@@ -6,6 +6,27 @@ resolver = "2"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+# Size-optimized for deploy rent; the sha3/keccak dependency chain must stay
+# at opt-level 3 — under "z" its array code blows the SBF 4KB stack frame.
+opt-level = "z"
+
+[profile.release.package.sha3]
+opt-level = 3
+
+[profile.release.package.keccak]
+opt-level = 3
+
+[profile.release.package.crypto-common]
+opt-level = 3
+
+[profile.release.package.block-buffer]
+opt-level = 3
+
+[profile.release.package.hybrid-array]
+opt-level = 3
+
+[profile.release.package.solana-keccak-hasher]
+opt-level = 3
 
 [profile.release.build-override]
 opt-level = 3
