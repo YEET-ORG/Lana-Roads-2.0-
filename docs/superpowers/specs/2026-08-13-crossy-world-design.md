@@ -5,6 +5,15 @@
 **Target:** Solana + MagicBlock Ephemeral Rollups, React/Vite/Three.js client  
 **Working program name:** `crossy_world`
 
+**Companion specifications:**
+
+- [Specification suite and reading order](./2026-08-13-crossy-world-spec-suite.md)
+- [Contract and economy](./2026-08-13-crossy-world-contract-economy-spec.md)
+- [MagicBlock gameplay and integration](./2026-08-13-crossy-world-magicblock-integration-spec.md)
+- [Frontend and Three.js](./2026-08-13-crossy-world-frontend-threejs-spec.md)
+- [Client SDK, subscriptions, and indexing](./2026-08-13-crossy-world-sdk-indexing-spec.md)
+- [Testing, security, and operations](./2026-08-13-crossy-world-testing-security-operations-spec.md)
+
 ## 1. Executive summary
 
 Crossy World is a persistent, shared, multiplayer grid-crossing game inspired by Crossy Road. Up to 500 players occupy one synchronized 64-column world, move one tile at a time, avoid deterministic roads, rivers, logs, trains, and other hazards, and use player-versus-player abilities. Every player has a universal one-tile Kick with a five-second cooldown. Collectible agent classes add one class ability with a ten-to-thirty-second cooldown.
