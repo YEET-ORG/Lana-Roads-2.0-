@@ -12,6 +12,7 @@
 4. [Frontend and Three.js](./2026-08-13-crossy-world-frontend-threejs-spec.md) — React/Vite product UX, rendering, input, prediction, assets, admin UI, and performance.
 5. [Client SDK, subscriptions, and indexing](./2026-08-13-crossy-world-sdk-indexing-spec.md) — typed client workflows, routing, realtime subscriptions, derived APIs, and indexer rules.
 6. [Testing, security, and operations](./2026-08-13-crossy-world-testing-security-operations-spec.md) — verification, threat model, load gates, deployment, monitoring, reconciliation, and incident response.
+7. [Coding-agent guide template](./crossy-world-AGENTS.template.md) — repository-level instructions and safety constraints for AI coding agents in the future standalone repository.
 
 ## 2. Authority and precedence
 
@@ -57,6 +58,8 @@ Any unresolved conflict blocks implementation planning and must be corrected in 
 Crossy World must be implemented in a new standalone repository. This checked-out `solsocket` repository is an open-source starter/reference used for research and specification work; it is not the Crossy World product remote, release repository, or long-term Git history. No Crossy World deployment, program ID, secret, production asset, or release tag should be attached to the solsocket remote.
 
 Repository creation is a deliberate first implementation-plan task. The new repository receives its own initial commit, remote, access controls, branch protection, CI/CD, package names, program IDs, environment configuration, and deployment manifests. Relevant starter code may be copied or adapted only after license and dependency review, with attribution retained where required. Crossy World must not depend on unpublished state or history from this working clone.
+
+At creation time, copy [`crossy-world-AGENTS.template.md`](./crossy-world-AGENTS.template.md) to the new repository root as `AGENTS.md`, update the specification paths to their final locations, and keep it synchronized with material architecture decisions.
 
 The detailed implementation plan may adjust names, but should preserve these boundaries:
 
