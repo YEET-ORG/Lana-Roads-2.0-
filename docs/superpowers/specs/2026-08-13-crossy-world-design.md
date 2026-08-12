@@ -11,6 +11,7 @@
 - [Contract and economy](./2026-08-13-crossy-world-contract-economy-spec.md)
 - [MagicBlock gameplay and integration](./2026-08-13-crossy-world-magicblock-integration-spec.md)
 - [Frontend and Three.js](./2026-08-13-crossy-world-frontend-threejs-spec.md)
+- [Visual UI and motion design](./2026-08-13-lana-roads-visual-ui-motion-design.md)
 - [Client SDK, subscriptions, and indexing](./2026-08-13-crossy-world-sdk-indexing-spec.md)
 - [Testing, security, and operations](./2026-08-13-crossy-world-testing-security-operations-spec.md)
 

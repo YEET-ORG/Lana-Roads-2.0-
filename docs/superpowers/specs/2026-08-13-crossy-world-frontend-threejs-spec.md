@@ -10,6 +10,8 @@
 
 This document specifies the React/Vite application, Three.js game runtime, wallet and transaction UX, state ownership, realtime prediction/reconciliation, asset pipeline, accessibility, performance budgets, admin screens, and frontend acceptance criteria.
 
+The complete visual language, responsive screen system, gesture controls, original iconography, and transition choreography are defined in the [Lana Roads visual UI and motion design](./2026-08-13-lana-roads-visual-ui-motion-design.md).
+
 ## 2. Product principles
 
 - On-chain state is authoritative; frontend prediction is presentation only.
@@ -198,8 +200,9 @@ Mobile composition uses touch controls and collapsible panels without reducing t
 
 ### 11.2 Touch
 
-- Swipe or four-direction pad.
-- Dedicated Kick and ability buttons.
+- Swipe up/down/left/right on the unobstructed gameplay surface is the default movement input.
+- An optional four-direction accessibility pad may replace swipes when enabled in settings; there is no default virtual joystick.
+- Dedicated Kick and ability buttons remain on the side and may mirror for left-handed mode.
 - Haptic feedback where available.
 
 ### 11.3 Input queue

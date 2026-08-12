@@ -16,8 +16,9 @@ Read the specification suite before changing architecture or behavior:
 2. `docs/specs/contract-economy.md` — durable accounts, payments, NFTs, gacha, marketplace, settlement.
 3. `docs/specs/magicblock-integration.md` — realtime accounts, sessions, movement, hazards, VRF, cranks.
 4. `docs/specs/frontend-threejs.md` — React/Vite/Three.js UX and rendering.
-5. `docs/specs/sdk-indexing.md` — client workflows, subscriptions, indexer boundaries.
-6. `docs/specs/testing-security-operations.md` — verification and launch requirements.
+5. `docs/specs/visual-ui-motion.md` — art direction, responsive screens, swipe controls, icons, and motion.
+6. `docs/specs/sdk-indexing.md` — client workflows, subscriptions, indexer boundaries.
+7. `docs/specs/testing-security-operations.md` — verification and launch requirements.
 
 When documents conflict, the approved product design wins. The contract specification owns durable money/NFT state; the MagicBlock specification owns active delegated gameplay. Frontend, SDK, indexer, and operator services may project authority but cannot redefine it.
 
@@ -235,6 +236,12 @@ Do not build a frontend-only simulation and later attempt to retrofit contract a
 - Paid and casual modes must remain unmistakable in navigation and transaction UI.
 - Show exact transaction consequences before wallet approval, including USDC amount, agent lock, gacha finality, or market royalty.
 - Support keyboard, touch, reduced motion, focus visibility, and warnings independent of color.
+- Follow the approved Voxel Arcade visual direction and keep the Three.js world visible through core navigation.
+- Mobile movement is gesture-first: one cardinal swipe submits one grid-step intent. Do not add a default virtual joystick.
+- Keep Kick and class ability as large side buttons, with a left-handed mirror option and strict pointer ownership.
+- Production UI uses original SVG/icons and VoxelAnimals-derived renders. Emoji are forbidden as shipped icons or visual fallbacks.
+- Normal screen transitions coordinate camera and overlays, target 220–300 ms, and remain responsive at the measured frame budget.
+- Crossy Road is interaction/art-direction reference only. Never copy its logo, proprietary characters, icons, sounds, textures, screenshots, or exact branded artwork.
 
 ## Indexer and service rules
 

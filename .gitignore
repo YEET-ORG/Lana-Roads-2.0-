@@ -31,3 +31,4 @@ notes/
 # docs build output
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+.superpowers/
