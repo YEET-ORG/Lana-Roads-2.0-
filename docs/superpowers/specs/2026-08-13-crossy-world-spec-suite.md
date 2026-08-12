@@ -54,6 +54,10 @@ Any unresolved conflict blocks implementation planning and must be corrected in 
 
 ## 5. Implementation repository shape
 
+Crossy World must be implemented in a new standalone repository. This checked-out `solsocket` repository is an open-source starter/reference used for research and specification work; it is not the Crossy World product remote, release repository, or long-term Git history. No Crossy World deployment, program ID, secret, production asset, or release tag should be attached to the solsocket remote.
+
+Repository creation is a deliberate first implementation-plan task. The new repository receives its own initial commit, remote, access controls, branch protection, CI/CD, package names, program IDs, environment configuration, and deployment manifests. Relevant starter code may be copied or adapted only after license and dependency review, with attribution retained where required. Crossy World must not depend on unpublished state or history from this working clone.
+
 The detailed implementation plan may adjust names, but should preserve these boundaries:
 
 ```text
@@ -72,13 +76,13 @@ docs/
   superpowers/specs/           Product and subsystem specifications
 ```
 
-If the existing generic `solsocket-engine` and `solsocket` SDK remain, Crossy World may reuse proven transport/session/subscription utilities. They must not become an alternate game authority or expose generic client-authored state mutation to Crossy World.
+Crossy World may copy, adapt, or depend on selected proven transport/session/subscription utilities from the generic `solsocket-engine` and `solsocket` SDK. Reuse must be explicit and minimal; those components must not become an alternate game authority or expose generic client-authored state mutation to Crossy World.
 
 ## 6. Required implementation-plan workstreams
 
 After this suite is approved, the implementation plan must sequence:
 
-1. workspace/toolchain and shared test-vector setup;
+1. create the standalone Crossy World repository, then establish its workspace/toolchain, CI, and shared test vectors;
 2. durable program accounts and economic invariants;
 3. entry/revival receipt bridge and delegated attempt lifecycle;
 4. deterministic grid, occupancy, chunks, hazards, Kick, and abilities;

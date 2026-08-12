@@ -28,7 +28,7 @@ The architecture uses one purpose-built Anchor program with two internal planes:
 - Durable assets, USDC, NFT ownership, gacha, refunds, seasons, and settlement remain on Solana’s base layer.
 - Realtime movement, occupancy, hazards, combat, scores, and live leaderboards execute on delegated MagicBlock accounts.
 
-The existing solsocket codebase supplies useful connection, session, subscription, transaction, codec, delegation, and recovery patterns. Its generic room program is not the game authority because it permits client-authored state and does not enforce the economic or spatial rules required by a paid competition.
+The existing solsocket codebase is an open-source starter and reference implementation only. It supplies useful connection, session, subscription, transaction, codec, delegation, and recovery patterns, but Crossy World will be created in a separate repository with independent history, remotes, packages, program IDs, deployment configuration, and release lifecycle. The generic solsocket room program is not the game authority because it permits client-authored state and does not enforce the economic or spatial rules required by a paid competition.
 
 ## 2. Product decisions
 

@@ -51,7 +51,7 @@ Production has unique secrets and authorities. No staging or developer key is ac
 
 ## 4. Toolchain and dependency policy
 
-The implementation begins from the repository's verified baseline:
+The new standalone Crossy World repository may begin from the versions verified in the solsocket starter/reference repository:
 
 - Anchor CLI/program dependency: `1.0.2`;
 - `ephemeral-rollups-sdk`: `0.16.2`;
@@ -68,6 +68,8 @@ These versions are an initial compatibility baseline, not a permanent requiremen
 - rollback plan.
 
 Rust and JavaScript lockfiles are committed. CI uses exact lockfiles and fails on an unreviewed generated-code diff.
+
+The new repository must not inherit the starter repository's Git remote, program IDs, deployment credentials, package publication identity, or release history. Copied/adapted source retains notices required by its license, and dependency provenance is recorded in the new repository.
 
 ## 5. Test pyramid
 
