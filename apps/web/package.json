@@ -1,14 +1,15 @@
 {
   "name": "@crossy-world/web",
   "private": true,
-  "description": "Crossy World React/Vite/Three.js client — vertical slice",
+  "description": "Crossy World React/Vite/Three.js client \u2014 vertical slice",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:devnet": "vite --mode devnet"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",
