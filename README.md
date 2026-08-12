@@ -1,3 +1,13 @@
+# Lana Roads 2.0 / Crossy World
+
+This private repository is the standalone product workspace for the contract-first Solana + MagicBlock multiplayer game described in [`docs/superpowers/specs/2026-08-13-crossy-world-spec-suite.md`](docs/superpowers/specs/2026-08-13-crossy-world-spec-suite.md).
+
+It is bootstrapped from the open-source solsocket starter so its MagicBlock connection, session, delegation, and subscription patterns can be selectively adapted. The generic solsocket engine is reference code, not the authoritative Crossy World game contract. Read [`AGENTS.md`](AGENTS.md) before making changes.
+
+`VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Keep this repository private and do not redistribute the raw pack.
+
+## Starter reference documentation
+
 <p align="center">
   <img src="docs/public/logo.svg" width="88" alt="solsocket" />
 </p>
@@ -74,14 +84,14 @@ processed-commitment subscription wiring, before any game code.
 
 ## Packages
 
-| Path | What |
-|---|---|
-| [`packages/sdk`](packages/sdk) | [`solsocket`](https://www.npmjs.com/package/solsocket) — the TypeScript SDK (web3.js, dual CJS/ESM) |
-| [`packages/create-solsocket`](packages/create-solsocket) | [`create-solsocket`](https://www.npmjs.com/package/create-solsocket) — `npm create solsocket` scaffolder; add `--template gather` for a walkable world |
-| [`program`](program) | `solsocket-engine` — Anchor program, devnet: [`CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh`](https://explorer.solana.com/address/CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh?cluster=devnet) |
-| [`examples/cursor-canvas`](examples/cursor-canvas) | Shared-cursor demo — the whole integration is ~15 lines |
-| [`examples/gather-lite`](examples/gather-lite) | A tiny Gather-style world: walking avatars, **proximity chat**, emotes, a shared door — every event an onchain transaction |
-| [`examples/escape-duo`](examples/escape-duo) | **The Vault** — a two-player escape room where all four puzzles are impossible alone: shared plates, code relay, a held gate, keys turned in the same 2s |
+| Path                                                     | What                                                                                                                                                                                           |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/sdk`](packages/sdk)                           | [`solsocket`](https://www.npmjs.com/package/solsocket) — the TypeScript SDK (web3.js, dual CJS/ESM)                                                                                            |
+| [`packages/create-solsocket`](packages/create-solsocket) | [`create-solsocket`](https://www.npmjs.com/package/create-solsocket) — `npm create solsocket` scaffolder; add `--template gather` for a walkable world                                         |
+| [`program`](program)                                     | `solsocket-engine` — Anchor program, devnet: [`CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh`](https://explorer.solana.com/address/CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh?cluster=devnet) |
+| [`examples/cursor-canvas`](examples/cursor-canvas)       | Shared-cursor demo — the whole integration is ~15 lines                                                                                                                                        |
+| [`examples/gather-lite`](examples/gather-lite)           | A tiny Gather-style world: walking avatars, **proximity chat**, emotes, a shared door — every event an onchain transaction                                                                     |
+| [`examples/escape-duo`](examples/escape-duo)             | **The Vault** — a two-player escape room where all four puzzles are impossible alone: shared plates, code relay, a held gate, keys turned in the same 2s                                       |
 
 ## Run it
 
@@ -147,9 +157,9 @@ Be precise about what is and isn't enforced on-chain:
   every payload, and creator-only room closure.
 - **Clients self-report their own presence.** A position broadcast is
   client-authored, exactly like every mainstream game-netcode SDK
-  (Socket.io, Colyseus, Photon) — solsocket makes movement *authenticated
-  and attributable* (every update is a signed transaction from a known
-  wallet), not *validated*. Game-rule enforcement (speed limits, collision)
+  (Socket.io, Colyseus, Photon) — solsocket makes movement _authenticated
+  and attributable_ (every update is a signed transaction from a known
+  wallet), not _validated_. Game-rule enforcement (speed limits, collision)
   belongs in your program's instructions; the engine is deliberately
   game-agnostic.
 - **Delegation trust follows MagicBlock's ER model**: while delegated, the

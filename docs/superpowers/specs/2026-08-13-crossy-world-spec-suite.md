@@ -74,12 +74,15 @@ apps/
   crank/                       Idempotent scheduled/recovery work
 assets/
   manifests/                   Public optimized asset metadata
-  source-private/              Not committed or publicly distributed
+  generated/                   Optimized GLB, thumbnails, and runtime outputs
+VoxelAnimals/                  Purchased raw source pack; private-repo only
 docs/
   superpowers/specs/           Product and subsystem specifications
 ```
 
 Crossy World may copy, adapt, or depend on selected proven transport/session/subscription utilities from the generic `solsocket-engine` and `solsocket` SDK. Reuse must be explicit and minimal; those components must not become an alternate game authority or expose generic client-authored state mutation to Crossy World.
+
+The tracked `VoxelAnimals/` directory is the complete purchased Unity Asset Store source pack supplied by the user. It remains unmodified in the private product repository. Reproducible conversion writes optimized Three.js runtime assets outside that directory; raw pack files never enter public build output or distributable packages.
 
 ## 6. Required implementation-plan workstreams
 

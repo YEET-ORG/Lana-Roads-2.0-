@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 99243ab1a10bb99479abfb5781854f6c
+timeCreated: 1549234245
+licenseType: Store
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 139406
+  packageName: Cute 3D Voxel Animals
+  packageVersion: 1.0
+  assetPath: Assets/VoxelAnimals/animal_unitymarket.vox
+  uploadId: 294706

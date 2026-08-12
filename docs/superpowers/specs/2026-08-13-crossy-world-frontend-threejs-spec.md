@@ -285,7 +285,7 @@ Train warnings, sinking platforms, and chunk barriers must be visibly legible be
 
 ### 15.1 Source custody
 
-- Purchased Unity package remains in private asset storage, not public repository.
+- The complete purchased Unity package is tracked under `VoxelAnimals/` in the private product repository. It must never be copied to a public repository or public build output.
 - License invoice and terms are retained by the team.
 - Confirm commercial, derivative, promotional, and NFT-render usage.
 

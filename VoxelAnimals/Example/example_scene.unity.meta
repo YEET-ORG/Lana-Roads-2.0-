@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: fe282eb29aec1ad468c677dd41f9ec3e
+timeCreated: 1550362144
+licenseType: Store
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 139406
+  packageName: Cute 3D Voxel Animals
+  packageVersion: 1.0
+  assetPath: Assets/VoxelAnimals/Example/example_scene.unity
+  uploadId: 294706

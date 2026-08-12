@@ -1,0 +1,2 @@
+# Purchased Unity Asset Store source pack. Preserve bytes and suppress source-style diffs.
+VoxelAnimals/** -text -diff

@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 5b69d9f45a327dd419206781ea488af7
+timeCreated: 1549234095
+licenseType: Store
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 139406
+  packageName: Cute 3D Voxel Animals
+  packageVersion: 1.0
+  assetPath: Assets/VoxelAnimals/animal-0.mtl
+  uploadId: 294706
