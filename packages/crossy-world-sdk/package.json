@@ -1,0 +1,39 @@
+{
+  "name": "@crossy-world/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed client workflows for the Crossy World program — PDAs, deterministic helpers, entry/revive/gacha flows, realtime world client",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "mocha --import=tsx -t 30000 tests/*.test.ts",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@magicblock-labs/ephemeral-rollups-sdk": "0.16.2",
+    "@solana/web3.js": "1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.0.0",
+    "mocha": "^11.2.2",
+    "ts-mocha": "^11.1.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.8.3"
+  }
+}

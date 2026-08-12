@@ -1,0 +1,523 @@
+/**
+ * CrossyClient: typed, narrow workflows over the generated program client.
+ * No generic state writes; financial methods build reviewable transactions
+ * separately from submission. Base-layer money flows keep preflight; ER
+ * gameplay uses processed commitment.
+ */
+import * as anchor from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
+import { Connection, Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import type { CrossyWorld } from "./generated/crossy_world.js";
+import idl from "./generated/crossy_world.json" with { type: "json" };
+import {
+  Direction,
+  ENTRY_PRICE,
+  ReceiptKind,
+  SESSION_SCOPE,
+  WorldMode,
+} from "./constants.js";
+import { pda, sectorForTile, sectorOf, spawnSectors } from "./pda.js";
+import { revivePrice, utcDayFromUnix } from "./time.js";
+import { SubscriptionHub } from "./subscriptions.js";
+
+export interface WalletSigner {
+  publicKey: PublicKey;
+  signTransaction<T extends anchor.web3.Transaction | anchor.web3.VersionedTransaction>(
+    tx: T,
+  ): Promise<T>;
+  signAllTransactions<
+    T extends anchor.web3.Transaction | anchor.web3.VersionedTransaction,
+  >(
+    txs: T[],
+  ): Promise<T[]>;
+}
+
+export interface CrossyClientOptions {
+  /** Base-layer connection (confirmed commitment for finance). */
+  connection: Connection;
+  /** Ephemeral-rollup connection (processed commitment for gameplay). */
+  erConnection?: Connection;
+  wallet: WalletSigner;
+}
+
+/** Human-readable review returned before any financial signature. */
+export interface TransactionReview {
+  action: string;
+  usdcTransfers: { from: string; to: string; amount: bigint }[];
+  assets: { address: string; effect: "freeze" | "thaw" | "mint" | "transfer" }[];
+  warnings: string[];
+  instructions: TransactionInstruction[];
+}
+
+export class CrossyClient {
+  readonly program: Program<CrossyWorld>;
+  /** Program client bound to the ER connection for delegated gameplay. */
+  readonly erProgram: Program<CrossyWorld>;
+  readonly connection: Connection;
+  readonly erConnection: Connection;
+  readonly wallet: WalletSigner;
+  readonly subscriptions: SubscriptionHub;
+
+  constructor(opts: CrossyClientOptions) {
+    this.connection = opts.connection;
+    this.erConnection = opts.erConnection ?? opts.connection;
+    this.wallet = opts.wallet;
+    const baseProvider = new anchor.AnchorProvider(
+      this.connection,
+      opts.wallet as anchor.Wallet,
+      { commitment: "confirmed", preflightCommitment: "confirmed" },
+    );
+    const erProvider = new anchor.AnchorProvider(
+      this.erConnection,
+      opts.wallet as anchor.Wallet,
+      { commitment: "processed", skipPreflight: true },
+    );
+    this.program = new Program(idl as CrossyWorld, baseProvider);
+    this.erProgram = new Program(idl as CrossyWorld, erProvider);
+    this.subscriptions = new SubscriptionHub(this.erConnection);
+  }
+
+  // ---- readers ----------------------------------------------------------
+
+  async getConfig() {
+    return this.program.account.globalConfig.fetch(pda.config());
+  }
+
+  async getCurrentDay(): Promise<bigint> {
+    // Authoritative on-chain clock, never the browser clock.
+    const slot = await this.connection.getSlot("confirmed");
+    const ts = await this.connection.getBlockTime(slot);
+    if (ts == null) throw new Error("block time unavailable");
+    const day = utcDayFromUnix(ts);
+    if (day == null) throw new Error("pre-epoch clock");
+    return day;
+  }
+
+  async getDaily(day: bigint) {
+    return this.program.account.dailyCompetition.fetch(pda.daily(day));
+  }
+
+  async getWorld(mode: WorldMode, day: bigint) {
+    return this.erProgram.account.worldHeader.fetch(pda.world(mode, day));
+  }
+
+  async getProfile(wallet = this.wallet.publicKey) {
+    return this.program.account.playerProfile.fetchNullable(pda.profile(wallet));
+  }
+
+  async getRun(world: PublicKey, wallet = this.wallet.publicKey) {
+    return this.erProgram.account.playerRun.fetchNullable(pda.run(world, wallet));
+  }
+
+  async getChunk(day: bigint, chunkIndex: number) {
+    return this.erProgram.account.chunkDefinition.fetchNullable(
+      pda.chunk(day, chunkIndex),
+    );
+  }
+
+  async getSector(world: PublicKey, sx: number, sy: number) {
+    return this.erProgram.account.occupancySector.fetchNullable(
+      pda.sector(world, sx, sy),
+    );
+  }
+
+  async getPull(wallet: PublicKey, pullNonce: number) {
+    return this.program.account.gachaPull.fetchNullable(pda.pull(wallet, pullNonce));
+  }
+
+  // ---- entry workflow ---------------------------------------------------
+
+  /**
+   * Build the reviewable paid-entry bundle: ensure profile, init run (first
+   * time), starter lock, 1 USDC payment + receipt. The caller shows the
+   * review, then submits; ER spawn follows as its own step.
+   */
+  async reviewPaidEntry(params: {
+    day: bigint;
+    payerToken: PublicKey;
+    usdcMint: PublicKey;
+    sessionAuthority: PublicKey;
+    sessionExpiry: number;
+  }): Promise<TransactionReview & { attemptNonce: number }> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(WorldMode.Paid, params.day);
+    const runAddr = pda.run(world, wallet);
+    const instructions: TransactionInstruction[] = [];
+
+    const profile = await this.getProfile();
+    if (!profile) {
+      instructions.push(
+        await this.program.methods
+          .ensureProfile()
+          .accountsPartial({ profile: pda.profile(wallet), wallet })
+          .instruction(),
+      );
+    }
+    if (!profile?.starterClaimed) {
+      instructions.push(
+        await this.program.methods
+          .claimStarter()
+          .accountsPartial({ profile: pda.profile(wallet), wallet })
+          .instruction(),
+      );
+    }
+
+    const run = await this.getRun(world);
+    if (!run) {
+      instructions.push(
+        await this.program.methods
+          .initRun(params.sessionAuthority, new BN(params.sessionExpiry))
+          .accountsPartial({
+            world,
+            run: runAddr,
+            best: pda.best(world, wallet),
+            wallet,
+          })
+          .instruction(),
+      );
+    }
+    const attemptNonce = (run?.attemptNonce ?? 0) + 1;
+    const receiptNonce = profile?.receiptCount ?? 0;
+
+    instructions.push(
+      await this.program.methods
+        .lockStarter(attemptNonce)
+        .accountsPartial({
+          profile: pda.profile(wallet),
+          world,
+          lock: pda.agentLock(world, wallet, attemptNonce),
+          wallet,
+        })
+        .instruction(),
+    );
+
+    const daily = pda.daily(params.day);
+    instructions.push(
+      await this.program.methods
+        .beginPaidAttempt()
+        .accountsPartial({
+          config: pda.config(),
+          daily,
+          vault: pda.dailyVault(params.day),
+          profile: pda.profile(wallet),
+          run: runAddr,
+          payerToken: params.payerToken,
+          usdcMint: params.usdcMint,
+          receipt: pda.receipt(ReceiptKind.Entry, params.day, wallet, receiptNonce),
+          contribution: pda.contribution(params.day, wallet),
+          wallet,
+          tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+        })
+        .instruction(),
+    );
+
+    return {
+      action: "Enter today's paid competition",
+      usdcTransfers: [
+        {
+          from: params.payerToken.toBase58(),
+          to: pda.dailyVault(params.day).toBase58(),
+          amount: ENTRY_PRICE,
+        },
+      ],
+      assets: [],
+      warnings: [
+        "Winner-takes-all: 90% to the daily winner, 10% to the team.",
+        "The entry is refundable only if spawning fails.",
+      ],
+      instructions,
+      attemptNonce,
+    };
+  }
+
+  /** Submit a reviewed transaction on the base layer. */
+  async submitReviewed(review: TransactionReview): Promise<string> {
+    const tx = new anchor.web3.Transaction().add(...review.instructions);
+    const provider = this.program.provider as anchor.AnchorProvider;
+    return provider.sendAndConfirm(tx);
+  }
+
+  /** ER spawn for a paid attempt (session- or wallet-signed). */
+  async spawn(params: {
+    day: bigint;
+    attemptNonce: number;
+    receiptNonce: number;
+    session?: Keypair;
+    mode?: WorldMode;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const mode = params.mode ?? WorldMode.Paid;
+    const world = pda.world(mode, params.day);
+    const receipt =
+      mode === WorldMode.Paid
+        ? pda.receipt(ReceiptKind.Entry, params.day, wallet, params.receiptNonce)
+        : world;
+    const builder = this.erProgram.methods
+      .spawn(params.attemptNonce)
+      .accountsPartial({
+        world,
+        run: pda.run(world, wallet),
+        receipt,
+        agentLock: pda.agentLock(world, wallet, params.attemptNonce),
+        signer: params.session?.publicKey ?? wallet,
+      })
+      .remainingAccounts(
+        spawnSectors(world).map((pubkey) => ({
+          pubkey,
+          isSigner: false,
+          isWritable: true,
+        })),
+      );
+    if (params.session) builder.signers([params.session]);
+    return builder.rpc();
+  }
+
+  /** Permissionless entry/revival receipt reconciliation on base. */
+  async reconcileReceipt(params: {
+    day: bigint;
+    wallet: PublicKey;
+    kind: ReceiptKind;
+    receiptNonce: number;
+  }): Promise<string> {
+    const world = pda.world(WorldMode.Paid, params.day);
+    return this.program.methods
+      .reconcileReceipt()
+      .accountsPartial({
+        daily: pda.daily(params.day),
+        receipt: pda.receipt(params.kind, params.day, params.wallet, params.receiptNonce),
+        run: pda.run(world, params.wallet),
+        contribution: pda.contribution(params.day, params.wallet),
+      })
+      .rpc();
+  }
+
+  // ---- revival ----------------------------------------------------------
+
+  /** Quote the exact next revival price from committed run state. */
+  async quoteRevive(day: bigint): Promise<{
+    price: bigint;
+    deathNonce: number;
+    deadline: number;
+  } | null> {
+    const world = pda.world(WorldMode.Paid, day);
+    const run = await this.getRun(world);
+    if (!run || !("deadAwaitingRevive" in (run.state as object))) return null;
+    const price = revivePrice(run.successfulRevives);
+    if (price == null) return null;
+    return {
+      price,
+      deathNonce: run.deathNonce,
+      deadline: run.reviveDeadline.toNumber(),
+    };
+  }
+
+  async reviewRevive(params: {
+    day: bigint;
+    payerToken: PublicKey;
+    usdcMint: PublicKey;
+  }): Promise<TransactionReview & { receiptNonce: number }> {
+    const wallet = this.wallet.publicKey;
+    const quote = await this.quoteRevive(params.day);
+    if (!quote) throw new Error("run is not awaiting revival");
+    const profile = await this.getProfile();
+    const receiptNonce = profile?.receiptCount ?? 0;
+    const world = pda.world(WorldMode.Paid, params.day);
+    const ix = await this.program.methods
+      .beginRevive()
+      .accountsPartial({
+        config: pda.config(),
+        daily: pda.daily(params.day),
+        vault: pda.dailyVault(params.day),
+        profile: pda.profile(wallet),
+        run: pda.run(world, wallet),
+        payerToken: params.payerToken,
+        usdcMint: params.usdcMint,
+        receipt: pda.receipt(ReceiptKind.Revival, params.day, wallet, receiptNonce),
+        wallet,
+        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+      })
+      .instruction();
+    return {
+      action: `Revive (death #${quote.deathNonce})`,
+      usdcTransfers: [
+        {
+          from: params.payerToken.toBase58(),
+          to: pda.dailyVault(params.day).toBase58(),
+          amount: quote.price,
+        },
+      ],
+      assets: [],
+      warnings: [
+        "Revival prices double after each successful revival.",
+        "The payment is refundable if the revival cannot complete in time.",
+      ],
+      instructions: [ix],
+      receiptNonce,
+    };
+  }
+
+  /** ER revival completion against the paid receipt. */
+  async completeRevive(params: {
+    day: bigint;
+    receiptNonce: number;
+    session?: Keypair;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(WorldMode.Paid, params.day);
+    const run = await this.getRun(world);
+    if (!run) throw new Error("run missing");
+    const builder = this.erProgram.methods.completeRevive().accountsPartial({
+      world,
+      run: pda.run(world, wallet),
+      receipt: pda.receipt(ReceiptKind.Revival, params.day, wallet, params.receiptNonce),
+      safeSector: sectorForTile(world, run.safeX, run.safeY),
+      signer: params.session?.publicKey ?? wallet,
+    });
+    if (params.session) builder.signers([params.session]);
+    return builder.rpc();
+  }
+
+  // ---- gameplay actions (session-signed, ER) ----------------------------
+
+  /** One-tile movement; derives all accounts from canonical coordinates. */
+  async move(params: {
+    day: bigint;
+    mode?: WorldMode;
+    direction: Direction;
+    session: Keypair;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const run = await this.getRun(world);
+    if (!run) throw new Error("run missing");
+    let [nx, ny] = [run.x, run.y];
+    if (params.direction === Direction.Forward) ny += 1;
+    else if (params.direction === Direction.Backward) ny -= 1;
+    else if (params.direction === Direction.Left) nx -= 1;
+    else nx += 1;
+    if (nx < 0 || nx > 63 || ny < 0) throw new Error("out of bounds");
+
+    const src = sectorForTile(world, run.x, run.y);
+    const dst = sectorForTile(world, nx, ny);
+    const [chunkIndex] = [Math.floor(ny / 16)];
+    return this.erProgram.methods
+      .moveAction(
+        run.attemptNonce,
+        run.actionSeq,
+        params.direction,
+        // Uniqueness memo: distinct logical actions never share bytes even
+        // under a cached blockhash.
+        new BN(Date.now() * 8 + params.direction),
+      )
+      .accountsPartial({
+        world,
+        run: pda.run(world, wallet),
+        sourceSector: src,
+        destSector: dst.equals(src) ? null : dst,
+        chunk: pda.chunk(params.day, chunkIndex),
+        best: pda.best(world, wallet),
+        signer: params.session.publicKey,
+      })
+      .signers([params.session])
+      .rpc();
+  }
+
+  /** Kick the facing-adjacent target. */
+  async kick(params: {
+    day: bigint;
+    mode?: WorldMode;
+    targetWallet: PublicKey;
+    session: Keypair;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const run = await this.getRun(world);
+    const target = await this.getRun(world, params.targetWallet);
+    if (!run || !target) throw new Error("run missing");
+    // Knockback destination: one tile beyond the target in facing direction.
+    const d = run.facing as Direction;
+    let [dx, dy] = [target.x, target.y];
+    if (d === Direction.Forward) dy += 1;
+    else if (d === Direction.Backward) dy -= 1;
+    else if (d === Direction.Left) dx -= 1;
+    else dx += 1;
+    const targetSector = sectorForTile(world, target.x, target.y);
+    const destSector = sectorForTile(
+      world,
+      Math.max(0, Math.min(63, dx)),
+      Math.max(0, dy),
+    );
+    return this.erProgram.methods
+      .kick(run.attemptNonce, run.actionSeq, new BN(Date.now()))
+      .accountsPartial({
+        world,
+        kicker: pda.run(world, wallet),
+        target: pda.run(world, params.targetWallet),
+        targetSector,
+        destSector: destSector.equals(targetSector) ? null : destSector,
+        chunk: pda.chunk(params.day, Math.floor(Math.max(0, dy) / 16)),
+        signer: params.session.publicKey,
+      })
+      .signers([params.session])
+      .rpc();
+  }
+
+  /** Propagate a record-beating score into the world header. */
+  async claimRecord(day: bigint, mode: WorldMode = WorldMode.Paid): Promise<string> {
+    const world = pda.world(mode, day);
+    return this.erProgram.methods
+      .claimRecord()
+      .accountsPartial({ world, run: pda.run(world, this.wallet.publicKey) })
+      .rpc();
+  }
+
+  // ---- interest management ---------------------------------------------
+
+  /**
+   * Subscribe to the sectors within `radius` sectors of the player plus the
+   * run and world; returns a single disposer that releases everything.
+   */
+  subscribeNearby(params: {
+    world: PublicKey;
+    x: number;
+    y: number;
+    radius?: number;
+    onUpdate: (address: PublicKey, data: Buffer, slot: number) => void;
+  }): () => void {
+    const radius = params.radius ?? 1;
+    const disposers: (() => void)[] = [];
+    const [csx, csy] = sectorOf(params.x, params.y);
+    for (let sy = Math.max(0, csy - radius); sy <= csy + radius; sy++) {
+      for (let sx = Math.max(0, csx - radius); sx <= Math.min(7, csx + radius); sx++) {
+        const addr = pda.sector(params.world, sx, sy);
+        disposers.push(
+          this.subscriptions.onAccount(addr, (info, slot) =>
+            params.onUpdate(addr, info.data, slot),
+          ),
+        );
+      }
+    }
+    disposers.push(
+      this.subscriptions.onAccount(params.world, (info, slot) =>
+        params.onUpdate(params.world, info.data, slot),
+      ),
+    );
+    const runAddr = pda.run(params.world, this.wallet.publicKey);
+    disposers.push(
+      this.subscriptions.onAccount(runAddr, (info, slot) =>
+        params.onUpdate(runAddr, info.data, slot),
+      ),
+    );
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      for (const d of disposers) d();
+    };
+  }
+
+  /** Release all subscriptions. */
+  async close(): Promise<void> {
+    await this.subscriptions.close();
+  }
+}
