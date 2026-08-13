@@ -1,6 +1,8 @@
 # Crossy World: Frontend and Three.js Specification
 
 **Status:** Draft for user review  
+**Master frontend:** [Lana Roads master frontend specification](../../FRONTEND.md)
+
 **Parent:** [Crossy World product and protocol design](./2026-08-13-crossy-world-design.md)  
 **Contract:** [Contract and economy specification](./2026-08-13-crossy-world-contract-economy-spec.md)  
 **Realtime:** [MagicBlock gameplay integration specification](./2026-08-13-crossy-world-magicblock-integration-spec.md)  

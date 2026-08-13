@@ -6,14 +6,15 @@
 
 ## 1. Reading order
 
-1. [Product and protocol design](./2026-08-13-crossy-world-design.md) — approved product rules and overall architecture.
-2. [Contract and economy](./2026-08-13-crossy-world-contract-economy-spec.md) — durable accounts, instructions, custody, NFTs, gacha, marketplace, refunds, and settlement.
-3. [MagicBlock gameplay and integration](./2026-08-13-crossy-world-magicblock-integration-spec.md) — delegated realtime accounts, sessions, grid simulation, hazards, VRF chunks, cranks, and cross-plane workflows.
-4. [Frontend and Three.js](./2026-08-13-crossy-world-frontend-threejs-spec.md) — React/Vite product UX, rendering, input, prediction, assets, admin UI, and performance.
-5. [Visual UI and motion design](./2026-08-13-lana-roads-visual-ui-motion-design.md) — Voxel Arcade art direction, mobile screens, swipe controls, original iconography, transitions, responsive rules, and visual acceptance criteria.
-6. [Client SDK, subscriptions, and indexing](./2026-08-13-crossy-world-sdk-indexing-spec.md) — typed client workflows, routing, realtime subscriptions, derived APIs, and indexer rules.
-7. [Testing, security, and operations](./2026-08-13-crossy-world-testing-security-operations-spec.md) — verification, threat model, load gates, deployment, monitoring, reconciliation, and incident response.
-8. [Coding-agent guide template](./crossy-world-AGENTS.template.md) — repository-level instructions and safety constraints for AI coding agents in the future standalone repository.
+1. [Master frontend specification](../../FRONTEND.md) — complete implementation-facing source for every frontend screen, system, asset, interaction, and delivery phase.
+2. [Product and protocol design](./2026-08-13-crossy-world-design.md) — approved product rules and overall architecture.
+3. [Contract and economy](./2026-08-13-crossy-world-contract-economy-spec.md) — durable accounts, instructions, custody, NFTs, gacha, marketplace, refunds, and settlement.
+4. [MagicBlock gameplay and integration](./2026-08-13-crossy-world-magicblock-integration-spec.md) — delegated realtime accounts, sessions, grid simulation, hazards, VRF chunks, cranks, and cross-plane workflows.
+5. [Frontend and Three.js](./2026-08-13-crossy-world-frontend-threejs-spec.md) — detailed React/Vite rendering, input, prediction, and asset architecture.
+6. [Visual UI and motion design](./2026-08-13-lana-roads-visual-ui-motion-design.md) — detailed Voxel Arcade art direction and transitions.
+7. [Client SDK, subscriptions, and indexing](./2026-08-13-crossy-world-sdk-indexing-spec.md) — typed client workflows, routing, realtime subscriptions, derived APIs, and indexer rules.
+8. [Testing, security, and operations](./2026-08-13-crossy-world-testing-security-operations-spec.md) — verification, threat model, load gates, deployment, monitoring, reconciliation, and incident response.
+9. [Coding-agent guide template](./crossy-world-AGENTS.template.md) — repository-level instructions and safety constraints for AI coding agents.
 
 ## 2. Authority and precedence
 

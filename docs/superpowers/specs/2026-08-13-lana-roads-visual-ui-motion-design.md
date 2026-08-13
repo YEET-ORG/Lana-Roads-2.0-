@@ -2,6 +2,8 @@
 
 **Status:** Approved direction, written specification pending user review
 
+**Master frontend:** [Lana Roads master frontend specification](../../FRONTEND.md)
+
 **Parent:** [Crossy World product and protocol design](./2026-08-13-crossy-world-design.md)
 
 **Frontend architecture:** [Frontend and Three.js specification](./2026-08-13-crossy-world-frontend-threejs-spec.md)

@@ -12,13 +12,14 @@ This repository is the standalone Crossy World product. The open-source solsocke
 
 Read the specification suite before changing architecture or behavior:
 
-1. `docs/superpowers/specs/2026-08-13-crossy-world-design.md` — approved product rules.
-2. `docs/superpowers/specs/2026-08-13-crossy-world-contract-economy-spec.md` — durable accounts, payments, NFTs, gacha, marketplace, settlement.
-3. `docs/superpowers/specs/2026-08-13-crossy-world-magicblock-integration-spec.md` — realtime accounts, sessions, movement, hazards, VRF, cranks.
-4. `docs/superpowers/specs/2026-08-13-crossy-world-frontend-threejs-spec.md` — React/Vite/Three.js UX and rendering.
-5. `docs/superpowers/specs/2026-08-13-lana-roads-visual-ui-motion-design.md` — art direction, responsive screens, swipe controls, icons, and motion.
-6. `docs/superpowers/specs/2026-08-13-crossy-world-sdk-indexing-spec.md` — client workflows, subscriptions, indexer boundaries.
-7. `docs/superpowers/specs/2026-08-13-crossy-world-testing-security-operations-spec.md` — verification and launch requirements.
+1. `docs/FRONTEND.md` — master frontend design and engineering source of truth for all web/game presentation work.
+2. `docs/superpowers/specs/2026-08-13-crossy-world-design.md` — approved product rules.
+3. `docs/superpowers/specs/2026-08-13-crossy-world-contract-economy-spec.md` — durable accounts, payments, NFTs, gacha, marketplace, settlement.
+4. `docs/superpowers/specs/2026-08-13-crossy-world-magicblock-integration-spec.md` — realtime accounts, sessions, movement, hazards, VRF, cranks.
+5. `docs/superpowers/specs/2026-08-13-crossy-world-frontend-threejs-spec.md` — detailed React/Vite/Three.js architecture.
+6. `docs/superpowers/specs/2026-08-13-lana-roads-visual-ui-motion-design.md` — detailed art direction and motion.
+7. `docs/superpowers/specs/2026-08-13-crossy-world-sdk-indexing-spec.md` — client workflows, subscriptions, indexer boundaries.
+8. `docs/superpowers/specs/2026-08-13-crossy-world-testing-security-operations-spec.md` — verification and launch requirements.
 
 When documents conflict, the approved product design wins. The contract specification owns durable money/NFT state; the MagicBlock specification owns active delegated gameplay. Frontend, SDK, indexer, and operator services may project authority but cannot redefine it.
 
