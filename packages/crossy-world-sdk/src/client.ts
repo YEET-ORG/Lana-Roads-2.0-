@@ -37,6 +37,8 @@ export interface CrossyClientOptions {
   connection: Connection;
   /** Ephemeral-rollup connection (processed commitment for gameplay). */
   erConnection?: Connection;
+  /** ER validator identity — pins delegation to that rollup. */
+  validator?: PublicKey;
   wallet: WalletSigner;
 }
 
@@ -56,12 +58,14 @@ export class CrossyClient {
   readonly connection: Connection;
   readonly erConnection: Connection;
   readonly wallet: WalletSigner;
+  readonly validator?: PublicKey;
   readonly subscriptions: SubscriptionHub;
 
   constructor(opts: CrossyClientOptions) {
     this.connection = opts.connection;
     this.erConnection = opts.erConnection ?? opts.connection;
     this.wallet = opts.wallet;
+    this.validator = opts.validator;
     const baseProvider = new anchor.AnchorProvider(
       this.connection,
       opts.wallet as anchor.Wallet,
@@ -289,6 +293,106 @@ export class CrossyClient {
         contribution: pda.contribution(params.day, params.wallet),
       })
       .rpc();
+  }
+
+  /** Poll the ER until the delegated account is cloned there. */
+  async waitForEr(address: PublicKey, timeoutMs = 90_000): Promise<void> {
+    const started = Date.now();
+    for (;;) {
+      const acc = await this.erConnection
+        .getAccountInfo(address, "processed")
+        .catch(() => null);
+      if (acc && acc.owner.equals(this.program.programId)) return;
+      if (Date.now() - started > timeoutMs) {
+        throw new Error(`timeout waiting for ER clone of ${address.toBase58()}`);
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+
+  /**
+   * Casual join, solsocket-style: profile + starter + run + lock + DELEGATE
+   * run/best in ONE base transaction (validator pinned), then wait for the
+   * ER clones. Gameplay continues on the ER afterwards.
+   */
+  async joinCasual(params: {
+    day: bigint;
+    sessionAuthority: PublicKey;
+    sessionExpiry: number;
+  }): Promise<{ attemptNonce: number }> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(WorldMode.Casual, params.day);
+    const runAddr = pda.run(world, wallet);
+    const bestAddr = pda.best(world, wallet);
+    const validatorAccounts = this.validator
+      ? [{ pubkey: this.validator, isSigner: false, isWritable: false }]
+      : [];
+
+    const instructions: TransactionInstruction[] = [];
+    const profile = await this.getProfile();
+    if (!profile) {
+      instructions.push(
+        await this.program.methods
+          .ensureProfile()
+          .accountsPartial({ profile: pda.profile(wallet), wallet })
+          .instruction(),
+      );
+    }
+    if (!profile?.starterClaimed) {
+      instructions.push(
+        await this.program.methods
+          .claimStarter()
+          .accountsPartial({ profile: pda.profile(wallet), wallet })
+          .instruction(),
+      );
+    }
+    // The run may already exist (later attempts); the world may already be
+    // delegated — init_run validates it via committed state.
+    const existingRun = await this.getRun(world).catch(() => null);
+    if (!existingRun) {
+      instructions.push(
+        await this.program.methods
+          .initRun(params.sessionAuthority, new BN(params.sessionExpiry))
+          .accountsPartial({ world, run: runAddr, best: bestAddr, wallet })
+          .instruction(),
+      );
+    }
+    const attemptNonce = (existingRun?.attemptNonce ?? 0) + 1;
+    const lockAddr = pda.agentLock(world, wallet, attemptNonce);
+    const lockInfo = await this.connection.getAccountInfo(lockAddr);
+    if (!lockInfo) {
+      instructions.push(
+        await this.program.methods
+          .lockStarter(attemptNonce)
+          .accountsPartial({ profile: pda.profile(wallet), world, lock: lockAddr, wallet })
+          .instruction(),
+      );
+    }
+    // Delegate the player's run + best unless already delegated.
+    const runInfo = await this.connection.getAccountInfo(runAddr);
+    const runDelegated =
+      runInfo != null && !runInfo.owner.equals(this.program.programId);
+    if (!runDelegated) {
+      instructions.push(
+        await this.program.methods
+          .delegateRun(world, wallet)
+          .accountsPartial({ payer: wallet, pda: runAddr })
+          .remainingAccounts(validatorAccounts)
+          .instruction(),
+        await this.program.methods
+          .delegateBest(world, wallet)
+          .accountsPartial({ payer: wallet, pda: bestAddr })
+          .remainingAccounts(validatorAccounts)
+          .instruction(),
+      );
+    }
+    if (instructions.length > 0) {
+      const tx = new anchor.web3.Transaction().add(...instructions);
+      const provider = this.program.provider as anchor.AnchorProvider;
+      await provider.sendAndConfirm(tx);
+    }
+    await this.waitForEr(runAddr);
+    return { attemptNonce };
   }
 
   // ---- revival ----------------------------------------------------------

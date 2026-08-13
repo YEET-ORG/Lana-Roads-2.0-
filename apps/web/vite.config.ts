@@ -7,4 +7,8 @@ export default defineConfig({
     // web3.js expects a node-style global in the browser
     global: "globalThis",
   },
+  server: {
+    // Dev server is reached through proxy hostnames (e.g. test.mystic.cat).
+    allowedHosts: true,
+  },
 });

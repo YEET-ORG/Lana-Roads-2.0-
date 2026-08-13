@@ -13,6 +13,22 @@ import { WorldScene } from "../../game/renderer/scene";
 import { attachInput } from "../../game/input/keys";
 import type { Route } from "../../app/App";
 
+/**
+ * anchor@0.32 constructs web3.js@1.98's SendTransactionError with the old
+ * positional signature, so `message` renders as "Unknown action 'undefined'".
+ * The real diagnostics survive in the error's fields — dig them out.
+ */
+function errorText(e: unknown): string {
+  const any = e as { transactionMessage?: string; transactionLogs?: string[]; message?: string };
+  const fromLogs = any.transactionLogs
+    ?.map((l) => l.match(/Error Code: (\w+)/)?.[1])
+    .find(Boolean);
+  if (fromLogs) return fromLogs;
+  if (any.transactionMessage) return any.transactionMessage.slice(0, 140);
+  const msg = `${any.message ?? e}`;
+  return msg.includes("Unknown action") ? "transaction failed (see console)" : msg.slice(0, 140);
+}
+
 type PlayRoute = Extract<Route, { name: "play" }>;
 
 interface Hud {
@@ -58,85 +74,25 @@ export function GameScreen({
   const [reviving, setReviving] = useState(false);
   const world = pda.world(route.mode, route.day);
 
-  // Casual: spawn a free run on mount when needed.
+  // Casual: solsocket-style join — ONE base tx (profile + starter + run +
+  // lock + delegate run/best to the pinned ER validator), wait for the ER
+  // clone, then spawn ON the ER with the session key.
   useEffect(() => {
     let live = true;
     (async () => {
       if (route.mode !== WorldMode.Casual) return;
       try {
-        let run = await boot.client.getRun(world);
-        if (!run) {
-          // init + starter lock + spawn, wallet-signed (free).
-          const attemptNonce = 1;
-          const w = boot.wallet.publicKey;
-          const methods = boot.client.program.methods;
-          const ixs = [];
-          const profile = await boot.client.getProfile();
-          if (!profile) {
-            ixs.push(
-              await methods
-                .ensureProfile()
-                .accountsPartial({ profile: pda.profile(w), wallet: w })
-                .instruction(),
-            );
-          }
-          if (!profile?.starterClaimed) {
-            ixs.push(
-              await methods
-                .claimStarter()
-                .accountsPartial({ profile: pda.profile(w), wallet: w })
-                .instruction(),
-            );
-          }
-          ixs.push(
-            await methods
-              .initRun(
-                boot.session.publicKey,
-                new (await import("@coral-xyz/anchor")).BN(
-                  Math.floor(Date.now() / 1000) + 8 * 3600,
-                ),
-              )
-              .accountsPartial({
-                world,
-                run: pda.run(world, w),
-                best: pda.best(world, w),
-                wallet: w,
-              })
-              .instruction(),
-            await methods
-              .lockStarter(attemptNonce)
-              .accountsPartial({
-                profile: pda.profile(w),
-                world,
-                lock: pda.agentLock(world, w, attemptNonce),
-                wallet: w,
-              })
-              .instruction(),
-          );
-          const { Transaction } = await import("@solana/web3.js");
-          const provider = boot.client.program
-            .provider as import("@coral-xyz/anchor").AnchorProvider;
-          await provider.sendAndConfirm(new Transaction().add(...ixs));
-          run = await boot.client.getRun(world);
-        }
+        setHud((h) => ({ ...h, state: "joining…" }));
+        const { attemptNonce } = await boot.client.joinCasual({
+          day: route.day,
+          sessionAuthority: boot.session.publicKey,
+          sessionExpiry: Math.floor(Date.now() / 1000) + 8 * 3600,
+        });
+        if (!live) return;
+        const run = await boot.client.getRun(world);
         const state = run ? Object.keys(run.state)[0] : "missing";
         if (state === "idle" || state === "ended" || state === "entryFailed") {
-          const attemptNonce = (run?.attemptNonce ?? 0) + 1;
-          const w = boot.wallet.publicKey;
-          const lock = await boot.client.program.account.agentLock.fetchNullable(
-            pda.agentLock(world, w, attemptNonce),
-          );
-          if (!lock) {
-            await boot.client.program.methods
-              .lockStarter(attemptNonce)
-              .accountsPartial({
-                profile: pda.profile(w),
-                world,
-                lock: pda.agentLock(world, w, attemptNonce),
-                wallet: w,
-              })
-              .rpc();
-          }
+          setHud((h) => ({ ...h, state: "spawning…" }));
           await boot.client.spawn({
             day: route.day,
             attemptNonce,
@@ -147,7 +103,8 @@ export function GameScreen({
         }
         if (live) setHud((h) => ({ ...h, state: "active" }));
       } catch (e) {
-        if (live) setHud((h) => ({ ...h, state: `error: ${`${e}`.slice(0, 120)}` }));
+        console.error("join/spawn failed:", e);
+        if (live) setHud((h) => ({ ...h, state: `error: ${errorText(e)}` }));
       }
     })();
     return () => {
@@ -279,12 +236,11 @@ export function GameScreen({
           setHud((h) => ({ ...h, lastRejection: "kick: no adjacent target" }));
         }
       } catch (e) {
-        const msg = `${e}`;
-        const code = msg.match(/Error Code: (\w+)/)?.[1] ?? msg.slice(0, 80);
+        console.error("action failed:", e);
         // Rejection: snap the visual back to canonical state.
         setHud((h) => {
           sceneRef.current?.setLocal(h.x, h.y);
-          return { ...h, lastRejection: code };
+          return { ...h, lastRejection: errorText(e) };
         });
       } finally {
         busyRef.current = false;
