@@ -28,13 +28,29 @@ pub enum TileState {
 /// moving lane at time `t_ms`. Objects repeat every `gap_tiles`; the lane is
 /// an infinite conveyor sampled modulo its cycle.
 fn object_offset_mt(lane: &LaneDescriptor, t_ms: u64) -> u64 {
-    // Distance traveled, milli-tiles.
-    let traveled = t_ms
+    let cycle = lane.gap_tiles as u64 * 1_000;
+    traveled_mt(lane, t_ms) % cycle
+}
+
+/// Distance traveled by the lane's conveyor, snapped to whole tiles.
+///
+/// Objects sit on tile boundaries, never between them. Without the snap a
+/// one-tile car parked at a 0.4-tile offset overlaps *two* cells and kills on
+/// both, which is neither what the player sees nor what any two clients would
+/// agree on. Snapping also makes the object grid exactly reproducible off
+/// chain: every position is an integer tile, so a renderer and the program
+/// cannot drift apart.
+fn traveled_mt(lane: &LaneDescriptor, t_ms: u64) -> u64 {
+    let raw = t_ms
         .wrapping_mul(lane.speed_mtps as u64)
         .wrapping_div(1_000)
         .wrapping_add(lane.phase_mt as u64);
-    let cycle = lane.gap_tiles as u64 * 1_000;
-    traveled % cycle
+    raw / 1_000 * 1_000
+}
+
+/// Whole tiles the conveyor has advanced at `t_ms`.
+fn traveled_tiles(lane: &LaneDescriptor, t_ms: u64) -> u64 {
+    traveled_mt(lane, t_ms) / 1_000
 }
 
 /// True when world tile-x `x` overlaps any object footprint of the lane at
@@ -60,6 +76,32 @@ pub fn lane_object_covers(lane: &LaneDescriptor, x: u8, t_ms: u64) -> bool {
     // part always lands inside [0, fp_mt) because fp_mt >= 1000).
     let fp_mt = lane.footprint as u64 * 1_000;
     pattern_pos < fp_mt || pattern_pos + 1_000 > cycle_mt
+}
+
+/// The stable conveyor index of the object covering tile `x`, or `None` when
+/// the tile is clear.
+///
+/// The lane is an infinite line of objects spaced `gap_tiles` apart, and the
+/// whole line scrolls. Indexing by *slot on that line* rather than by
+/// position means a given car keeps one index for its entire journey across
+/// the world, which is what makes it addressable: pair it with the chunk's
+/// randomness and every client independently agrees on which car this is.
+pub fn object_index(lane: &LaneDescriptor, x: u8, t_ms: u64) -> Option<i64> {
+    if lane.gap_tiles == 0 || lane.footprint == 0 {
+        return None;
+    }
+    let gap = lane.gap_tiles as i64;
+    let traveled = traveled_tiles(lane, t_ms) as i64;
+    // Objects sit at `k * gap + traveled` (or minus, travelling the other
+    // way); solve for the slot whose footprint covers this tile.
+    let relative = if lane.dir_positive == 1 {
+        x as i64 - traveled
+    } else {
+        x as i64 + traveled
+    };
+    let index = relative.div_euclid(gap);
+    let offset_in_object = relative.rem_euclid(gap);
+    (offset_in_object < lane.footprint as i64).then_some(index)
 }
 
 /// Train cycle state for a rail lane at `t_ms`.
@@ -306,6 +348,56 @@ mod tests {
         assert_eq!(evaluate_tile(&lane, 0, 0), TileState::Supported);
         assert_eq!(evaluate_tile(&lane, 2, 0), TileState::Supported);
         assert_eq!(evaluate_tile(&lane, 5, 0), TileState::Lethal);
+    }
+
+    #[test]
+    fn objects_sit_on_whole_tiles_and_cover_exactly_their_footprint() {
+        // A one-tile car must never occupy two cells, whatever the phase or
+        // speed: that is what lets a renderer and the program agree.
+        for phase in [0u32, 250, 400, 750, 999] {
+            for speed in [250u16, 333, 1_000, 2_500, 4_000] {
+                let lane = LaneDescriptor {
+                    kind: LaneKind::Road as u8,
+                    dir_positive: 1,
+                    footprint: 1,
+                    gap_tiles: 8,
+                    speed_mtps: speed,
+                    phase_mt: phase,
+                    ..Default::default()
+                };
+                for step in 0..12u64 {
+                    let t = step * 1_000; // the authoritative clock ticks in seconds
+                    let covered = (0..64u8)
+                        .filter(|x| lane_object_covers(&lane, *x, t))
+                        .count();
+                    // 64 tiles / gap 8 = 8 objects, one tile each.
+                    assert_eq!(covered, 8, "phase {phase} speed {speed} t {t}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn object_index_matches_coverage() {
+        let lane = LaneDescriptor {
+            kind: LaneKind::Road as u8,
+            dir_positive: 0,
+            footprint: 3,
+            gap_tiles: 9,
+            speed_mtps: 2_000,
+            phase_mt: 0,
+            ..Default::default()
+        };
+        for step in 0..20u64 {
+            let t = step * 1_000;
+            for x in 0..64u8 {
+                assert_eq!(
+                    object_index(&lane, x, t).is_some(),
+                    lane_object_covers(&lane, x, t),
+                    "x {x} t {t}"
+                );
+            }
+        }
     }
 
     #[test]

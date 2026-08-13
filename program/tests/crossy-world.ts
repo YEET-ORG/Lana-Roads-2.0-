@@ -719,7 +719,10 @@ describe("crossy-world lifecycle", () => {
     // Clamp for client-side PDA derivation; the program rejects the actual
     // out-of-bounds step regardless.
     nx = Math.max(0, Math.min(63, nx));
-    ny = Math.max(0, ny);
+    // Clamp into the revealed frontier too: a sector past it does not exist,
+    // and Anchor would report the missing account instead of the program's
+    // own FrontierClosed rejection.
+    ny = Math.max(0, Math.min(15, ny));
     const src = sectorPda(paidWorld, Math.floor(run.x / 8), Math.floor(run.y / 8));
     const dst = sectorPda(paidWorld, Math.floor(nx / 8), Math.floor(ny / 8));
     const p = program.methods
@@ -766,15 +769,25 @@ describe("crossy-world lifecycle", () => {
   }
 
   it("moves forward with the session key and scores strictly-forward rows", async () => {
-    const before = await program.account.playerRun.fetch(
+    let before = await program.account.playerRun.fetch(
       runPda(paidWorld, playerA.publicKey),
     );
-    await moveOnce(playerA, sessionA, 0, 0);
+    const world = await program.account.worldHeader.fetch(paidWorld);
+    // The spawn scan covers the whole safe zone, so a player can legitimately
+    // land on the last revealed row, where no forward move exists. Step back
+    // first rather than making this test depend on spawn luck.
+    if (before.y >= world.revealedRows - 1) {
+      await moveOnce(playerA, sessionA, 1, before.actionSeq.toNumber());
+      before = await program.account.playerRun.fetch(
+        runPda(paidWorld, playerA.publicKey),
+      );
+    }
+    await moveOnce(playerA, sessionA, 0, before.actionSeq.toNumber());
     const after = await program.account.playerRun.fetch(
       runPda(paidWorld, playerA.publicKey),
     );
     assert.equal(after.y, before.y + 1);
-    assert.equal(after.actionSeq.toNumber(), 1);
+    assert.equal(after.actionSeq.toNumber(), before.actionSeq.toNumber() + 1);
     assert.equal(after.score, Math.max(before.score, after.y));
     const best = await program.account.dailyBest.fetch(
       bestPda(paidWorld, playerA.publicKey),
@@ -783,12 +796,26 @@ describe("crossy-world lifecycle", () => {
   });
 
   it("rejects replayed and out-of-order action sequences", async () => {
-    await moveOnce(playerA, sessionA, 1, 0, { expectError: "BadActionSequence" });
-    await moveOnce(playerA, sessionA, 1, 5, { expectError: "BadActionSequence" });
+    const run = await program.account.playerRun.fetch(
+      runPda(paidWorld, playerA.publicKey),
+    );
+    const next = run.actionSeq.toNumber();
+    await moveOnce(playerA, sessionA, 1, next - 1, {
+      expectError: "BadActionSequence",
+    });
+    await moveOnce(playerA, sessionA, 1, next + 4, {
+      expectError: "BadActionSequence",
+    });
   });
 
   it("rejects a foreign session key", async () => {
-    await moveOnce(playerA, sessionB, 0, 1, { expectError: "BadSession" });
+    // Correct sequence, wrong signer: the session is the only thing wrong.
+    const run = await program.account.playerRun.fetch(
+      runPda(paidWorld, playerA.publicKey),
+    );
+    await moveOnce(playerA, sessionB, 0, run.actionSeq.toNumber(), {
+      expectError: "BadSession",
+    });
   });
 
   it("enforces one live player per tile", async () => {

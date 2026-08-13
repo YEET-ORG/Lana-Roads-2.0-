@@ -12,3 +12,4 @@ pub mod hazard;
 pub mod pity;
 pub mod sampling;
 pub mod time;
+pub mod vehicle;
