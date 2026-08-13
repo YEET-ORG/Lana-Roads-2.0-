@@ -33,6 +33,10 @@ pub struct CheckHazard<'info> {
     /// Sector containing the run's current tile.
     #[account(mut)]
     pub sector: Box<Account<'info, OccupancySector>>,
+    /// Sector the player drifts into when a log carries them across a sector
+    /// boundary; None when the drift stays inside `sector` or cannot happen.
+    #[account(mut)]
+    pub drift_sector: Option<Box<Account<'info, OccupancySector>>>,
     /// Chunk covering the run's current row.
     pub chunk: Box<Account<'info, ChunkDefinition>>,
 }
@@ -72,6 +76,50 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
         return Ok(());
     }
 
+    // A log carries its passenger. The water under the player only turns
+    // lethal because the log scrolled on without them, so before drowning
+    // anyone, follow the log one tile downstream and see if they are still
+    // aboard. Riding off the world edge, or into an occupied tile, still
+    // drowns.
+    if let Some(drift) = hazard::carry_target(&descriptor, run.x, t_ms) {
+        let dest_bit = grid::sector_bit(drift, run.y);
+        let src_bit = grid::sector_bit(run.x, run.y);
+        let same_sector = grid::sector_of(drift, run.y) == grid::sector_of(run.x, run.y);
+        let dest_free = {
+            let dest_view: &OccupancySector = if same_sector {
+                &ctx.accounts.sector
+            } else {
+                match ctx.accounts.drift_sector.as_deref() {
+                    Some(d) => d,
+                    None => return Err(error!(CrossyError::WrongSector)),
+                }
+            };
+            if !same_sector {
+                assert_sector(dest_view, &world_key, drift, run.y)?;
+            }
+            !dest_view.is_occupied(dest_bit) && !dest_view.is_blocked(dest_bit)
+        };
+        if dest_free {
+            if same_sector {
+                let s = &mut ctx.accounts.sector;
+                s.clear_occupied(src_bit);
+                s.set_occupied(dest_bit);
+            } else {
+                ctx.accounts.sector.clear_occupied(src_bit);
+                ctx.accounts
+                    .drift_sector
+                    .as_deref_mut()
+                    .unwrap()
+                    .set_occupied(dest_bit);
+            }
+            run.x = drift;
+            run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+            run.hazard_deadline_ms =
+                hazard::next_hazard_deadline_ms(&descriptor, drift, t_ms).unwrap_or(0);
+            return Ok(());
+        }
+    }
+
     // Shield absorbs one environmental collision.
     if run.shield_charges > 0 && now < run.shield_until {
         run.shield_charges -= 1;
@@ -81,7 +129,14 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
         return Ok(());
     }
 
-    execute_death(world, run, &mut ctx.accounts.sector, world_key, now, 0)
+    execute_death(
+        world,
+        run,
+        &mut ctx.accounts.sector,
+        world_key,
+        now,
+        descriptor.kind.saturating_add(1),
+    )
 }
 
 /// The single authoritative death transition (environmental causes only —

@@ -106,9 +106,7 @@ describe("solsocket-engine lifecycle", () => {
   });
 
   it("delegates room + presence to the ER in one transaction", async () => {
-    const remainingAccounts = [
-      { pubkey: validator, isSigner: false, isWritable: false },
-    ];
+    const remainingAccounts = [{ pubkey: validator, isSigner: false, isWritable: false }];
     const delegateRoomIx = await program.methods
       .delegateRoom(wallet.publicKey, roomId)
       .accounts({ payer: wallet.publicKey, pda: roomPda })
@@ -157,7 +155,8 @@ describe("solsocket-engine lifecycle", () => {
     console.log(`${Date.now() - start}ms set_state on ER (session-signed)`);
 
     // Wait briefly for the subscription callback.
-    for (let i = 0; i < 50 && !notified; i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 50 && !notified; i++)
+      await new Promise((r) => setTimeout(r, 100));
     await erConnection.removeAccountChangeListener(subId);
     assert.ok(notified, "processed-commitment WS notification should fire");
     console.log(`WS notification after ${notified!.ms}ms, seq=${notified!.seq}`);

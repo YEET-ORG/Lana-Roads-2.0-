@@ -458,7 +458,10 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
 
 #[derive(Accounts)]
 pub struct MoveAction<'info> {
+    /// Mutable: a move into a hazard window is fatal, and death updates the
+    /// world's active-player count.
     #[account(
+        mut,
         seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
@@ -552,10 +555,15 @@ pub fn move_action(
         CrossyError::BadChunkState
     );
     let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
-    require!(
-        hazard::is_traversable(&descriptor, nx, t_ms),
-        CrossyError::Blocked
-    );
+    // Terrain decides what entering the tile *means*, not whether it is
+    // allowed. Rocks and trees are walls and simply stop you; traffic,
+    // trains and open water are entered and are fatal. Only the fatal case
+    // needs to be carried past the occupancy transfer below.
+    let fatal = match hazard::evaluate_tile(&descriptor, nx, t_ms) {
+        hazard::TileState::Blocked => return Err(error!(CrossyError::Blocked)),
+        hazard::TileState::Lethal => true,
+        hazard::TileState::Safe | hazard::TileState::Supported => false,
+    };
 
     let dest_bit = grid::sector_bit(nx, ny);
     {
@@ -587,6 +595,31 @@ pub fn move_action(
     run.facing = direction;
     run.last_move_slot = clock.slot;
     run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+
+    if fatal {
+        // A shield absorbs one lethal environmental collision, here exactly
+        // as it does for a hazard that arrives while standing still.
+        if run.shield_charges > 0 && now < run.shield_until {
+            run.shield_charges -= 1;
+            run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+            run.hazard_deadline_ms =
+                hazard::next_hazard_deadline_ms(&descriptor, nx, t_ms).unwrap_or(0);
+            return Ok(());
+        }
+        // Walking into traffic scores nothing: the row is not survived.
+        let sector: &mut OccupancySector = match ctx.accounts.dest_sector.as_deref_mut() {
+            Some(dest) => dest,
+            None => &mut ctx.accounts.source_sector,
+        };
+        return crate::instructions::hazards::execute_death(
+            &mut ctx.accounts.world,
+            run,
+            sector,
+            world_key,
+            now,
+            descriptor.kind.saturating_add(1),
+        );
+    }
 
     // Track last verified safe tile (grass, unblocked).
     if hazard::evaluate_tile(&descriptor, nx, t_ms) == hazard::TileState::Safe {

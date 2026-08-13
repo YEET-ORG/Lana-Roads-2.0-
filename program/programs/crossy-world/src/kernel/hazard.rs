@@ -161,6 +161,29 @@ pub fn is_lethal(lane: &LaneDescriptor, x: u8, t_ms: u64) -> bool {
     evaluate_tile(lane, x, t_ms) == TileState::Lethal
 }
 
+/// The tile a river passenger drifts to, or `None` when this lane cannot
+/// carry anyone from `x` right now.
+///
+/// A log is a moving platform: the water under a rider only turns lethal
+/// because the log scrolled on without them. At that instant the rider sits
+/// exactly one tile behind the log's trailing edge, so the tile immediately
+/// downstream is the one still under the log. Following it is what "the log
+/// carries you" means on a tile grid.
+pub fn carry_target(lane: &LaneDescriptor, x: u8, t_ms: u64) -> Option<u8> {
+    if LaneKind::from_u8(lane.kind) != Some(LaneKind::River) {
+        return None;
+    }
+    let next = if lane.dir_positive == 1 {
+        x.checked_add(1)?
+    } else {
+        x.checked_sub(1)?
+    };
+    if next >= WORLD_WIDTH {
+        return None; // carried off the edge of the world
+    }
+    (evaluate_tile(lane, next, t_ms) == TileState::Supported).then_some(next)
+}
+
 /// Earliest future instant (ms, strictly > t_ms) at which the tile *could*
 /// become lethal, or `None` if the tile is permanently safe under static
 /// geometry. Used to schedule the bounded crank collision check. The result
@@ -283,6 +306,48 @@ mod tests {
         assert_eq!(evaluate_tile(&lane, 0, 0), TileState::Supported);
         assert_eq!(evaluate_tile(&lane, 2, 0), TileState::Supported);
         assert_eq!(evaluate_tile(&lane, 5, 0), TileState::Lethal);
+    }
+
+    #[test]
+    fn logs_carry_their_passenger_downstream() {
+        let lane = LaneDescriptor {
+            kind: LaneKind::River as u8,
+            dir_positive: 1,
+            footprint: 3,
+            gap_tiles: 8,
+            speed_mtps: 1_000, // 1 tile/s
+            phase_mt: 0,
+            sinking: 0,
+            ..Default::default()
+        };
+        // t=0: the log covers tiles 0..3. A rider at tile 0 is supported.
+        assert_eq!(evaluate_tile(&lane, 0, 0), TileState::Supported);
+        // One second on, the log has moved to 1..4 and tile 0 is open water.
+        assert_eq!(evaluate_tile(&lane, 0, 1_000), TileState::Lethal);
+        // The rider is carried to tile 1, which is still under the log.
+        assert_eq!(carry_target(&lane, 0, 1_000), Some(1));
+        assert_eq!(evaluate_tile(&lane, 1, 1_000), TileState::Supported);
+    }
+
+    #[test]
+    fn carrying_stops_at_the_world_edge_and_off_water() {
+        let mut lane = LaneDescriptor {
+            kind: LaneKind::River as u8,
+            dir_positive: 1,
+            footprint: 3,
+            gap_tiles: 8,
+            speed_mtps: 1_000,
+            phase_mt: 0,
+            ..Default::default()
+        };
+        // Nothing downstream of the last column: the rider drowns.
+        assert_eq!(carry_target(&lane, WORLD_WIDTH - 1, 1_000), None);
+        // Moving the other way, column 0 has nowhere to drift either.
+        lane.dir_positive = 0;
+        assert_eq!(carry_target(&lane, 0, 1_000), None);
+        // Only rivers carry — roads and rails never do.
+        lane.kind = LaneKind::Road as u8;
+        assert_eq!(carry_target(&lane, 10, 0), None);
     }
 
     #[test]

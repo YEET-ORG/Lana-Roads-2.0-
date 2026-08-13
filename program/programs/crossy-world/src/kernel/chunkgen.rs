@@ -124,10 +124,12 @@ impl DetRng {
 /// spawn rows and get denser/faster within audited maxima.
 pub const fn difficulty_stage(chunk_index: u16) -> u8 {
     match chunk_index {
-        0..=3 => 1,
-        4..=8 => 2,
-        9..=15 => 3,
-        _ => 4,
+        0..=1 => 1,  // rows 0-31
+        2..=3 => 2,  // rows 32-63
+        4..=6 => 3,  // rows 64-111
+        7..=10 => 4, // rows 112-175
+        11..=15 => 5,
+        _ => 6,
     }
 }
 
@@ -143,6 +145,16 @@ pub const fn safe_prefix(chunk_index: u16) -> usize {
     }
 }
 
+/// The spawn chunk carries no moving hazards at all.
+///
+/// Up to 500 players materialise in these rows, revivals return here, and
+/// the menu camera frames them, so nothing in chunk 0 may be lethal. It is
+/// still not empty: past the apron it grows rocks and trees, which stop a
+/// player without hurting them.
+pub const fn is_safe_zone(chunk_index: u16) -> bool {
+    chunk_index == 0
+}
+
 struct StageParams {
     hazard_weight: u64, // percent of rows that are hazardous
     max_speed: u64,     // milli-tiles per second
@@ -156,22 +168,22 @@ struct StageParams {
 const fn stage_params(stage: u8) -> StageParams {
     match stage {
         0 | 1 => StageParams {
-            hazard_weight: 45,
-            max_speed: 1_000,
+            hazard_weight: 50,
+            max_speed: 1_200,
             min_gap: 6,
             rail_allowed: false,
             river_allowed: true,
             sinking_allowed: false,
-            max_blockers_per_row: 6,
+            max_blockers_per_row: 10,
         },
         2 => StageParams {
-            hazard_weight: 60,
-            max_speed: 1_600,
+            hazard_weight: 62,
+            max_speed: 1_800,
             min_gap: 5,
             rail_allowed: true,
             river_allowed: true,
             sinking_allowed: false,
-            max_blockers_per_row: 8,
+            max_blockers_per_row: 14,
         },
         3 => StageParams {
             hazard_weight: 70,
@@ -180,16 +192,34 @@ const fn stage_params(stage: u8) -> StageParams {
             rail_allowed: true,
             river_allowed: true,
             sinking_allowed: true,
-            max_blockers_per_row: 10,
+            max_blockers_per_row: 18,
         },
-        _ => StageParams {
-            hazard_weight: 80,
-            max_speed: 3_200,
+        4 => StageParams {
+            hazard_weight: 78,
+            max_speed: 3_000,
             min_gap: 3,
             rail_allowed: true,
             river_allowed: true,
             sinking_allowed: true,
-            max_blockers_per_row: 12,
+            max_blockers_per_row: 22,
+        },
+        5 => StageParams {
+            hazard_weight: 85,
+            max_speed: 3_500,
+            min_gap: 3,
+            rail_allowed: true,
+            river_allowed: true,
+            sinking_allowed: true,
+            max_blockers_per_row: 26,
+        },
+        _ => StageParams {
+            hazard_weight: 90,
+            max_speed: 4_000,
+            min_gap: 2,
+            rail_allowed: true,
+            river_allowed: true,
+            sinking_allowed: true,
+            max_blockers_per_row: 30,
         },
     }
 }
@@ -203,6 +233,12 @@ pub fn generate_chunk(seed: &[u8; 32], chunk_index: u16) -> ChunkLayout {
     let p = stage_params(stage);
     let mut lanes = [LaneDescriptor::default(); MAX_CHUNK_LANES];
     let prefix = safe_prefix(chunk_index);
+    // The spawn zone gets scenery, never traffic.
+    let hazard_weight = if is_safe_zone(chunk_index) {
+        0
+    } else {
+        p.hazard_weight
+    };
 
     let mut consecutive_hazard = 0u8;
     #[allow(clippy::needless_range_loop)]
@@ -211,7 +247,7 @@ pub fn generate_chunk(seed: &[u8; 32], chunk_index: u16) -> ChunkLayout {
         // always exists; the chunk's opening rows are safe so entering it is
         // never an instant trap.
         let force_safe = row < prefix || consecutive_hazard >= 4;
-        let hazardous = !force_safe && rng.below(100) < p.hazard_weight;
+        let hazardous = !force_safe && rng.below(100) < hazard_weight;
 
         let lane = &mut lanes[row];
         if !hazardous {
@@ -316,8 +352,9 @@ pub fn validate_layout(layout: &ChunkLayout, chunk_index: u16) -> bool {
                 }
             }
         }
-        // The opening rows of every chunk must be safe (grass).
-        if row < prefix && kind != LaneKind::Grass {
+        // The opening rows of every chunk must be safe (grass), and the
+        // whole spawn chunk must be.
+        if (row < prefix || is_safe_zone(chunk_index)) && kind != LaneKind::Grass {
             return false;
         }
     }
@@ -329,20 +366,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spawn_apron_is_clear_but_the_chunk_is_not_empty() {
+    fn spawn_chunk_has_scenery_but_never_a_hazard() {
         let layout = generate_chunk(&[0u8; 32], 0);
         for lane in layout.lanes.iter().take(safe_prefix(0)) {
             assert_eq!(lane.kind, LaneKind::Grass as u8);
-            assert_eq!(lane.blocker_mask, 0);
+            assert_eq!(lane.blocker_mask, 0, "the apron itself stays clear");
         }
-        // The deterministic spawn chunk must still contain real terrain past
-        // the apron — an empty opening chunk is the bug this guards.
-        let interesting = layout
-            .lanes
-            .iter()
-            .skip(safe_prefix(0))
-            .any(|l| l.kind != LaneKind::Grass as u8 || l.blocker_mask != 0);
-        assert!(interesting, "spawn chunk past the apron must have terrain");
+        // Nothing in the spawn chunk may be lethal: players materialise and
+        // revive here.
+        for lane in layout.lanes.iter() {
+            assert_eq!(lane.kind, LaneKind::Grass as u8, "no traffic in the safe zone");
+        }
+        // But it must not be an empty field — that was the original bug.
+        let blockers: u32 = layout.lanes.iter().map(|l| l.blocker_mask.count_ones()).sum();
+        assert!(blockers > 0, "spawn chunk past the apron must have obstacles");
     }
 
     #[test]
@@ -370,9 +407,60 @@ mod tests {
     #[test]
     fn every_seed_validates() {
         for s in 0u8..50 {
-            for idx in [0u16, 1, 4, 9, 16, 100] {
+            for idx in [0u16, 1, 2, 4, 7, 11, 16, 40, 100, 1000] {
                 let layout = generate_chunk(&[s; 32], idx);
                 assert!(validate_layout(&layout, idx), "seed {s} chunk {idx}");
+            }
+        }
+    }
+
+    #[test]
+    fn difficulty_rises_with_distance() {
+        // Sample the same seed deep into the run: later chunks must be
+        // denser and faster, never easier.
+        let hazards_at = |idx: u16| {
+            let layout = generate_chunk(&[7u8; 32], idx);
+            layout
+                .lanes
+                .iter()
+                .filter(|l| l.kind != LaneKind::Grass as u8)
+                .count()
+        };
+        let early: usize = (0..2).map(hazards_at).sum();
+        let late: usize = (30..32).map(hazards_at).sum();
+        assert!(late > early, "deep chunks must be busier ({early} -> {late})");
+
+        // Stage parameters themselves must be monotonic.
+        let mut prev = stage_params(1);
+        for stage in 2..=6u8 {
+            let p = stage_params(stage);
+            assert!(p.hazard_weight >= prev.hazard_weight, "stage {stage}");
+            assert!(p.max_speed >= prev.max_speed, "stage {stage}");
+            assert!(p.min_gap <= prev.min_gap, "stage {stage}");
+            assert!(
+                p.max_blockers_per_row >= prev.max_blockers_per_row,
+                "stage {stage}"
+            );
+            prev = p;
+        }
+    }
+
+    #[test]
+    fn deep_chunks_still_leave_a_route() {
+        // The hardest stage must remain traversable: no more than four
+        // consecutive hazard rows, and every grass row keeps open columns.
+        for s in 0u8..40 {
+            let layout = generate_chunk(&[s; 32], 40);
+            assert!(validate_layout(&layout, 40), "seed {s}");
+            let mut consecutive = 0;
+            for lane in layout.lanes.iter() {
+                if lane.kind == LaneKind::Grass as u8 {
+                    consecutive = 0;
+                    assert!(lane.blocker_mask.count_ones() <= 56, "seed {s}");
+                } else {
+                    consecutive += 1;
+                    assert!(consecutive <= 4, "seed {s}");
+                }
             }
         }
     }

@@ -129,7 +129,10 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
   let casualWorld: web3.PublicKey;
   let spawnChunk: web3.PublicKey;
 
-  const umi = createUmi(process.env.PROVIDER_ENDPOINT || "http://localhost:8899", "confirmed").use(mplCore());
+  const umi = createUmi(
+    process.env.PROVIDER_ENDPOINT || "http://localhost:8899",
+    "confirmed",
+  ).use(mplCore());
   umi.use(keypairIdentity(fromWeb3JsKeypair(admin)));
 
   const SEASON = 1;
@@ -138,7 +141,9 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
   async function airdrop(to: web3.PublicKey, sol = 10) {
     // Devnet: faucets are rate-limited — fund from the provider wallet.
     if (process.env.FUND_FROM_WALLET) {
-      const lamports = Math.floor(Number(process.env.FUND_SOL ?? "0.4") * web3.LAMPORTS_PER_SOL);
+      const lamports = Math.floor(
+        Number(process.env.FUND_SOL ?? "0.4") * web3.LAMPORTS_PER_SOL,
+      );
       const tx = new web3.Transaction().add(
         web3.SystemProgram.transfer({
           fromPubkey: admin.publicKey,
@@ -553,7 +558,11 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     // stays inside the initialized spawn-zone sectors (sy 0..1).
     while (run.y > 13) {
       const src = sectorPda(casualWorld, Math.floor(run.x / 8), Math.floor(run.y / 8));
-      const dst = sectorPda(casualWorld, Math.floor(run.x / 8), Math.floor((run.y - 1) / 8));
+      const dst = sectorPda(
+        casualWorld,
+        Math.floor(run.x / 8),
+        Math.floor((run.y - 1) / 8),
+      );
       try {
         await program.methods
           .moveAction(1, new BN(run.actionSeq), 1, new BN(Date.now()))
@@ -707,6 +716,25 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
             msg.includes("TileOccupied")
           ) {
             await new Promise((r) => setTimeout(r, 600));
+          } else if (msg.includes("Blocked")) {
+            // The spawn zone has rocks and trees now, so a straight line to
+            // the target is not guaranteed. Step around on the other axis.
+            const detour = dir === 0 || dir === 1 ? (run.x < 60 ? 3 : 2) : 0;
+            await program.methods
+              .moveAction(1, new BN(run.actionSeq), detour, new BN(Date.now() + i))
+              .accountsPartial({
+                world: casualWorld,
+                run: runPda(casualWorld, player.publicKey),
+                sourceSector: src,
+                destSector: null,
+                chunk: spawnChunk,
+                best: bestPda(casualWorld, player.publicKey),
+                signer: player.publicKey,
+              })
+              .signers([player])
+              .rpc()
+              .catch(() => {});
+            await new Promise((r) => setTimeout(r, 300));
           } else throw e;
         }
       }
@@ -1327,6 +1355,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
             world: paidWorld,
             run: runPda(paidWorld, c),
             sector: sectorPda(paidWorld, Math.floor(run.x / 8), Math.floor(run.y / 8)),
+            driftSector: null,
             chunk: run.y >= 16 ? chunk1 : spawnChunk,
           })
           .rpc();

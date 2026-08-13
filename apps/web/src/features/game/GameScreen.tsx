@@ -11,7 +11,7 @@ import { Direction, pda, ReceiptKind, revivePrice, WorldMode } from "@crossy-wor
 import { Bootstrapped } from "../../lib/client";
 import { WorldScene } from "../../game/renderer/scene";
 import { attachInput } from "../../game/input/keys";
-import { blockedReason, isTraversable } from "../../game/simulation/hazards";
+import { evaluateTile, LANE_RIVER } from "../../game/simulation/hazards";
 import type { Route } from "../../app/App";
 
 /**
@@ -342,6 +342,11 @@ export function GameScreen({
         const lane = scene.laneAt(y);
         return lane != null && lane.kind !== 0;
       };
+      const driftOf = (y: number) => {
+        const lane = scene.laneAt(y);
+        if (!lane || lane.kind !== LANE_RIVER) return 0;
+        return lane.dirPositive === 1 ? 1 : -1;
+      };
       const crank = (
         wallet: PublicKey | undefined,
         x: number,
@@ -357,6 +362,7 @@ export function GameScreen({
             x,
             y,
             hazardNonce: nonce,
+            driftDirection: driftOf(y),
           })
           .catch(() => {
             /* stale nonce / already resolved */
@@ -435,9 +441,13 @@ export function GameScreen({
         const destLane = sceneRef.current?.laneAt(ny);
         if (destLane) {
           const tMs = sceneRef.current!.worldTimeMs();
-          if (!isTraversable(destLane, nx, tMs)) {
-            const why = blockedReason(destLane, nx, tMs);
-            setHud((h) => (h.lastRejection === why ? h : { ...h, lastRejection: why }));
+          // Only walls stop a move. Traffic, trains and open water are
+          // enterable and fatal, so the move is sent and the death comes
+          // back from the program.
+          if (evaluateTile(destLane, nx, tMs) === "blocked") {
+            setHud((h) =>
+              h.lastRejection === "blocked" ? h : { ...h, lastRejection: "blocked" },
+            );
             return;
           }
         }
@@ -515,10 +525,6 @@ export function GameScreen({
             break;
           }
         }
-        if (!targetWallet) {
-          setHud((h) => ({ ...h, lastRejection: "kick: face an adjacent player" }));
-          return;
-        }
         lastKickAtRef.current = now;
         const sent = { attemptNonce: mine.attempt, actionSeq: mine.seq };
         liveRun.current = { ...mine, seq: mine.seq + 1 };
@@ -530,9 +536,9 @@ export function GameScreen({
             session: boot.session,
             ...sent,
             facing: mine.facing as Direction,
-            targetWallet: new PublicKey(targetWallet),
-            targetX: tx,
-            targetY: ty,
+            target: targetWallet
+              ? { wallet: new PublicKey(targetWallet), x: tx, y: ty }
+              : undefined,
           })
           .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
         const sentAt = performance.now();

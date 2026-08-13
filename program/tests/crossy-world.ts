@@ -471,11 +471,18 @@ describe("crossy-world lifecycle", () => {
     assert.equal(world.playerCap, 500);
     const chunk = await program.account.chunkDefinition.fetch(spawnChunk);
     assert.deepEqual(chunk.status, { revealed: {} });
-    // All 16 spawn lanes are safe grass.
-    for (const lane of chunk.lanes) {
-      assert.equal(lane.kind, 0);
-      assert.equal(lane.blockerMask.toNumber(), 0);
-    }
+    // The spawn zone carries no moving hazards — players materialise and
+    // revive here — but past the apron it grows obstacles.
+    let spawnBlockers = 0;
+    chunk.lanes.forEach((lane: any, row: number) => {
+      assert.equal(lane.kind, 0, `spawn lane ${row} must be grass`);
+      if (row < 3) assert.equal(lane.blockerMask.toNumber(), 0, "apron stays clear");
+      spawnBlockers += lane.blockerMask
+        .toString(2)
+        .split("")
+        .filter((b) => b === "1").length;
+    });
+    assert.ok(spawnBlockers > 0, "spawn chunk is not an empty field");
 
     await program.methods
       .openDay()
@@ -508,7 +515,10 @@ describe("crossy-world lifecycle", () => {
       sectorPda(paidWorld, 0, 0),
     );
     assert.equal(sector.occupancy.toNumber(), 0);
-    assert.equal(sector.blockers.toNumber(), 0);
+    // Blockers are derived from the chunk's grass rows; the apron (rows 0-2)
+    // is clear, so the low bits of the first sector must be free.
+    const apronBits = BigInt(sector.blockers.toString()) & 0xffffffn;
+    assert.equal(apronBits, 0n, "spawn apron has no static blockers");
   });
 
   // -------------------------------------------------------------------------
@@ -858,7 +868,30 @@ describe("crossy-world lifecycle", () => {
       else if (dir === 2) nx -= 1;
       else nx += 1;
       if (nx === runB.x && ny === runB.y) break;
-      await moveOnce(playerA, sessionA, dir, seq);
+      try {
+        await moveOnce(playerA, sessionA, dir, seq);
+      } catch (e) {
+        // A rock or tree is in the way: step around it. The spawn zone has
+        // scenery now, so walking a straight line is not guaranteed.
+        if (!`${e}`.includes("Blocked")) throw e;
+        let stepped = false;
+        for (const [sidestep, delta] of [
+          [ax < 60 ? 3 : 2, ax < 60 ? 1 : -1],
+          [ax < 60 ? 2 : 3, ax < 60 ? -1 : 1],
+        ] as [number, number][]) {
+          try {
+            await moveOnce(playerA, sessionA, sidestep, seq);
+            seq += 1;
+            ax += delta;
+            stepped = true;
+            break;
+          } catch (inner) {
+            if (!`${inner}`.includes("Blocked")) throw inner;
+          }
+        }
+        if (!stepped) break; // boxed in; the adjacency assertions below cope
+        continue;
+      }
       seq += 1;
       ax = nx;
       ay = ny;

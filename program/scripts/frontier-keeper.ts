@@ -31,8 +31,14 @@ const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
 const VALIDATOR = new web3.PublicKey(
   process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
 );
-/** Keep this many chunks of revealed rows beyond the frontier leader. */
-const LOOKAHEAD_CHUNKS = Number(process.env.LOOKAHEAD_CHUNKS ?? 2);
+/**
+ * Keep this many chunks of revealed rows beyond the frontier leader.
+ * Players cross a 16-row chunk in seconds, and a player who catches up to
+ * the frontier is stopped dead by it, so the buffer is deliberately deep.
+ */
+const LOOKAHEAD_CHUNKS = Number(process.env.LOOKAHEAD_CHUNKS ?? 5);
+/** Most chunks to publish in a single pass, so catching up cannot run away. */
+const MAX_CHUNKS_PER_TICK = Number(process.env.MAX_CHUNKS_PER_TICK ?? 6);
 const POLL_MS = Number(process.env.POLL_MS ?? 3_000);
 const CHUNK_ROWS = 16;
 const SECTOR_EDGE = 8;
@@ -171,16 +177,23 @@ async function main() {
     const target = (Math.floor(leader / CHUNK_ROWS) + LOOKAHEAD_CHUNKS) * CHUNK_ROWS;
     if (live.revealedRows >= target) return;
 
-    const index: number = live.nextChunkIndex;
+    // Catch the whole gap up in one pass. Publishing a single chunk per poll
+    // loses ground against a fast player, and against a cold start it would
+    // take a minute to build the buffer at all.
+    let revealed: number = live.revealedRows;
+    let index: number = live.nextChunkIndex;
     log(
-      `mode ${mode} day ${day}: leader row ${leader}, revealed ${live.revealedRows} ` +
-        `-> extending with chunk ${index}`,
+      `mode ${mode} day ${day}: leader row ${leader}, revealed ${revealed} ` +
+        `-> building out to ${target}`,
     );
-
-    await publishChunk(day, world, index);
-    await ensureSectors(world, index);
-    await extendFrontier(world, index);
-    log(`mode ${mode}: frontier now ${(index + 1) * CHUNK_ROWS} rows`);
+    for (let n = 0; n < MAX_CHUNKS_PER_TICK && revealed < target; n++) {
+      await publishChunk(day, world, index);
+      await ensureSectors(world, index);
+      await extendFrontier(world, index);
+      revealed = (index + 1) * CHUNK_ROWS;
+      index += 1;
+      log(`mode ${mode}: frontier now ${revealed} rows`);
+    }
   }
 
   /** Furthest row any live run has reached, floored by the claimed record. */

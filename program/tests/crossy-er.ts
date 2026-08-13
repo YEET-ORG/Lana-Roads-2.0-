@@ -23,7 +23,9 @@ import { Program, web3, BN } from "@coral-xyz/anchor";
 import assert from "node:assert/strict";
 import type { CrossyWorld } from "../target/types/crossy_world";
 
-const DELEGATION_PROGRAM = new web3.PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+const DELEGATION_PROGRAM = new web3.PublicKey(
+  "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+);
 
 const S = {
   config: Buffer.from("config"),
@@ -54,10 +56,13 @@ const le64 = (n: number | bigint) => {
 
 describe("crossy-world MagicBlock ER delegation (devnet)", () => {
   const base = new anchor.AnchorProvider(
-    new web3.Connection(process.env.PROVIDER_ENDPOINT || "https://api.devnet.solana.com", {
-      wsEndpoint: process.env.WS_ENDPOINT || "wss://api.devnet.solana.com",
-      commitment: "confirmed",
-    }),
+    new web3.Connection(
+      process.env.PROVIDER_ENDPOINT || "https://api.devnet.solana.com",
+      {
+        wsEndpoint: process.env.WS_ENDPOINT || "wss://api.devnet.solana.com",
+        commitment: "confirmed",
+      },
+    ),
     anchor.Wallet.local(),
     { commitment: "confirmed", preflightCommitment: "confirmed" },
   );
@@ -121,7 +126,8 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     for (;;) {
       const v = await f().catch(() => null);
       if (v) return v as T;
-      if (Date.now() - started > timeoutMs) throw new Error(`timeout waiting for ${what}`);
+      if (Date.now() - started > timeoutMs)
+        throw new Error(`timeout waiting for ${what}`);
       await new Promise((r) => setTimeout(r, intervalMs));
     }
   }
@@ -146,7 +152,10 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     world = pda(S.world, Buffer.from([1]), le64(day));
     spawnChunk = pda(S.chunk, le64(day), le16(0));
     const worldAcc = await base.connection.getAccountInfo(world);
-    assert.ok(worldAcc, `casual world for day ${day} exists (run crossy-nft.ts on devnet first)`);
+    assert.ok(
+      worldAcc,
+      `casual world for day ${day} exists (run crossy-nft.ts on devnet first)`,
+    );
   });
 
   it("prepares the player's run + starter lock on base", async function () {
@@ -301,16 +310,20 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
 
     // The committed run appears on base (still delegated: owner stays the
     // delegation program, data reflects the ER state).
-    await waitFor("committed run on base", async () => {
-      const acc = await base.connection.getAccountInfo(runPda(), "confirmed");
-      if (!acc) return null;
-      const committed = program.coder.accounts.decode("playerRun", acc.data);
-      return committed.actionSeq.toNumber() === erRun.actionSeq.toNumber() &&
-        committed.x === erRun.x &&
-        committed.y === erRun.y
-        ? acc
-        : null;
-    }, 120_000);
+    await waitFor(
+      "committed run on base",
+      async () => {
+        const acc = await base.connection.getAccountInfo(runPda(), "confirmed");
+        if (!acc) return null;
+        const committed = program.coder.accounts.decode("playerRun", acc.data);
+        return committed.actionSeq.toNumber() === erRun.actionSeq.toNumber() &&
+          committed.x === erRun.x &&
+          committed.y === erRun.y
+          ? acc
+          : null;
+      },
+      120_000,
+    );
     assert.ok(true, "base sees the committed ER position and action sequence");
   });
 
@@ -323,10 +336,14 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
       .signers([player])
       .rpc();
 
-    await waitFor("base ownership restored", async () => {
-      const acc = await base.connection.getAccountInfo(runPda(), "confirmed");
-      return acc && acc.owner.equals(program.programId) ? acc : null;
-    }, 180_000);
+    await waitFor(
+      "base ownership restored",
+      async () => {
+        const acc = await base.connection.getAccountInfo(runPda(), "confirmed");
+        return acc && acc.owner.equals(program.programId) ? acc : null;
+      },
+      180_000,
+    );
     const run = await program.account.playerRun.fetch(runPda());
     assert.deepEqual(run.state, { active: {} });
     assert.ok(run.actionSeq.toNumber() >= 3, "undelegated run keeps the ER progress");

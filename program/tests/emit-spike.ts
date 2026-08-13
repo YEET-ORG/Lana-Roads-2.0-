@@ -76,9 +76,7 @@ describe("emit_event via logsSubscribe on the ER", () => {
       .accounts({ room: roomPda, player: wallet.publicKey })
       .rpc({ skipPreflight: true });
 
-    const remainingAccounts = [
-      { pubkey: validator, isSigner: false, isWritable: false },
-    ];
+    const remainingAccounts = [{ pubkey: validator, isSigner: false, isWritable: false }];
     const delegateRoomIx = await program.methods
       .delegateRoom(wallet.publicKey, roomId)
       .accounts({ payer: wallet.publicKey, pda: roomPda })

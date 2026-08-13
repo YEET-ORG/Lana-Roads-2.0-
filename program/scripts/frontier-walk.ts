@@ -200,6 +200,17 @@ async function main() {
   }
   console.log(`frontier: ${worldAcc.revealedRows} rows revealed`);
 
+  // A log can carry a rider across a sector boundary; hand the program that
+  // sector so the ride is possible instead of a drowning.
+  const driftSectorFor = (r: any, lane: any) => {
+    if (lane.kind !== 2) return null;
+    const nx = r.x + (lane.dirPositive === 1 ? 1 : -1);
+    if (nx < 0 || nx > 63) return null;
+    const here = sectorPda(Math.floor(r.x / 8), Math.floor(r.y / 8));
+    const there = sectorPda(Math.floor(nx / 8), Math.floor(r.y / 8));
+    return there.equals(here) ? null : there;
+  };
+
   // Mirror the client's hazard crank: collisions only resolve when someone
   // asks the program to check, so without this a player could stand in
   // traffic forever.
@@ -217,6 +228,7 @@ async function main() {
             world,
             run: runPda(),
             sector: sectorPda(Math.floor(r.x / 8), Math.floor(r.y / 8)),
+            driftSector: driftSectorFor(r, lane),
             chunk: chunkPda(Math.floor(r.y / 16)),
           })
           .rpc({ skipPreflight: true, commitment: "processed" });
@@ -265,7 +277,7 @@ async function main() {
     try {
       await move(0);
       if (nextLane) seen.add(KINDS[nextLane.kind]);
-    } catch (e) {
+    } catch (e: any) {
       const msg = errText(e);
       const code = /Blocked|TileOccupied|FrontierClosed|TooFast|Immobilized/.exec(msg);
       rejects.set(code?.[0] ?? msg, (rejects.get(code?.[0] ?? msg) ?? 0) + 1);

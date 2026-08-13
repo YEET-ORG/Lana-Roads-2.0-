@@ -17,7 +17,9 @@ import { Program, web3, BN } from "@coral-xyz/anchor";
 import assert from "node:assert/strict";
 import type { CrossyWorld } from "../target/types/crossy_world";
 
-const DELEGATION_PROGRAM = new web3.PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+const DELEGATION_PROGRAM = new web3.PublicKey(
+  "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+);
 const S = {
   config: Buffer.from("config"),
   player: Buffer.from("player"),
@@ -48,10 +50,13 @@ const le64 = (n: number | bigint) => {
 
 describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
   const base = new anchor.AnchorProvider(
-    new web3.Connection(process.env.PROVIDER_ENDPOINT || "https://api.devnet.solana.com", {
-      wsEndpoint: process.env.WS_ENDPOINT || "wss://api.devnet.solana.com",
-      commitment: "confirmed",
-    }),
+    new web3.Connection(
+      process.env.PROVIDER_ENDPOINT || "https://api.devnet.solana.com",
+      {
+        wsEndpoint: process.env.WS_ENDPOINT || "wss://api.devnet.solana.com",
+        commitment: "confirmed",
+      },
+    ),
     anchor.Wallet.local(),
     { commitment: "confirmed", preflightCommitment: "confirmed" },
   );
@@ -239,9 +244,12 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     const waitClone = async (addr: web3.PublicKey, what: string) => {
       const started = Date.now();
       for (;;) {
-        const acc = await erConnection.getAccountInfo(addr, "processed").catch(() => null);
+        const acc = await erConnection
+          .getAccountInfo(addr, "processed")
+          .catch(() => null);
         if (acc && acc.owner.equals(program.programId)) return;
-        if (Date.now() - started > 120_000) throw new Error(`timeout: ER clone of ${what}`);
+        if (Date.now() - started > 120_000)
+          throw new Error(`timeout: ER clone of ${what}`);
         await new Promise((r) => setTimeout(r, 1500));
       }
     };
@@ -301,7 +309,12 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     const dst = sectorPda(Math.floor(nx / 8), Math.floor(ny / 8));
     try {
       await er.methods
-        .moveAction(1, new BN(run.actionSeq), dir, new BN(Date.now() + Math.random() * 1e6))
+        .moveAction(
+          1,
+          new BN(run.actionSeq),
+          dir,
+          new BN(Date.now() + Math.random() * 1e6),
+        )
         .accountsPartial({
           world,
           run: runPda(p.publicKey),
@@ -322,8 +335,12 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
 
   it("moves both players CONCURRENTLY on the ER", async function () {
     this.timeout(300_000);
-    const seqA0 = (await erA.account.playerRun.fetch(runPda(playerA.publicKey))).actionSeq.toNumber();
-    const seqB0 = (await erB.account.playerRun.fetch(runPda(playerB.publicKey))).actionSeq.toNumber();
+    const seqA0 = (
+      await erA.account.playerRun.fetch(runPda(playerA.publicKey))
+    ).actionSeq.toNumber();
+    const seqB0 = (
+      await erB.account.playerRun.fetch(runPda(playerB.publicKey))
+    ).actionSeq.toNumber();
     let okA = 0;
     let okB = 0;
     for (let round = 0; round < 4; round++) {
@@ -336,9 +353,16 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
       if (rb === "ok") okB++;
       await new Promise((r) => setTimeout(r, 500)); // one move per ER slot
     }
-    assert.ok(okA >= 2 && okB >= 2, `both players moved concurrently (A ${okA}, B ${okB})`);
-    const seqA = (await erA.account.playerRun.fetch(runPda(playerA.publicKey))).actionSeq.toNumber();
-    const seqB = (await erB.account.playerRun.fetch(runPda(playerB.publicKey))).actionSeq.toNumber();
+    assert.ok(
+      okA >= 2 && okB >= 2,
+      `both players moved concurrently (A ${okA}, B ${okB})`,
+    );
+    const seqA = (
+      await erA.account.playerRun.fetch(runPda(playerA.publicKey))
+    ).actionSeq.toNumber();
+    const seqB = (
+      await erB.account.playerRun.fetch(runPda(playerB.publicKey))
+    ).actionSeq.toNumber();
     assert.equal(seqA - seqA0, okA, "A's sequence advanced exactly per accepted move");
     assert.equal(seqB - seqB0, okB, "B's sequence advanced exactly per accepted move");
   });
@@ -378,11 +402,11 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     // Ensure facing toward B (facing = last accepted move direction).
     if (runA.facing !== facing) {
       const backDir = facing === 3 ? 2 : 3;
-      if (await moveOnce(playerA, erA, backDir) === "ok") {
+      if ((await moveOnce(playerA, erA, backDir)) === "ok") {
         await new Promise((r) => setTimeout(r, 600));
       }
       for (let i = 0; i < 5; i++) {
-        if (await moveOnce(playerA, erA, facing) === "ok") break;
+        if ((await moveOnce(playerA, erA, facing)) === "ok") break;
         await new Promise((r) => setTimeout(r, 600));
       }
       runA = await erA.account.playerRun.fetch(runPda(playerA.publicKey));
@@ -434,8 +458,14 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
 
     const started = Date.now();
     for (;;) {
-      const a = await base.connection.getAccountInfo(runPda(playerA.publicKey), "confirmed");
-      const b = await base.connection.getAccountInfo(runPda(playerB.publicKey), "confirmed");
+      const a = await base.connection.getAccountInfo(
+        runPda(playerA.publicKey),
+        "confirmed",
+      );
+      const b = await base.connection.getAccountInfo(
+        runPda(playerB.publicKey),
+        "confirmed",
+      );
       if (a && b) {
         const ca = program.coder.accounts.decode("playerRun", a.data);
         const cb = program.coder.accounts.decode("playerRun", b.data);
@@ -447,9 +477,13 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
           break;
         }
       }
-      if (Date.now() - started > 120_000) throw new Error("timeout: committed multiplayer state");
+      if (Date.now() - started > 120_000)
+        throw new Error("timeout: committed multiplayer state");
       await new Promise((r) => setTimeout(r, 2000));
     }
-    assert.ok(true, "base reflects both players' ER positions, including the kick displacement");
+    assert.ok(
+      true,
+      "base reflects both players' ER positions, including the kick displacement",
+    );
   });
 });

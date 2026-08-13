@@ -53,7 +53,11 @@ const le64 = (n: number | bigint) => {
   return b;
 };
 
-async function inChunks<T, R>(items: T[], size: number, f: (t: T) => Promise<R>): Promise<R[]> {
+async function inChunks<T, R>(
+  items: T[],
+  size: number,
+  f: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = [];
   for (let i = 0; i < items.length; i += size) {
     out.push(...(await Promise.all(items.slice(i, i + size).map(f))));
@@ -76,7 +80,9 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
   const admin = (provider.wallet as anchor.Wallet).payer;
   const vrfAuthority = web3.Keypair.generate();
 
-  const players: web3.Keypair[] = Array.from({ length: PLAYERS }, () => web3.Keypair.generate());
+  const players: web3.Keypair[] = Array.from({ length: PLAYERS }, () =>
+    web3.Keypair.generate(),
+  );
 
   const pda = (...seeds: (Buffer | Uint8Array)[]) =>
     web3.PublicKey.findProgramAddressSync(seeds as Buffer[], program.programId)[0];
@@ -87,7 +93,8 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
   const runPda = (w: web3.PublicKey) => pda(S.run, world.toBuffer(), w.toBuffer());
   const bestPda = (w: web3.PublicKey) => pda(S.best, world.toBuffer(), w.toBuffer());
   const profilePda = (w: web3.PublicKey) => pda(S.player, w.toBuffer());
-  const lockPda = (w: web3.PublicKey) => pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(1));
+  const lockPda = (w: web3.PublicKey) =>
+    pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(1));
   const sectorPda = (sx: number, sy: number) =>
     pda(S.sector, world.toBuffer(), Buffer.from([sx]), le16(sy));
   const spawnSectorMetas = () => {
@@ -117,7 +124,11 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
         );
       }
     }
-    assert.equal(Number(occupancyBits), active.length, "sector bitsets sum to population");
+    assert.equal(
+      Number(occupancyBits),
+      active.length,
+      "sector bitsets sum to population",
+    );
 
     const worldAcc = await program.account.worldHeader.fetch(world);
     assert.equal(worldAcc.activePlayers, active.length, "world population counter");
@@ -230,7 +241,9 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
       const sig = await conn.sendRawTransaction(tx.serialize());
       await conn.confirmTransaction(sig, "confirmed");
     });
-    console.log(`      onboarded ${PLAYERS} players in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    console.log(
+      `      onboarded ${PLAYERS} players in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+    );
   });
 
   it(`spawns ${PLAYERS} players into the 1024-tile safe zone`, async function () {
@@ -260,7 +273,11 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
       `      ${ok}/${PLAYERS} spawned in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
     );
     const failures = results.filter((r) => r !== "ok");
-    assert.equal(ok, PLAYERS, `all spawns succeed (failures: ${failures.slice(0, 3).join(" | ")})`);
+    assert.equal(
+      ok,
+      PLAYERS,
+      `all spawns succeed (failures: ${failures.slice(0, 3).join(" | ")})`,
+    );
     await auditOccupancy(PLAYERS);
   });
 
@@ -288,7 +305,12 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
           const src = sectorPda(Math.floor(run.x / 8), Math.floor(run.y / 8));
           const dst = sectorPda(Math.floor(nx / 8), Math.floor(ny / 8));
           await program.methods
-            .moveAction(1, new BN(run.actionSeq), dir, new BN(Date.now() + Math.random() * 1e9))
+            .moveAction(
+              1,
+              new BN(run.actionSeq),
+              dir,
+              new BN(Date.now() + Math.random() * 1e9),
+            )
             .accountsPartial({
               world,
               run: runPda(p.publicKey),
@@ -318,14 +340,19 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
       const transport = results.filter((r) => r.startsWith("transport:"));
       const otherCodes = results.filter(
         (r) =>
-          !["ok", "TileOccupied", "TooFast", "BadActionSequence", "oob-skip"].includes(r) &&
-          !r.startsWith("transport:"),
+          !["ok", "TileOccupied", "TooFast", "BadActionSequence", "oob-skip"].includes(
+            r,
+          ) && !r.startsWith("transport:"),
       );
       const other = otherCodes.length;
       if (other)
-        console.log(`      unexpected program errors: ${otherCodes.join(" | ").slice(0, 300)}`);
+        console.log(
+          `      unexpected program errors: ${otherCodes.join(" | ").slice(0, 300)}`,
+        );
       if (transport.length)
-        console.log(`      transport (${transport.length}): ${transport[0].slice(0, 100)}`);
+        console.log(
+          `      transport (${transport.length}): ${transport[0].slice(0, 100)}`,
+        );
       totalAccepted += accepted;
       totalContention += contention;
       totalOther += other;

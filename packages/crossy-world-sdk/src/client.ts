@@ -765,30 +765,43 @@ export class CrossyClient {
     attemptNonce: number;
     actionSeq: number;
     facing: Direction;
-    targetWallet: PublicKey;
-    targetX: number;
-    targetY: number;
+    /** Omit to swing at empty space — a legal, wasted kick. */
+    target?: { wallet: PublicKey; x: number; y: number };
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
     const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
     // Knockback destination: one tile beyond the target, same direction.
-    let [dx, dy] = [params.targetX, params.targetY];
-    if (params.facing === Direction.Forward) dy += 1;
-    else if (params.facing === Direction.Backward) dy -= 1;
-    else if (params.facing === Direction.Left) dx -= 1;
-    else dx += 1;
-    if (dx < 0 || dx > 63 || dy < 0) throw new Error("knockback out of bounds");
-    const targetSector = sectorForTile(world, params.targetX, params.targetY);
-    const destSector = sectorForTile(world, dx, dy);
+    // Without a target the program is handed nothing to displace and simply
+    // burns the swing, so the client never has to be sure a target is there.
+    let accounts: Record<string, PublicKey | null> = {
+      target: null,
+      targetSector: null,
+      destSector: null,
+      chunk: null,
+    };
+    if (params.target) {
+      let [dx, dy] = [params.target.x, params.target.y];
+      if (params.facing === Direction.Forward) dy += 1;
+      else if (params.facing === Direction.Backward) dy -= 1;
+      else if (params.facing === Direction.Left) dx -= 1;
+      else dx += 1;
+      if (dx >= 0 && dx <= 63 && dy >= 0) {
+        const targetSector = sectorForTile(world, params.target.x, params.target.y);
+        const destSector = sectorForTile(world, dx, dy);
+        accounts = {
+          target: pda.run(world, params.target.wallet),
+          targetSector,
+          destSector: destSector.equals(targetSector) ? null : destSector,
+          chunk: pda.chunk(params.day, Math.floor(dy / 16)),
+        };
+      }
+    }
     const ix = await this.erProgram.methods
       .kick(params.attemptNonce, new BN(params.actionSeq), new BN(Date.now()))
       .accountsPartial({
         world,
         kicker: pda.run(world, wallet),
-        target: pda.run(world, params.targetWallet),
-        targetSector,
-        destSector: destSector.equals(targetSector) ? null : destSector,
-        chunk: pda.chunk(params.day, Math.floor(dy / 16)),
+        ...accounts,
         signer: params.session.publicKey,
       })
       .instruction();
@@ -841,14 +854,26 @@ export class CrossyClient {
     x: number;
     y: number;
     hazardNonce: number;
+    /** +1 / -1 when standing on a river, so a log can carry the player. */
+    driftDirection?: number;
   }): Promise<string> {
     const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    // A river can carry the player one tile downstream, which may cross a
+    // sector boundary — hand the program that sector so the ride is possible.
+    const sector = sectorForTile(world, params.x, params.y);
+    const drift = params.driftDirection ?? 0;
+    const driftX = params.x + drift;
+    const driftSector =
+      drift !== 0 && driftX >= 0 && driftX <= 63
+        ? sectorForTile(world, driftX, params.y)
+        : sector;
     const ix = await this.erProgram.methods
       .checkHazard(params.hazardNonce)
       .accountsPartial({
         world,
         run: pda.run(world, params.wallet ?? this.wallet.publicKey),
-        sector: sectorForTile(world, params.x, params.y),
+        sector,
+        driftSector: driftSector.equals(sector) ? null : driftSector,
         chunk: pda.chunk(params.day, Math.floor(params.y / 16)),
       })
       .instruction();

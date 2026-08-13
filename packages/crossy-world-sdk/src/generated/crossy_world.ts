@@ -770,6 +770,15 @@ export type CrossyWorld = {
           "writable": true
         },
         {
+          "name": "driftSector",
+          "docs": [
+            "Sector the player drifts into when a log carries them across a sector",
+            "boundary; None when the drift stays inside `sector` or cannot happen."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "chunk",
           "docs": [
             "Chunk covering the run's current row."
@@ -3072,6 +3081,60 @@ export type CrossyWorld = {
       "args": []
     },
     {
+      "name": "extendFrontier",
+      "discriminator": [
+        91,
+        37,
+        169,
+        36,
+        252,
+        191,
+        74,
+        5
+      ],
+      "accounts": [
+        {
+          "name": "world",
+          "writable": true
+        },
+        {
+          "name": "chunk",
+          "docs": [
+            "The next chunk, already revealed on base and read cross-plane here."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  117,
+                  110,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world.day",
+                "account": "worldHeader"
+              },
+              {
+                "kind": "account",
+                "path": "world.next_chunk_index",
+                "account": "worldHeader"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "finalizeDay",
       "discriminator": [
         88,
@@ -3293,12 +3356,19 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
-          "name": "world"
+          "name": "world",
+          "docs": [
+            "typed account would reject it and no sector could ever be created for",
+            "newly revealed rows. The handler validates it by committed read +",
+            "mode/day PDA derivation, exactly like `init_run`."
+          ]
         },
         {
           "name": "chunk",
           "docs": [
-            "Chunk covering this sector's rows (blocker derivation)."
+            "Chunk covering this sector's rows (blocker derivation). Its address is",
+            "pinned in the handler against the committed world's day, since the",
+            "day is not available to the seeds expression here."
           ]
         },
         {
@@ -3446,7 +3516,12 @@ export type CrossyWorld = {
         },
         {
           "name": "target",
+          "docs": [
+            "The player being kicked. Optional: a kick thrown at empty space is a",
+            "legal, wasted kick rather than a failed transaction."
+          ],
           "writable": true,
+          "optional": true,
           "pda": {
             "seeds": [
               {
@@ -3474,7 +3549,8 @@ export type CrossyWorld = {
           "docs": [
             "Sector containing the target's current tile."
           ],
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "destSector",
@@ -3489,7 +3565,8 @@ export type CrossyWorld = {
           "name": "chunk",
           "docs": [
             "Chunk covering the knockback destination row."
-          ]
+          ],
+          "optional": true
         },
         {
           "name": "signer",
@@ -3928,7 +4005,12 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
-          "name": "world"
+          "name": "world",
+          "docs": [
+            "Mutable: a move into a hazard window is fatal, and death updates the",
+            "world's active-player count."
+          ],
+          "writable": true
         },
         {
           "name": "run",
@@ -4419,6 +4501,132 @@ export type CrossyWorld = {
         {
           "name": "newAdmin",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "publishChunk",
+      "discriminator": [
+        61,
+        194,
+        106,
+        57,
+        153,
+        64,
+        135,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "world",
+          "docs": [
+            "typed account would reject it. The handler validates it by committed",
+            "read + mode/day PDA derivation."
+          ]
+        },
+        {
+          "name": "prevChunk",
+          "docs": [
+            "Continuity anchor: the preceding chunk must already be revealed, so",
+            "the revealed range can never gain a hole."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  117,
+                  110,
+                  107
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day"
+              },
+              {
+                "kind": "arg",
+                "path": "chunk_index.saturating_sub(1)"
+              }
+            ]
+          }
+        },
+        {
+          "name": "chunk",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  117,
+                  110,
+                  107
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day"
+              },
+              {
+                "kind": "arg",
+                "path": "chunkIndex"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrfAuthority",
+          "docs": [
+            "The authenticated randomness identity fixed in config."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day",
+          "type": "u64"
+        },
+        {
+          "name": "chunkIndex",
+          "type": "u16"
+        },
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ]
     },
@@ -5203,6 +5411,50 @@ export type CrossyWorld = {
         {
           "name": "paused",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "setVrfAuthority",
+      "discriminator": [
+        219,
+        49,
+        136,
+        166,
+        71,
+        6,
+        51,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "newAuthority",
+          "type": "pubkey"
         }
       ]
     },

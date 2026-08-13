@@ -45,109 +45,104 @@ pub struct Kick<'info> {
         bump = kicker.bump,
     )]
     pub kicker: Box<Account<'info, PlayerRun>>,
+    /// The player being kicked. Optional: a kick thrown at empty space is a
+    /// legal, wasted kick rather than a failed transaction.
     #[account(
         mut,
         seeds = [seeds::RUN, world.key().as_ref(), target.wallet.as_ref()],
         bump = target.bump,
         constraint = target.key() != kicker.key() @ CrossyError::NoTarget
     )]
-    pub target: Box<Account<'info, PlayerRun>>,
+    pub target: Option<Box<Account<'info, PlayerRun>>>,
     /// Sector containing the target's current tile.
     #[account(mut)]
-    pub target_sector: Box<Account<'info, OccupancySector>>,
+    pub target_sector: Option<Box<Account<'info, OccupancySector>>>,
     /// Sector containing the knockback destination; None when it shares the
     /// target's sector (Anchor forbids duplicate mutable accounts).
     #[account(mut)]
     pub dest_sector: Option<Box<Account<'info, OccupancySector>>>,
     /// Chunk covering the knockback destination row.
-    pub chunk: Box<Account<'info, ChunkDefinition>>,
+    pub chunk: Option<Box<Account<'info, ChunkDefinition>>>,
     pub signer: Signer<'info>,
 }
 
-/// Kick: displace the adjacent facing target one tile. Destination must be
-/// in bounds, not statically blocked, and unoccupied — but MAY be a hazard
-/// window: the environment kills, never the kick.
+/// Kick: swing at the tile the kicker faces. The swing itself always
+/// happens — it costs the cooldown and consumes the action whether or not it
+/// connects — so a kick at thin air, or at someone who stepped away between
+/// the client deciding and the rollup executing, is a miss rather than a
+/// failed transaction. A connecting kick displaces the target one tile. The
+/// destination must be in bounds, not statically blocked, and unoccupied,
+/// but it MAY be a hazard window: the environment kills, never the kick.
 pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let world_key = ctx.accounts.world.key();
-    let world = &ctx.accounts.world;
-    let kicker = &mut ctx.accounts.kicker;
-    let target = &mut ctx.accounts.target;
+    let revealed_rows = ctx.accounts.world.revealed_rows;
+    let world_day = ctx.accounts.world.day;
+    let t_ms = world_time_ms(&ctx.accounts.world, now)?;
 
-    validate_action(
-        world,
-        kicker,
-        &ctx.accounts.signer.key(),
-        session_scope::KICK,
-        attempt_nonce,
-        action_seq,
-        now,
-    )?;
-    require!(now >= kicker.stunned_until, CrossyError::Immobilized);
-    require!(now >= kicker.kick_ready_ts, CrossyError::Cooldown);
-
-    // Target: exactly the adjacent tile in facing direction, Active.
-    let facing = Direction::from_u8(kicker.facing).ok_or(CrossyError::NoTarget)?;
-    let (tx, ty) = grid::facing_tile(kicker.x, kicker.y, facing).ok_or(CrossyError::NoTarget)?;
-    require!(target.state == RunState::Active, CrossyError::NoTarget);
-    require!(target.x == tx && target.y == ty, CrossyError::NoTarget);
-
-    // Anchor resists forced movement.
-    require!(now >= target.anchor_until, CrossyError::Blocked);
-
-    // Knockback destination: one tile further in the same direction.
-    let (dx, dy) = grid::step(tx, ty, facing).ok_or(CrossyError::OutOfBounds)?;
-    require!(dy < world.revealed_rows, CrossyError::FrontierClosed);
-
-    assert_sector(&ctx.accounts.target_sector, &world_key, tx, ty)?;
-    match &ctx.accounts.dest_sector {
-        Some(dest) => assert_sector(dest, &world_key, dx, dy)?,
-        None => assert_sector(&ctx.accounts.target_sector, &world_key, dx, dy)?,
-    }
-
-    let dest_bit = grid::sector_bit(dx, dy);
     {
-        let dest_view = ctx
-            .accounts
-            .dest_sector
-            .as_deref()
-            .unwrap_or(&ctx.accounts.target_sector);
-        require!(!dest_view.is_blocked(dest_bit), CrossyError::Blocked);
-        require!(!dest_view.is_occupied(dest_bit), CrossyError::TileOccupied);
+        let world = &ctx.accounts.world;
+        let kicker = &ctx.accounts.kicker;
+        validate_action(
+            world,
+            kicker,
+            &ctx.accounts.signer.key(),
+            session_scope::KICK,
+            attempt_nonce,
+            action_seq,
+            now,
+        )?;
+        require!(now >= kicker.stunned_until, CrossyError::Immobilized);
+        require!(now >= kicker.kick_ready_ts, CrossyError::Cooldown);
     }
 
-    // Atomic displacement.
-    let src_bit = grid::sector_bit(tx, ty);
-    match ctx.accounts.dest_sector.as_deref_mut() {
-        None => {
-            let s = &mut ctx.accounts.target_sector;
-            s.clear_occupied(src_bit);
-            s.set_occupied(dest_bit);
-        }
-        Some(dest) => {
-            ctx.accounts.target_sector.clear_occupied(src_bit);
-            dest.set_occupied(dest_bit);
+    // The tile the kicker is facing, and the tile a target there would be
+    // knocked into. Both are derived from the kicker's own state, so the
+    // client cannot aim anywhere else.
+    let facing = Direction::from_u8(ctx.accounts.kicker.facing).ok_or(CrossyError::NoTarget)?;
+    let struck = grid::facing_tile(ctx.accounts.kicker.x, ctx.accounts.kicker.y, facing);
+
+    if let Some((tx, ty)) = struck {
+        if kick_connects(&ctx, tx, ty, facing, now, revealed_rows, world_day)? {
+            let (dx, dy) = grid::step(tx, ty, facing).unwrap();
+            let dest_bit = grid::sector_bit(dx, dy);
+            let src_bit = grid::sector_bit(tx, ty);
+
+            // Atomic displacement.
+            match ctx.accounts.dest_sector.as_deref_mut() {
+                None => {
+                    let s = ctx.accounts.target_sector.as_deref_mut().unwrap();
+                    s.clear_occupied(src_bit);
+                    s.set_occupied(dest_bit);
+                }
+                Some(dest) => {
+                    ctx.accounts
+                        .target_sector
+                        .as_deref_mut()
+                        .unwrap()
+                        .clear_occupied(src_bit);
+                    dest.set_occupied(dest_bit);
+                }
+            }
+
+            // Forced movement re-evaluates environmental hazards at the
+            // destination: being kicked into a river or a lane of traffic is
+            // fatal, but the environment is what kills.
+            let lane = lane_for_row(ctx.accounts.chunk.as_deref().unwrap(), dy)?;
+            let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
+            let target = ctx.accounts.target.as_deref_mut().unwrap();
+            target.x = dx;
+            target.y = dy;
+            target.hazard_nonce = target.hazard_nonce.wrapping_add(1);
+            target.hazard_deadline_ms = if hazard::is_lethal(&descriptor, dx, t_ms) {
+                t_ms // immediate: next check_hazard resolves the death
+            } else {
+                hazard::next_hazard_deadline_ms(&descriptor, dx, t_ms).unwrap_or(0)
+            };
         }
     }
-    target.x = dx;
-    target.y = dy;
 
-    // Forced movement re-evaluates environmental hazards at the destination.
-    let t_ms = world_time_ms(world, now)?;
-    require!(
-        ctx.accounts.chunk.day == world.day,
-        CrossyError::BadChunkState
-    );
-    let lane = lane_for_row(&ctx.accounts.chunk, dy)?;
-    let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
-    target.hazard_nonce = target.hazard_nonce.wrapping_add(1);
-    target.hazard_deadline_ms = if hazard::is_lethal(&descriptor, dx, t_ms) {
-        t_ms // immediate: next check_hazard resolves the death
-    } else {
-        hazard::next_hazard_deadline_ms(&descriptor, dx, t_ms).unwrap_or(0)
-    };
-
-    // Cooldown starts on successful displacement only. No kill credit.
+    // The swing costs the same whether or not it landed. No kill credit.
+    let kicker = &mut ctx.accounts.kicker;
     kicker.kick_ready_ts = now
         .checked_add(KICK_COOLDOWN_SECONDS)
         .ok_or(CrossyError::Overflow)?;
@@ -156,6 +151,58 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
     Ok(())
+}
+
+/// Does the swing actually connect? Every condition here is a *miss*, not an
+/// error: the kick already happened. Only a genuine account-wiring mistake
+/// (sectors that do not cover the tiles they claim to) is rejected, so that
+/// a malformed transaction can never silently skip occupancy bookkeeping.
+fn kick_connects(
+    ctx: &Context<Kick>,
+    tx: u8,
+    ty: u16,
+    facing: Direction,
+    now: i64,
+    revealed_rows: u16,
+    world_day: u64,
+) -> Result<bool> {
+    let (Some(target), Some(target_sector), Some(chunk)) = (
+        ctx.accounts.target.as_deref(),
+        ctx.accounts.target_sector.as_deref(),
+        ctx.accounts.chunk.as_deref(),
+    ) else {
+        return Ok(false); // swung at empty space
+    };
+    // Someone is there, they are alive, and they are not braced.
+    if target.state != RunState::Active
+        || target.x != tx
+        || target.y != ty
+        || now < target.anchor_until
+    {
+        return Ok(false);
+    }
+    // Knockback destination: one tile further in the same direction.
+    let Some((dx, dy)) = grid::step(tx, ty, facing) else {
+        return Ok(false); // would leave the world
+    };
+    if dy >= revealed_rows || chunk.day != world_day {
+        return Ok(false);
+    }
+    let world_key = ctx.accounts.world.key();
+    assert_sector(target_sector, &world_key, tx, ty)?;
+    let dest_view = match ctx.accounts.dest_sector.as_deref() {
+        Some(dest) => {
+            assert_sector(dest, &world_key, dx, dy)?;
+            dest
+        }
+        None => {
+            assert_sector(target_sector, &world_key, dx, dy)?;
+            target_sector
+        }
+    };
+    // A wall or another player behind them absorbs the kick.
+    let dest_bit = grid::sector_bit(dx, dy);
+    Ok(!dest_view.is_blocked(dest_bit) && !dest_view.is_occupied(dest_bit))
 }
 
 // ---------------------------------------------------------------------------
