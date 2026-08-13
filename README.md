@@ -4,6 +4,8 @@ This private repository is the standalone product workspace for the contract-fir
 
 Frontend work starts with the consolidated [`docs/FRONTEND.md`](docs/FRONTEND.md).
 
+Art and asset work starts with [`docs/ASSETS.md`](docs/ASSETS.md), which records every supplied source pack, licensing status, curation rule, and runtime conversion requirement.
+
 It is bootstrapped from the open-source solsocket starter so its MagicBlock connection, session, delegation, and subscription patterns can be selectively adapted. The generic solsocket engine is reference code, not the authoritative Crossy World game contract. Read [`AGENTS.md`](AGENTS.md) before making changes.
 
 `VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Keep this repository private and do not redistribute the raw pack.

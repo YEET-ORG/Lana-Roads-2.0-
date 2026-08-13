@@ -16,6 +16,7 @@ This is the master specification for the complete Lana Roads frontend. It combin
 
 Frontend implementation agents must begin here. Supporting documents remain authoritative for deeper subsystem details:
 
+- [Source asset catalog and runtime policy](./ASSETS.md)
 - [Product and protocol design](./superpowers/specs/2026-08-13-crossy-world-design.md)
 - [Contract and economy](./superpowers/specs/2026-08-13-crossy-world-contract-economy-spec.md)
 - [MagicBlock gameplay integration](./superpowers/specs/2026-08-13-crossy-world-magicblock-integration-spec.md)

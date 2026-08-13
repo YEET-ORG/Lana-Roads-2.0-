@@ -13,13 +13,14 @@ This repository is the standalone Crossy World product. The open-source solsocke
 Read the specification suite before changing architecture or behavior:
 
 1. `docs/FRONTEND.md` — master frontend design and engineering source of truth.
-2. `docs/specs/crossy-world-design.md` — approved product rules.
-3. `docs/specs/contract-economy.md` — durable accounts, payments, NFTs, gacha, marketplace, settlement.
-4. `docs/specs/magicblock-integration.md` — realtime accounts, sessions, movement, hazards, VRF, cranks.
-5. `docs/specs/frontend-threejs.md` — detailed React/Vite/Three.js architecture.
-6. `docs/specs/visual-ui-motion.md` — detailed art direction, responsive screens, icons, and motion.
-7. `docs/specs/sdk-indexing.md` — client workflows, subscriptions, indexer boundaries.
-8. `docs/specs/testing-security-operations.md` — verification and launch requirements.
+2. `docs/ASSETS.md` — source-pack inventory, license status, and conversion policy.
+3. `docs/specs/crossy-world-design.md` — approved product rules.
+4. `docs/specs/contract-economy.md` — durable accounts, payments, NFTs, gacha, marketplace, settlement.
+5. `docs/specs/magicblock-integration.md` — realtime accounts, sessions, movement, hazards, VRF, cranks.
+6. `docs/specs/frontend-threejs.md` — detailed React/Vite/Three.js architecture.
+7. `docs/specs/visual-ui-motion.md` — detailed art direction, responsive screens, icons, and motion.
+8. `docs/specs/sdk-indexing.md` — client workflows, subscriptions, indexer boundaries.
+9. `docs/specs/testing-security-operations.md` — verification and launch requirements.
 
 When documents conflict, the approved product design wins. The contract specification owns durable money/NFT state; the MagicBlock specification owns active delegated gameplay. Frontend, SDK, indexer, and operator services may project authority but cannot redefine it.
 
