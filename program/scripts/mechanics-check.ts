@@ -263,8 +263,14 @@ async function main() {
     return { player, session, er, runPda, bestPda };
   }
 
-  const move = async (p: any, dir: number) => {
-    const run = await p.er.account.playerRun.fetch(p.runPda());
+  /**
+   * `known` skips the state fetch. Timed moves — jumping onto a moving log —
+   * must go out as soon as the window is checked; an extra round trip in
+   * between is long enough for the hazard to advance a tick and turn a good
+   * jump into a drowning.
+   */
+  const move = async (p: any, dir: number, known?: any) => {
+    const run = known ?? (await p.er.account.playerRun.fetch(p.runPda()));
     const [nx, ny] =
       dir === 0
         ? [run.x, run.y + 1]
@@ -301,9 +307,14 @@ async function main() {
       if (Object.keys(run.state)[0] !== "active") return run;
       if (run.y >= row) return run;
       const ahead = lanes[run.y + 1];
-      if (ahead && !safeToEnter(ahead, run.x, Date.now() - startMs)) {
-        // Not survivable this instant. Hold; if the tile stays hostile for
-        // a while, shuffle sideways and try a different column.
+      const now = Date.now() - startMs;
+      // The gap has to survive the transaction's flight, not just exist when
+      // the client looks. Hazards advance on whole authoritative seconds and
+      // the round trip is a good fraction of one, so a gap checked at send
+      // time can be gone on arrival.
+      if (ahead && !stableOver((t) => safeToEnter(ahead, run.x, t), now, now + 1_000)) {
+        // Not survivable. Hold; if the tile stays hostile for a while,
+        // shuffle sideways and try a different column.
         waited++;
         if (waited > 12) {
           waited = 0;
@@ -376,55 +387,65 @@ async function main() {
   if (riverRow > 0 && (PHASE === "all" || PHASE === "river")) {
     console.log(`\n[river] river at row ${riverRow}`);
     const lane = lanes[riverRow];
-    const p = await newPlayer("river");
-    let run: any = await walkTo(p, riverRow - 1);
     let carried = false;
     let boardedAt = -1;
-    if (Object.keys(run.state)[0] === "active" && run.y === riverRow - 1) {
-      // Board when a log is actually under the tile ahead.
-      for (let i = 0; i < 400 && boardedAt < 0; i++) {
-        run = await p.er.account.playerRun.fetch(p.runPda());
-        if (Object.keys(run.state)[0] !== "active") break;
-        if (run.y !== riverRow - 1) break;
-        const now = Date.now() - startMs;
-        // Board a log that will still be under the tile on arrival.
-        if (stableOver((t) => safeToEnter(lane, run.x, t), now + 200, now + 1_200)) {
-          await move(p, 0).catch(() => {});
+    let windows = 0;
+    let run: any = null;
+    // Boarding is a timed jump onto a moving platform over a ~500ms link, so
+    // a mistimed attempt drowns — which is the collision rule working, not a
+    // carry failure. Take a fresh runner rather than reporting the drowning.
+    for (let attempt = 0; attempt < 3 && !carried; attempt++) {
+      const p = await newPlayer(`river-${attempt + 1}`);
+      boardedAt = -1;
+      run = await walkTo(p, riverRow - 1);
+      if (Object.keys(run.state)[0] === "active" && run.y === riverRow - 1) {
+        // Board when a log is actually under the tile ahead.
+        for (let i = 0; i < 400 && boardedAt < 0; i++) {
           run = await p.er.account.playerRun.fetch(p.runPda());
-          if (run.y === riverRow && Object.keys(run.state)[0] === "active") {
-            boardedAt = run.x;
+          if (Object.keys(run.state)[0] !== "active") break;
+          if (run.y !== riverRow - 1) break;
+          const now = Date.now() - startMs;
+          // Board a log that will still be under the tile on arrival.
+          if (stableOver((t) => safeToEnter(lane, run.x, t), now, now + 1_000)) {
+            windows++;
+            // Send immediately with the state already in hand.
+            await move(p, 0, run).catch(() => {});
+            run = await p.er.account.playerRun.fetch(p.runPda());
+            if (run.y === riverRow && Object.keys(run.state)[0] === "active") {
+              boardedAt = run.x;
+            }
           }
+          await sleep(100);
         }
-        await sleep(100);
-      }
-      // Aboard: crank and watch the log move us instead of drowning us.
-      const drift = lane.dirPositive === 1 ? 1 : -1;
-      for (let i = 0; i < 80 && boardedAt >= 0; i++) {
-        run = await p.er.account.playerRun.fetch(p.runPda());
-        if (Object.keys(run.state)[0] !== "active") break;
-        if (run.y !== riverRow) break;
-        if (run.x !== boardedAt) {
-          carried = true;
-          break;
+        // Aboard: crank and watch the log move us instead of drowning us.
+        const drift = lane.dirPositive === 1 ? 1 : -1;
+        for (let i = 0; i < 80 && boardedAt >= 0; i++) {
+          run = await p.er.account.playerRun.fetch(p.runPda());
+          if (Object.keys(run.state)[0] !== "active") break;
+          if (run.y !== riverRow) break;
+          if (run.x !== boardedAt) {
+            carried = true;
+            break;
+          }
+          const nx = run.x + drift;
+          const here = sectorPda(Math.floor(run.x / 8), Math.floor(run.y / 8));
+          const there =
+            nx >= 0 && nx <= 63
+              ? sectorPda(Math.floor(nx / 8), Math.floor(run.y / 8))
+              : here;
+          await p.er.methods
+            .checkHazard(run.hazardNonce)
+            .accountsPartial({
+              world,
+              run: p.runPda(),
+              sector: here,
+              driftSector: there.equals(here) ? null : there,
+              chunk: chunkPda(Math.floor(run.y / 16)),
+            })
+            .rpc({ skipPreflight: true, commitment: "processed" })
+            .catch(() => {});
+          await sleep(250);
         }
-        const nx = run.x + drift;
-        const here = sectorPda(Math.floor(run.x / 8), Math.floor(run.y / 8));
-        const there =
-          nx >= 0 && nx <= 63
-            ? sectorPda(Math.floor(nx / 8), Math.floor(run.y / 8))
-            : here;
-        await p.er.methods
-          .checkHazard(run.hazardNonce)
-          .accountsPartial({
-            world,
-            run: p.runPda(),
-            sector: here,
-            driftSector: there.equals(here) ? null : there,
-            chunk: chunkPda(Math.floor(run.y / 16)),
-          })
-          .rpc({ skipPreflight: true, commitment: "processed" })
-          .catch(() => {});
-        await sleep(250);
       }
     }
     record(
@@ -433,7 +454,9 @@ async function main() {
       carried
         ? `boarded at x=${boardedAt}, carried to x=${run.x}`
         : boardedAt < 0
-          ? "never managed to board a log"
+          ? `never boarded: reached row ${run.y} (wanted ${riverRow - 1}), ` +
+            `state ${Object.keys(run.state)[0]}, ${windows} boarding windows seen, ` +
+            `lane fp=${lane.footprint} gap=${lane.gapTiles} speed=${lane.speedMtps}`
           : `stayed at x=${run.x}, state ${Object.keys(run.state)[0]}`,
     );
   } else if (PHASE === "all" || PHASE === "river") {
