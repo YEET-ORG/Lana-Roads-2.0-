@@ -8,6 +8,8 @@ It is bootstrapped from the open-source solsocket starter so its MagicBlock conn
 
 `VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Keep this repository private and do not redistribute the raw pack.
 
+The private source workspace also contains `Low_Poly_Cars_DevilsWorkShop_V03/` and `SportsCar_Yellow/`. Only the curated vehicle subset defined in [`docs/FRONTEND.md`](docs/FRONTEND.md) should be converted into distributable runtime derivatives; do not import every source model into the web bundle.
+
 ## Starter reference documentation
 
 <p align="center">

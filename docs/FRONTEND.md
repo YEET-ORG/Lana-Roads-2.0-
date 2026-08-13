@@ -514,6 +514,7 @@ An optional four-direction button pad can replace swipe recognition. It is off b
 - Endless 16-row chunks streamed around interest range.
 - Road, rail, river, safe, and blocked terrain have unmistakable silhouettes and colors.
 - Vehicles/logs/trains use deterministic transforms from canonical data/time.
+- Vehicle model selection comes from a canonical visual variant ID; clients never choose a random model independently.
 - Unrevealed frontier is visibly closed, not empty traversable space.
 - Static blockers match occupancy exactly.
 - World visuals never suggest a passable tile that authority rejects without a clear reason.
@@ -530,12 +531,63 @@ An optional four-direction button pad can replace swipe recognition. It is off b
 ### 10.4 Hazard readability
 
 - Vehicles: strong lane contrast and direction cues.
+- A curated vehicle roster is used instead of loading every source-pack model.
+- Compact cars, pickups, and buses must remain recognizable from the gameplay camera at mobile resolution.
+- Vehicle collision and occupied tile length come from canonical hazard data, never rendered mesh bounds.
+- Police lights, spoilers, exhausts, and other decorative parts are cosmetic and cannot change speed, collision, score, or rewards.
 - Trains: visual, audio, and optional haptic warning tied to canonical window.
 - Rivers: water motion distinct from safe blue UI accents.
 - Logs/platforms: clear support footprint and sinking phase.
 - Ability-altered lanes show temporary local effect without changing permanent chunk appearance.
 
-### 10.5 Interest management
+### 10.5 Curated vehicle asset roster
+
+The private source workspace contains two newly supplied vehicle sources:
+
+- `Low_Poly_Cars_DevilsWorkShop_V03/` — licensed low-poly vehicle pack with 11 model files across FBX, OBJ, and DAE formats.
+- `SportsCar_Yellow/` — standalone 220-vertex yellow sports car supplied with FBX, OBJ, DAE, and texture sources.
+
+The initial gameplay roster should deliberately use only a subset:
+
+| Runtime role      | Preferred source                                                     | Canonical footprint            | Initial use                                                      |
+| ----------------- | -------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| Compact car A     | `Low_Poly_Vehicles_car01`                                            | 1–2 tiles, fixed by simulation | common road traffic                                              |
+| Compact car B     | `Low_Poly_Vehicles_car02`                                            | same as compact A              | color/visual variety                                             |
+| Compact car C     | `Low_Poly_Vehicles_car03`                                            | same as compact A              | color/visual variety                                             |
+| Police car        | `Low_Poly_Vehicles_carPolice`                                        | same as compact A              | uncommon visual variant                                          |
+| Pickup            | choose one of `pickupTruck01` or `pickupTruck02` after camera review | simulation-defined             | medium silhouette traffic                                        |
+| Bus               | `Low_Poly_Vehicles_bus`                                              | longer multi-tile hazard       | uncommon long traffic                                            |
+| Yellow sports car | `SportsCar_Yellow`                                                   | simulation-defined             | candidate rare visual variant after provenance and camera review |
+
+The following files are not standalone traffic hazards and must not be registered as vehicles: `car_modeEngine`, `car_modLights`, `car_modPipes`, and `car_modSpoiler`. They are optional accessory meshes for authored cosmetic variants only. The unused pickup skin may be retained as a future visual variant without creating a new mechanical class.
+
+Vehicle selection rules:
+
+- Start with compact A/B/C, one pickup, and the bus; add police and sports variants only after gameplay-camera readability testing.
+- A visual variant may share geometry, footprint, and motion behavior with another variant.
+- Do not infer hazard speed or rarity from appearance. Canonical chunk/hazard state supplies archetype, direction, speed, timing, and footprint.
+- All players resolve the same canonical vehicle asset ID for a hazard.
+- If a client lacks an asset, it renders a footprint-correct fallback vehicle instead of hiding the hazard.
+- Long vehicles must visually cover every occupied tile without extending misleadingly into safe tiles.
+- Bright emissive police lights and headlights are quality-tiered, distance-capped, and never required to understand collision.
+- Source models remain private. Only optimized runtime derivatives approved for distribution ship to the web client.
+
+### 10.6 Vehicle conversion and optimization
+
+Each selected source vehicle is converted into one normalized GLB derivative:
+
+1. Import the FBX source when clean; use OBJ/DAE only as a recovery path.
+2. Apply transforms and normalize forward axis, origin, wheel contact, and scale against the canonical tile grid.
+3. Remove unused nodes, inaccessible interiors, duplicate materials, and hidden geometry.
+4. Combine accessory meshes only when an authored variant explicitly requires them.
+5. Bake or remap textures into the project color language; preserve strong roof/body contrast from the isometric camera.
+6. Produce compressed GLB with quantized geometry and appropriately sized WebP/KTX2 textures.
+7. Record source path, source license/provenance, output hash, dimensions, triangle count, material count, and runtime asset ID in the asset manifest.
+8. Validate silhouette, footprint alignment, travel direction, shadows, pooling, and low-quality fallback on a real mobile viewport.
+
+Recommended runtime IDs are stable semantic names such as `vehicle.compact.a`, `vehicle.compact.b`, `vehicle.pickup.a`, `vehicle.police.a`, `vehicle.bus.a`, and `vehicle.sport.yellow`. Filenames and pack-specific names must not leak into gameplay protocol fields.
+
+### 10.7 Interest management
 
 - Nearby players receive full models/animation.
 - Mid-distance players use reduced animation/LOD.
@@ -1085,6 +1137,8 @@ Against the current devnet vertical slice, the next frontend implementation work
 - [ ] Recompose Home as living-world room selection.
 - [ ] Build agent carousel and asset manifest.
 - [ ] Convert selected VoxelAnimals to GLB and portraits.
+- [ ] Convert the curated compact cars, one pickup, and bus to normalized GLB vehicle variants.
+- [ ] Add canonical vehicle asset IDs, footprint-correct fallback models, and a provenance manifest.
 - [ ] Implement camera route states and transitions.
 - [ ] Redesign entry and revival state machines visually.
 - [ ] Add interruption/settings/accessibility controls.
