@@ -40,6 +40,7 @@ interface Hud {
   state: string;
   pending: boolean;
   lastRejection: string | null;
+  pingMs: number | null;
 }
 
 interface DeathInfo {
@@ -69,6 +70,7 @@ export function GameScreen({
     state: "connecting",
     pending: false,
     lastRejection: null,
+    pingMs: null,
   });
   const [death, setDeath] = useState<DeathInfo | null>(null);
   const [reviving, setReviving] = useState(false);
@@ -113,7 +115,18 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Scene lifecycle + canonical state polling/subscription.
+  // Live state (solsocket-style): authoritative pushes from ONE ER
+  // websocket subscription; the local run mirror also advances optimistically
+  // so the input hot path never waits on a fetch.
+  const liveRun = useRef<{
+    x: number;
+    y: number;
+    seq: number;
+    attempt: number;
+    state: string;
+    score: number;
+  } | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current!;
     const scene = new WorldScene(canvas);
@@ -122,20 +135,50 @@ export function GameScreen({
     window.addEventListener("resize", onResize);
 
     let live = true;
+    const me = boot.wallet.publicKey.toBase58();
+    const remotes = new Map<string, { x: number; y: number; state: string }>();
 
-    // Load revealed chunks into the scene.
-    (async () => {
-      const worldAcc = await boot.client
-        .getWorld(route.mode, route.day)
-        .catch(() => null);
-      if (!worldAcc || !live) return;
-      scene.worldTimeOffsetMs =
-        Date.now() -
-        Number(worldAcc.startTs.toString()) * 1000 -
-        performance.now() +
-        performance.now();
+    const applyRun = (run: any) => {
+      const wallet = run.wallet.toBase58();
+      const state = Object.keys(run.state)[0] ?? "?";
+      if (wallet === me) {
+        const mine = liveRun.current;
+        liveRun.current = {
+          x: run.x,
+          y: run.y,
+          // Never regress the optimistic sequence: in-flight moves may
+          // already be ahead of this push.
+          seq: Math.max(run.actionSeq.toNumber(), mine?.seq ?? 0),
+          attempt: run.attemptNonce,
+          state,
+          score: run.score,
+        };
+        scene.setLocal(run.x, run.y);
+        setHud((h) => ({ ...h, score: run.score, x: run.x, y: run.y, state }));
+        if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
+          setDeath({
+            deathNonce: run.deathNonce,
+            deadline: Number(run.reviveDeadline.toString()),
+            price: revivePrice(run.successfulRevives),
+          });
+        } else if (state === "active") {
+          setDeath(null);
+        }
+      } else {
+        if (state === "active") remotes.set(wallet, { x: run.x, y: run.y, state });
+        else remotes.delete(wallet);
+        scene.setRemotes(
+          [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
+        );
+      }
+    };
+
+    // Chunk/lane loading (repeats when the frontier grows).
+    let loadedChunks = 0;
+    const loadChunks = async (revealedRows: number) => {
+      const worldAcc = { revealedRows };
       const chunks = Math.ceil(worldAcc.revealedRows / 16);
-      for (let c = 0; c < chunks; c++) {
+      for (let c = loadedChunks; c < chunks; c++) {
         const chunk = await boot.client.getChunk(route.day, c).catch(() => null);
         if (!chunk || !live) continue;
         chunk.lanes.forEach((lane: any, i: number) => {
@@ -152,46 +195,52 @@ export function GameScreen({
             sinking: lane.sinking,
           });
         });
+        loadedChunks = c + 1;
       }
-    })();
+    };
 
-    // Canonical run/world refresh loop (subscription-driven refinement comes
-    // with the indexer milestone; polling keeps the slice simple).
-    const poll = setInterval(async () => {
+    // The realtime feed: every run/sector of this world + the world header.
+    const unsubscribe = boot.client.subscribeWorldRealtime({
+      world,
+      onRun: (run) => live && applyRun(run),
+      onWorld: (w) => {
+        if (!live) return;
+        setHud((h) => ({ ...h, record: w.recordScore }));
+        void loadChunks(w.revealedRows);
+      },
+    });
+
+    // Bootstrap + 5s reconciliation sweep (sequence-gap safety net, per the
+    // spec: subscriptions are the fast path, refetch heals any gap).
+    const reconcile = async () => {
+      const [run, worldAcc] = await Promise.all([
+        boot.client.getRun(world).catch(() => null),
+        boot.client.getWorld(route.mode, route.day).catch(() => null),
+      ]);
       if (!live) return;
-      const run = await boot.client.getRun(world).catch(() => null);
-      const worldAcc = await boot.client
-        .getWorld(route.mode, route.day)
-        .catch(() => null);
-      if (!run || !live) return;
-      const state = Object.keys(run.state)[0] ?? "?";
-      scene.setLocal(run.x, run.y);
-      setHud((h) => ({
-        ...h,
-        score: run.score,
-        record: worldAcc?.recordScore ?? h.record,
-        x: run.x,
-        y: run.y,
-        state,
-      }));
-      if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
-        setDeath({
-          deathNonce: run.deathNonce,
-          deadline: Number(run.reviveDeadline.toString()),
-          price: revivePrice(run.successfulRevives),
-        });
-      } else if (state === "active") {
-        setDeath(null);
+      if (worldAcc) {
+        scene.worldTimeOffsetMs =
+          Date.now() - Number(worldAcc.startTs.toString()) * 1000 - performance.now() + performance.now();
+        setHud((h) => ({ ...h, record: worldAcc.recordScore }));
+        await loadChunks(worldAcc.revealedRows);
       }
-      // Record propagation: strictly-improving scores claim the record.
-      if (worldAcc && run.score > worldAcc.recordScore && state === "active") {
-        boot.client.claimRecord(route.day, route.mode).catch(() => {});
-      }
-    }, 700);
+      if (run) applyRun(run);
+    };
+    void reconcile();
+    const sweep = setInterval(() => void reconcile(), 5000);
+
+    // Ping meter: ER RPC round-trip every 3s.
+    const pingTimer = setInterval(async () => {
+      const t0 = performance.now();
+      await boot.client.erConnection.getSlot("processed").catch(() => null);
+      if (live) setHud((h) => ({ ...h, pingMs: Math.round(performance.now() - t0) }));
+    }, 3000);
 
     return () => {
       live = false;
-      clearInterval(poll);
+      clearInterval(sweep);
+      clearInterval(pingTimer);
+      unsubscribe();
       window.removeEventListener("resize", onResize);
       scene.destroy();
       sceneRef.current = null;
@@ -199,52 +248,45 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
 
-  // Input: one in-flight action; predict one tile, reconcile on rejection.
+  // Input: fire-and-forget with local prediction. The session key signs and
+  // pays (zero-fee ER); authority corrections arrive on the subscription.
   useEffect(() => {
-    const detach = attachInput(async (action) => {
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setHud((h) => ({ ...h, pending: true, lastRejection: null }));
-      try {
-        if (action.kind === "move") {
-          // Optimistic single-tile prediction (presentation only).
-          const dx =
-            action.direction === Direction.Left
-              ? -1
-              : action.direction === Direction.Right
-                ? 1
-                : 0;
-          const dy =
-            action.direction === Direction.Forward
-              ? 1
-              : action.direction === Direction.Backward
-                ? -1
-                : 0;
-          setHud((h) => {
-            sceneRef.current?.setLocal(h.x + dx, h.y + dy);
-            return h;
-          });
-          await boot.client.move({
+    let lastMoveAt = 0;
+    const detach = attachInput((action) => {
+      const mine = liveRun.current;
+      if (!mine || mine.state !== "active") return;
+      if (action.kind === "move") {
+        const now = performance.now();
+        if (now - lastMoveAt < 60) return; // debounce bursts
+        lastMoveAt = now;
+        const dx = action.direction === Direction.Left ? -1 : action.direction === Direction.Right ? 1 : 0;
+        const dy = action.direction === Direction.Forward ? 1 : action.direction === Direction.Backward ? -1 : 0;
+        const [nx, ny] = [mine.x + dx, mine.y + dy];
+        if (nx < 0 || nx > 63 || ny < 0) return;
+        const sent = {
+          x: mine.x,
+          y: mine.y,
+          attemptNonce: mine.attempt,
+          actionSeq: mine.seq,
+        };
+        // Optimistic: advance the local mirror + visual immediately.
+        liveRun.current = { ...mine, x: nx, y: ny, seq: mine.seq + 1 };
+        sceneRef.current?.setLocal(nx, ny);
+        setHud((h) => ({ ...h, pending: true, lastRejection: null, x: nx, y: ny }));
+        boot.client
+          .sendMove({
             day: route.day,
             mode: route.mode,
             direction: action.direction,
             session: boot.session,
-          });
-        } else if (action.kind === "kick") {
-          // Kick needs a target; the slice scans the facing tile occupant via
-          // canonical sector state and skips silently when empty.
-          setHud((h) => ({ ...h, lastRejection: "kick: no adjacent target" }));
-        }
-      } catch (e) {
-        console.error("action failed:", e);
-        // Rejection: snap the visual back to canonical state.
-        setHud((h) => {
-          sceneRef.current?.setLocal(h.x, h.y);
-          return { ...h, lastRejection: errorText(e) };
-        });
-      } finally {
-        busyRef.current = false;
-        setHud((h) => ({ ...h, pending: false }));
+            ...sent,
+          })
+          .catch((e) => {
+            setHud((h) => ({ ...h, lastRejection: errorText(e) }));
+          })
+          .finally(() => setHud((h) => ({ ...h, pending: false })));
+      } else if (action.kind === "kick") {
+        setHud((h) => ({ ...h, lastRejection: "kick: aim at an adjacent player" }));
       }
     });
     return detach;
@@ -308,6 +350,15 @@ export function GameScreen({
         {hud.lastRejection && <div className="rejection">✕ {hud.lastRejection}</div>}
       </div>
       <div className="hud top-right">
+        {hud.pingMs != null && (
+          <span
+            className={
+              hud.pingMs < 150 ? "ping good" : hud.pingMs < 400 ? "ping mid" : "ping bad"
+            }
+          >
+            {hud.pingMs}ms
+          </span>
+        )}
         <span className={route.mode === WorldMode.Paid ? "badge paid" : "badge casual"}>
           {route.mode === WorldMode.Paid ? "PAID" : "CASUAL — FREE"}
         </span>

@@ -575,6 +575,132 @@ export class CrossyClient {
       .rpc();
   }
 
+  /** Cached ER blockhash for the zero-fee fire-and-forget hot path. */
+  private erBlockhashCache: { value: string; fetchedAt: number } | null = null;
+
+  private async erBlockhash(): Promise<string> {
+    const now = Date.now();
+    if (!this.erBlockhashCache || now - this.erBlockhashCache.fetchedAt > 15_000) {
+      const { blockhash } = await this.erConnection.getLatestBlockhash("processed");
+      this.erBlockhashCache = { value: blockhash, fetchedAt: now };
+    }
+    return this.erBlockhashCache.value;
+  }
+
+  /**
+   * Fire-and-forget movement (the solsocket hot path): the SESSION key is
+   * the fee payer (ER transactions are zero-fee, so it never needs SOL) and
+   * the only signer; the transaction is sent with skipPreflight and NOT
+   * awaited — authority arrives via the realtime subscription, and the
+   * caller supplies current position/sequence instead of refetching.
+   */
+  async sendMove(params: {
+    day: bigint;
+    mode?: WorldMode;
+    direction: Direction;
+    session: Keypair;
+    x: number;
+    y: number;
+    attemptNonce: number;
+    actionSeq: number;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    let [nx, ny] = [params.x, params.y];
+    if (params.direction === Direction.Forward) ny += 1;
+    else if (params.direction === Direction.Backward) ny -= 1;
+    else if (params.direction === Direction.Left) nx -= 1;
+    else nx += 1;
+    if (nx < 0 || nx > 63 || ny < 0) throw new Error("out of bounds");
+    const src = sectorForTile(world, params.x, params.y);
+    const dst = sectorForTile(world, nx, ny);
+    const ix = await this.erProgram.methods
+      .moveAction(
+        params.attemptNonce,
+        new BN(params.actionSeq),
+        params.direction,
+        new BN(Date.now() * 8 + params.direction),
+      )
+      .accountsPartial({
+        world,
+        run: pda.run(world, wallet),
+        sourceSector: src,
+        destSector: dst.equals(src) ? null : dst,
+        chunk: pda.chunk(params.day, Math.floor(ny / 16)),
+        best: pda.best(world, wallet),
+        signer: params.session.publicKey,
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.erConnection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+    });
+  }
+
+  /**
+   * Solsocket-style realtime feed: ONE processed-commitment programSubscribe
+   * on the ER websocket, filtered by the world address at offset 8 — which
+   * matches every PlayerRun, OccupancySector, and DailyBest of that world.
+   * Decoded pushes arrive at ER slot time (~50ms); a separate account
+   * subscription covers the WorldHeader itself.
+   */
+  subscribeWorldRealtime(params: {
+    world: PublicKey;
+    onRun?: (run: any, slot: number) => void;
+    onSector?: (sector: any, slot: number) => void;
+    onWorld?: (world: any, slot: number) => void;
+  }): () => void {
+    const subId = this.erConnection.onProgramAccountChange(
+      this.program.programId,
+      (keyed, ctx) => {
+        const data = Buffer.from(keyed.accountInfo.data);
+        try {
+          const run = this.program.coder.accounts.decode("playerRun", data);
+          params.onRun?.(run, ctx.slot);
+          return;
+        } catch {
+          /* not a run */
+        }
+        try {
+          const sector = this.program.coder.accounts.decode("occupancySector", data);
+          params.onSector?.(sector, ctx.slot);
+          return;
+        } catch {
+          /* not a sector */
+        }
+      },
+      {
+        commitment: "processed",
+        filters: [{ memcmp: { offset: 8, bytes: params.world.toBase58() } }],
+      },
+    );
+    let worldSubId: number | null = null;
+    if (params.onWorld) {
+      worldSubId = this.erConnection.onAccountChange(
+        params.world,
+        (info, ctx) => {
+          try {
+            const w = this.program.coder.accounts.decode("worldHeader", Buffer.from(info.data));
+            params.onWorld?.(w, ctx.slot);
+          } catch {
+            /* not yet initialized on this plane */
+          }
+        },
+        { commitment: "processed" },
+      );
+    }
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      void this.erConnection.removeProgramAccountChangeListener(subId);
+      if (worldSubId != null) void this.erConnection.removeAccountChangeListener(worldSubId);
+    };
+  }
+
   // ---- interest management ---------------------------------------------
 
   /**

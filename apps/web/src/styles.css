@@ -187,3 +187,18 @@ button.ghost {
 .death h2 {
   color: #ff7a7a;
 }
+.ping {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+}
+.ping.good {
+  color: #7dff9a;
+}
+.ping.mid {
+  color: #ffd23f;
+}
+.ping.bad {
+  color: #ff7a7a;
+}

@@ -44,6 +44,8 @@ export class WorldScene {
   private lanes = new Map<number, Lane>();
   private movers = new Map<number, THREE.Mesh[]>();
   private players = new Map<string, THREE.Mesh>();
+  /** Remote lerp targets (smoothPresence-style interpolation). */
+  private remoteTargets = new Map<string, THREE.Vector3>();
   private localMesh: THREE.Mesh;
   private raf = 0;
   private disposed = false;
@@ -168,7 +170,10 @@ export class WorldScene {
         this.players.set(p.wallet, mesh);
         this.scene.add(mesh);
       }
-      mesh.position.set(p.x + 0.5, 0.35, -p.y);
+      const target = new THREE.Vector3(p.x + 0.5, 0.35, -p.y);
+      this.remoteTargets.set(p.wallet, target);
+      // First sighting snaps into place; afterwards the render loop lerps.
+      if (mesh.position.lengthSq() === 0) mesh.position.copy(target);
     }
     for (const [wallet, mesh] of this.players) {
       if (!seen.has(wallet)) {
@@ -176,6 +181,7 @@ export class WorldScene {
         mesh.geometry.dispose();
         (mesh.material as THREE.Material).dispose();
         this.players.delete(wallet);
+        this.remoteTargets.delete(wallet);
       }
     }
   }
@@ -187,6 +193,9 @@ export class WorldScene {
 
     // Smooth local follow + camera.
     this.localMesh.position.lerp(this.localTarget, 0.25);
+    for (const [wallet, target] of this.remoteTargets) {
+      this.players.get(wallet)?.position.lerp(target, 0.2);
+    }
     const cam = this.localMesh.position;
     this.camera.position.set(cam.x, 14, cam.z + 10);
     this.camera.lookAt(cam.x, 0, cam.z - 3);
