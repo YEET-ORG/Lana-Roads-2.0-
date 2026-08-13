@@ -160,24 +160,53 @@ export function GameScreen({
     const remotes = new Map<string, { x: number; y: number; state: string }>();
     occupiedRef.current = remotes;
 
-    const applyRun = (run: any) => {
+    const applyRun = (run: any, force = false) => {
       const wallet = run.wallet.toBase58();
       const state = Object.keys(run.state)[0] ?? "?";
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
         const mine = liveRun.current;
-        liveRun.current = {
-          x: run.x,
-          y: run.y,
-          // Never regress the optimistic sequence: in-flight moves may
-          // already be ahead of this push.
-          seq: Math.max(run.actionSeq.toNumber(), mine?.seq ?? 0),
-          attempt: run.attemptNonce,
-          state,
-          score: run.score,
-        };
-        scene.setLocal(run.x, run.y);
-        setHud((h) => ({ ...h, score: run.score, x: run.x, y: run.y, state }));
+        const authSeq = run.actionSeq.toNumber();
+        // While optimistic moves are still in flight (our local sequence is
+        // ahead of this push), keep the predicted position — snapping to the
+        // older authoritative tile rubber-bands every single move. The
+        // authoritative position wins when it has caught up (or when the
+        // silence reconciler forces a heal).
+        const inFlight = !force && mine != null && mine.seq > authSeq;
+        if (inFlight) {
+          liveRun.current = {
+            ...mine!,
+            attempt: run.attemptNonce,
+            state,
+            score: Math.max(run.score, mine!.score),
+          };
+        } else {
+          liveRun.current = {
+            x: run.x,
+            y: run.y,
+            seq: authSeq,
+            attempt: run.attemptNonce,
+            state,
+            score: run.score,
+          };
+          scene.setLocal(run.x, run.y);
+        }
+        // HUD updates only when something visible changed (uncontrolled
+        // re-renders on every ~50ms push cause visible jank).
+        setHud((h) =>
+          h.score === run.score &&
+          h.state === state &&
+          h.x === liveRun.current!.x &&
+          h.y === liveRun.current!.y
+            ? h
+            : {
+                ...h,
+                score: liveRun.current!.score,
+                x: liveRun.current!.x,
+                y: liveRun.current!.y,
+                state,
+              },
+        );
         if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
           setDeath({
             deathNonce: run.deathNonce,
@@ -250,7 +279,7 @@ export function GameScreen({
         setHud((h) => ({ ...h, record: worldAcc.recordScore }));
         await loadChunks(worldAcc.revealedRows);
       }
-      if (run) applyRun(run);
+      if (run) applyRun(run, true);
     };
     void reconcile();
     reconcileNowRef.current = () => void reconcile();
@@ -324,7 +353,11 @@ export function GameScreen({
         // Optimistic: advance the local mirror + visual immediately.
         liveRun.current = { ...mine, x: nx, y: ny, seq: mine.seq + 1 };
         sceneRef.current?.setLocal(nx, ny);
-        setHud((h) => ({ ...h, pending: true, lastRejection: null, x: nx, y: ny }));
+        setHud((h) =>
+          h.lastRejection == null && h.x === nx && h.y === ny
+            ? h
+            : { ...h, lastRejection: null, x: nx, y: ny },
+        );
         boot.client
           .sendMove({
             day: route.day,
@@ -336,7 +369,7 @@ export function GameScreen({
           .catch((e) => {
             setHud((h) => ({ ...h, lastRejection: errorText(e) }));
           })
-          .finally(() => setHud((h) => ({ ...h, pending: false })));
+          .finally(() => {});
         // Silence reconciler: a REJECTED move produces no push (no state
         // change on-chain), which would strand the optimistic mirror. If no
         // authoritative push has arrived since this send, refetch now
