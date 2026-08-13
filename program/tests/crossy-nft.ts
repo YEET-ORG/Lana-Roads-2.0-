@@ -673,70 +673,82 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
       .signers([playerD])
       .rpc();
 
-    // Walk C adjacent to D, facing D, then kick.
+    // Walk C adjacent to D, facing D, then kick. The spawn zone is full of
+    // rocks and trees, so this has to route around obstacles rather than
+    // walk a straight line: try the directions that close the gap first,
+    // then any legal step, and never assume a move succeeded.
+    const stepOnce = async (
+      player: web3.Keypair,
+      run: any,
+      dir: number,
+      salt: number,
+    ) => {
+      let [nx, ny] = [run.x, run.y];
+      if (dir === 0) ny += 1;
+      else if (dir === 1) ny -= 1;
+      else if (dir === 2) nx -= 1;
+      else nx += 1;
+      if (nx < 0 || nx > 63 || ny < 0 || ny > 15) return "illegal";
+      const src = sectorPda(casualWorld, Math.floor(run.x / 8), Math.floor(run.y / 8));
+      const dst = sectorPda(casualWorld, Math.floor(nx / 8), Math.floor(ny / 8));
+      try {
+        await program.methods
+          .moveAction(1, new BN(run.actionSeq), dir, new BN(Date.now() + salt))
+          .accountsPartial({
+            world: casualWorld,
+            run: runPda(casualWorld, player.publicKey),
+            sourceSector: src,
+            destSector: dst.equals(src) ? null : dst,
+            chunk: spawnChunk,
+            best: bestPda(casualWorld, player.publicKey),
+            signer: player.publicKey,
+          })
+          .signers([player])
+          .rpc();
+        return "ok";
+      } catch (e) {
+        const msg = `${e}`;
+        // Cadence, a stale sequence from a late-confirming rpc, or transient
+        // occupancy: the step is fine, the timing is not.
+        if (
+          msg.includes("TooFast") ||
+          msg.includes("BadActionSequence") ||
+          msg.includes("TileOccupied")
+        ) {
+          return "retry";
+        }
+        if (msg.includes("Blocked")) return "blocked";
+        throw e;
+      }
+    };
+
     const moveTo = async (player: web3.Keypair, targetX: number, targetY: number) => {
-      for (let i = 0; i < 160; i++) {
+      for (let i = 0; i < 200; i++) {
         const run = await program.account.playerRun.fetch(
           runPda(casualWorld, player.publicKey),
         );
         if (run.x === targetX && run.y === targetY) return run;
-        let dir: number;
-        if (run.x < targetX) dir = 3;
-        else if (run.x > targetX) dir = 2;
-        else if (run.y < targetY) dir = 0;
-        else dir = 1;
-        let [nx, ny] = [run.x, run.y];
-        if (dir === 0) ny += 1;
-        else if (dir === 1) ny -= 1;
-        else if (dir === 2) nx -= 1;
-        else nx += 1;
-        const src = sectorPda(casualWorld, Math.floor(run.x / 8), Math.floor(run.y / 8));
-        const dst = sectorPda(casualWorld, Math.floor(nx / 8), Math.floor(ny / 8));
-        try {
-          await program.methods
-            .moveAction(1, new BN(run.actionSeq), dir, new BN(Date.now() + i))
-            .accountsPartial({
-              world: casualWorld,
-              run: runPda(casualWorld, player.publicKey),
-              sourceSector: src,
-              destSector: dst.equals(src) ? null : dst,
-              chunk: spawnChunk,
-              best: bestPda(casualWorld, player.publicKey),
-              signer: player.publicKey,
-            })
-            .signers([player])
-            .rpc();
-        } catch (e) {
-          const msg = `${e}`;
-          // Recoverable: cadence, a stale action sequence from a
-          // late-confirming rpc, or transient occupancy. Refetch and retry.
-          if (
-            msg.includes("TooFast") ||
-            msg.includes("BadActionSequence") ||
-            msg.includes("TileOccupied")
-          ) {
+        // Closing moves first, then sideways escapes so a wall never traps us.
+        const wanted: number[] = [];
+        if (run.x < targetX) wanted.push(3);
+        else if (run.x > targetX) wanted.push(2);
+        if (run.y < targetY) wanted.push(0);
+        else if (run.y > targetY) wanted.push(1);
+        const escapes = [3, 2, 0, 1].filter((d) => !wanted.includes(d));
+        let progressed = false;
+        for (const dir of [...wanted, ...escapes]) {
+          const outcome = await stepOnce(player, run, dir, i);
+          if (outcome === "ok") {
+            progressed = true;
+            break;
+          }
+          if (outcome === "retry") {
             await new Promise((r) => setTimeout(r, 600));
-          } else if (msg.includes("Blocked")) {
-            // The spawn zone has rocks and trees now, so a straight line to
-            // the target is not guaranteed. Step around on the other axis.
-            const detour = dir === 0 || dir === 1 ? (run.x < 60 ? 3 : 2) : 0;
-            await program.methods
-              .moveAction(1, new BN(run.actionSeq), detour, new BN(Date.now() + i))
-              .accountsPartial({
-                world: casualWorld,
-                run: runPda(casualWorld, player.publicKey),
-                sourceSector: src,
-                destSector: null,
-                chunk: spawnChunk,
-                best: bestPda(casualWorld, player.publicKey),
-                signer: player.publicKey,
-              })
-              .signers([player])
-              .rpc()
-              .catch(() => {});
-            await new Promise((r) => setTimeout(r, 300));
-          } else throw e;
+            progressed = true; // not stuck, just early
+            break;
+          }
         }
+        if (!progressed) await new Promise((r) => setTimeout(r, 300));
       }
       throw new Error("moveTo did not converge");
     };
@@ -1166,8 +1178,30 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
             .signers([playerC])
             .rpc();
         } catch (e) {
-          if (`${e}`.includes("TooFast") || `${e}`.includes("TileOccupied")) {
+          const msg = `${e}`;
+          if (msg.includes("TooFast") || msg.includes("TileOccupied")) {
             await new Promise((r) => setTimeout(r, 500));
+          } else if (msg.includes("Blocked")) {
+            // A rock or tree sits in this column: shuffle sideways and keep
+            // climbing. The spawn zone is scenery-filled now.
+            const side = run.x < 60 ? 3 : 2;
+            const sx = side === 3 ? run.x + 1 : run.x - 1;
+            const sdst = sectorPda(paidWorld, Math.floor(sx / 8), Math.floor(run.y / 8));
+            await program.methods
+              .moveAction(1, new BN(run.actionSeq), side, new BN(Date.now() + i))
+              .accountsPartial({
+                world: paidWorld,
+                run: runPda(paidWorld, c),
+                sourceSector: src,
+                destSector: sdst.equals(src) ? null : sdst,
+                chunk: spawnChunk,
+                best: bestPda(paidWorld, c),
+                signer: c,
+              })
+              .signers([playerC])
+              .rpc()
+              .catch(() => {});
+            await new Promise((r) => setTimeout(r, 200));
           } else throw e;
         }
       }

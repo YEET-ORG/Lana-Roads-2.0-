@@ -15,6 +15,9 @@ export const LANE_RAIL = 3;
 
 import { WORLD_WIDTH } from "./constants.js";
 
+/** Mirrors `kernel::hazard::MAX_CARRY_TILES`. */
+export const MAX_CARRY_TILES = 8;
+
 /** Bump in step with `kernel::vehicle::ROSTER_VERSION`. */
 export const ROSTER_VERSION = 1;
 

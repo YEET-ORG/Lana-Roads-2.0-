@@ -17,6 +17,7 @@ import {
   WorldMode,
 } from "./constants.js";
 import { pda, sectorForTile, sectorOf, spawnSectors } from "./pda.js";
+import { MAX_CARRY_TILES } from "./hazards.js";
 import { revivePrice, utcDayFromUnix } from "./time.js";
 import { SubscriptionHub } from "./subscriptions.js";
 
@@ -858,15 +859,14 @@ export class CrossyClient {
     driftDirection?: number;
   }): Promise<string> {
     const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
-    // A river can carry the player one tile downstream, which may cross a
-    // sector boundary — hand the program that sector so the ride is possible.
+    // A river carries the player downstream, by as many tiles as the log
+    // moved since it last checked — so hand over the sector at the far end
+    // of the longest carry it could make. Together with the player's own
+    // sector that covers every tile the carry could land on.
     const sector = sectorForTile(world, params.x, params.y);
     const drift = params.driftDirection ?? 0;
-    const driftX = params.x + drift;
-    const driftSector =
-      drift !== 0 && driftX >= 0 && driftX <= 63
-        ? sectorForTile(world, driftX, params.y)
-        : sector;
+    const driftX = Math.max(0, Math.min(63, params.x + drift * MAX_CARRY_TILES));
+    const driftSector = drift !== 0 ? sectorForTile(world, driftX, params.y) : sector;
     const ix = await this.erProgram.methods
       .checkHazard(params.hazardNonce)
       .accountsPartial({

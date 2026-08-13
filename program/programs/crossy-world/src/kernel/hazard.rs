@@ -11,6 +11,16 @@
 use super::chunkgen::{LaneDescriptor, LaneKind};
 use crate::constants::WORLD_WIDTH;
 
+/// How often a rider on a river tile is rescheduled for a hazard check.
+/// The carry logic reads this back to work out how long it has been since
+/// the rider was last known to be aboard.
+pub const RIVER_RECHECK_MS: u64 = 250;
+
+/// Most tiles a single carry may move a rider. A stall longer than this is
+/// pathological, and an unbounded carry could teleport someone across the
+/// world after a long outage.
+pub const MAX_CARRY_TILES: u64 = 8;
+
 /// Outcome of evaluating one tile at one authoritative instant.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TileState {
@@ -211,19 +221,34 @@ pub fn is_lethal(lane: &LaneDescriptor, x: u8, t_ms: u64) -> bool {
 /// exactly one tile behind the log's trailing edge, so the tile immediately
 /// downstream is the one still under the log. Following it is what "the log
 /// carries you" means on a tile grid.
-pub fn carry_target(lane: &LaneDescriptor, x: u8, t_ms: u64) -> Option<u8> {
+pub fn carry_target(lane: &LaneDescriptor, x: u8, t_ms: u64, tiles: u64) -> Option<u8> {
     if LaneKind::from_u8(lane.kind) != Some(LaneKind::River) {
         return None;
     }
+    let step = u8::try_from(tiles.clamp(1, MAX_CARRY_TILES)).ok()?;
     let next = if lane.dir_positive == 1 {
-        x.checked_add(1)?
+        x.checked_add(step)?
     } else {
-        x.checked_sub(1)?
+        x.checked_sub(step)?
     };
     if next >= WORLD_WIDTH {
         return None; // carried off the edge of the world
     }
     (evaluate_tile(lane, next, t_ms) == TileState::Supported).then_some(next)
+}
+
+/// Tiles the lane's conveyor advanced between two instants.
+///
+/// A rider is only ever unsupported because the log moved on without them,
+/// so the distance the log travelled since they were last confirmed aboard
+/// is exactly the distance they should be carried. Checking one tile ahead
+/// is only correct when the check is punctual; hazard checks are
+/// permissionless, and a client that stalls for two seconds would otherwise
+/// drown a rider who never left the log.
+pub fn conveyor_advance(lane: &LaneDescriptor, from_ms: u64, to_ms: u64) -> u64 {
+    traveled_tiles(lane, to_ms)
+        .saturating_sub(traveled_tiles(lane, from_ms))
+        .clamp(1, MAX_CARRY_TILES)
 }
 
 /// Earliest future instant (ms, strictly > t_ms) at which the tile *could*
@@ -251,8 +276,8 @@ pub fn next_hazard_deadline_ms(lane: &LaneDescriptor, x: u8, t_ms: u64) -> Optio
         }
         Some(LaneKind::River) => {
             // Standing on water: support may scroll away or sink. Conservative
-            // short deadline — recheck every 250ms while on a river tile.
-            Some(t_ms + 250)
+            // short deadline — recheck often while on a river tile.
+            Some(t_ms + RIVER_RECHECK_MS)
         }
         Some(LaneKind::Rail) => Some(t_ms + rail_next_transition_ms(lane, t_ms).max(1)),
     }
@@ -417,7 +442,7 @@ mod tests {
         // One second on, the log has moved to 1..4 and tile 0 is open water.
         assert_eq!(evaluate_tile(&lane, 0, 1_000), TileState::Lethal);
         // The rider is carried to tile 1, which is still under the log.
-        assert_eq!(carry_target(&lane, 0, 1_000), Some(1));
+        assert_eq!(carry_target(&lane, 0, 1_000, 1), Some(1));
         assert_eq!(evaluate_tile(&lane, 1, 1_000), TileState::Supported);
     }
 
@@ -433,13 +458,55 @@ mod tests {
             ..Default::default()
         };
         // Nothing downstream of the last column: the rider drowns.
-        assert_eq!(carry_target(&lane, WORLD_WIDTH - 1, 1_000), None);
+        assert_eq!(carry_target(&lane, WORLD_WIDTH - 1, 1_000, 1), None);
         // Moving the other way, column 0 has nowhere to drift either.
         lane.dir_positive = 0;
-        assert_eq!(carry_target(&lane, 0, 1_000), None);
+        assert_eq!(carry_target(&lane, 0, 1_000, 1), None);
         // Only rivers carry — roads and rails never do.
         lane.kind = LaneKind::Road as u8;
-        assert_eq!(carry_target(&lane, 10, 0), None);
+        assert_eq!(carry_target(&lane, 10, 0, 1), None);
+    }
+
+    #[test]
+    fn a_late_check_still_carries_the_rider() {
+        // One tile per second. A rider boards at tile 0 at t=0 and nobody
+        // checks for three seconds: the log is now three tiles along, and a
+        // one-tile lookahead would find open water and drown them.
+        let lane = LaneDescriptor {
+            kind: LaneKind::River as u8,
+            dir_positive: 1,
+            footprint: 2,
+            gap_tiles: 8,
+            speed_mtps: 1_000,
+            phase_mt: 0,
+            sinking: 0,
+            ..Default::default()
+        };
+        assert_eq!(evaluate_tile(&lane, 0, 0), TileState::Supported);
+        assert_eq!(evaluate_tile(&lane, 0, 3_000), TileState::Lethal);
+        assert_eq!(carry_target(&lane, 0, 3_000, 1), None, "the naive lookahead drowns them");
+
+        let advanced = conveyor_advance(&lane, 0, 3_000);
+        assert_eq!(advanced, 3);
+        assert_eq!(carry_target(&lane, 0, 3_000, advanced), Some(3));
+        assert_eq!(evaluate_tile(&lane, 3, 3_000), TileState::Supported);
+    }
+
+    #[test]
+    fn carrying_is_bounded_after_a_long_stall() {
+        let lane = LaneDescriptor {
+            kind: LaneKind::River as u8,
+            dir_positive: 1,
+            footprint: 2,
+            gap_tiles: 8,
+            speed_mtps: 1_000,
+            phase_mt: 0,
+            ..Default::default()
+        };
+        // An hour-long outage must not teleport anyone across the world.
+        assert_eq!(conveyor_advance(&lane, 0, 3_600_000), MAX_CARRY_TILES);
+        // And a check that arrives before any movement still tries one tile.
+        assert_eq!(conveyor_advance(&lane, 1_000, 1_000), 1);
     }
 
     #[test]

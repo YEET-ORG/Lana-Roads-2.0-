@@ -81,11 +81,23 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
     // anyone, follow the log one tile downstream and see if they are still
     // aboard. Riding off the world edge, or into an occupied tile, still
     // drowns.
-    if let Some(drift) = hazard::carry_target(&descriptor, run.x, t_ms) {
+    // How far has the log moved since we last knew the rider was aboard?
+    // The rider's own schedule records it: a river tile is always rebooked
+    // one recheck interval ahead, so the deadline minus that interval is the
+    // last instant they were confirmed on the log. Carrying by exactly that
+    // distance means a late check cannot drown someone who never fell in.
+    let last_confirmed_ms = run
+        .hazard_deadline_ms
+        .saturating_sub(hazard::RIVER_RECHECK_MS);
+    let advance = hazard::conveyor_advance(&descriptor, last_confirmed_ms, t_ms);
+    if let Some(drift) = hazard::carry_target(&descriptor, run.x, t_ms, advance) {
         let dest_bit = grid::sector_bit(drift, run.y);
         let src_bit = grid::sector_bit(run.x, run.y);
         let same_sector = grid::sector_of(drift, run.y) == grid::sector_of(run.x, run.y);
         let dest_free = {
+            // A carry spans at most `MAX_CARRY_TILES`, so the destination is
+            // covered either by the rider's own sector or by the one handed
+            // in for the far end of that span.
             let dest_view: &OccupancySector = if same_sector {
                 &ctx.accounts.sector
             } else {

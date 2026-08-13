@@ -11,6 +11,12 @@
  *   3. base: `delegate_sector` — hand those sectors to the ER
  *   4. ER:   `extend_frontier` — publish the new frontier to live players
  *
+ * It also cranks hazards. Collisions are only resolved when somebody asks
+ * the program to check, so without a server-side watcher a player parked on
+ * a road never dies once the other clients look away, and a river rider
+ * drowns if their own tab stalls. Clients still crank themselves — this is
+ * the backstop, not the fast path.
+ *
  * Sectors exist and are delegated *before* the frontier moves, so a player
  * can never reach a row whose accounts are missing. Run it alongside the
  * game; it keeps `LOOKAHEAD_CHUNKS` of revealed map ahead of the leader.
@@ -42,12 +48,16 @@ const MAX_CHUNKS_PER_TICK = Number(process.env.MAX_CHUNKS_PER_TICK ?? 6);
 const POLL_MS = Number(process.env.POLL_MS ?? 3_000);
 const CHUNK_ROWS = 16;
 const SECTOR_EDGE = 8;
+const MAX_CARRY_TILES = 8;
+/** Set CRANK_HAZARDS=0 to leave collision resolution entirely to clients. */
+const CRANK_HAZARDS = (process.env.CRANK_HAZARDS ?? "1") !== "0";
 
 const S = {
   config: Buffer.from("config"),
   world: Buffer.from("world"),
   chunk: Buffer.from("chunk"),
   sector: Buffer.from("sector"),
+  run: Buffer.from("run"),
 };
 const le8 = (v: bigint | number) => {
   const b = Buffer.alloc(8);
@@ -160,6 +170,84 @@ async function main() {
     await sleep(POLL_MS);
   }
 
+  /**
+   * Ask the program to resolve collisions for everyone standing on moving
+   * terrain. Stale nonces are rejected harmlessly, so over-asking is safe.
+   */
+  async function crankHazards(
+    mode: number,
+    world: web3.PublicKey,
+    day: bigint,
+    lanes: any[],
+  ) {
+    let runs: any[];
+    try {
+      runs = await erProgram.account.playerRun.all([
+        { memcmp: { offset: 8, bytes: world.toBase58() } },
+      ]);
+    } catch {
+      return;
+    }
+    const exposed = runs.filter(({ account }: any) => {
+      if (Object.keys(account.state)[0] !== "active") return false;
+      const lane = lanes[account.y];
+      return lane != null && lane.kind !== 0;
+    });
+    if (!exposed.length) return;
+
+    let resolved = 0;
+    await Promise.all(
+      exposed.map(async ({ account }: any) => {
+        const lane = lanes[account.y];
+        const drift = lane.kind === 2 ? (lane.dirPositive === 1 ? 1 : -1) : 0;
+        const driftX = Math.max(0, Math.min(63, account.x + drift * MAX_CARRY_TILES));
+        const here = sectorPda(
+          world,
+          Math.floor(account.x / 8),
+          Math.floor(account.y / 8),
+        );
+        const there = sectorPda(world, Math.floor(driftX / 8), Math.floor(account.y / 8));
+        try {
+          await erProgram.methods
+            .checkHazard(account.hazardNonce)
+            .accountsPartial({
+              world,
+              run: pda(
+                S.run,
+                world.toBuffer(),
+                (account.wallet as web3.PublicKey).toBuffer(),
+              ),
+              sector: here,
+              driftSector: there.equals(here) ? null : there,
+              chunk: chunkPda(day, Math.floor(account.y / CHUNK_ROWS)),
+            })
+            .rpc({ skipPreflight: true, commitment: "processed" });
+          resolved++;
+        } catch {
+          /* stale nonce, already resolved, or the run moved on */
+        }
+      }),
+    );
+    if (resolved) log(`mode ${mode}: cranked ${resolved}/${exposed.length} exposed runs`);
+  }
+
+  /** Revealed lanes for a day, cached — chunks never change once revealed. */
+  const laneCache = new Map<string, any[]>();
+  async function revealedLanes(day: bigint, chunks: number) {
+    const key = `${day}:${chunks}`;
+    const hit = laneCache.get(key);
+    if (hit) return hit;
+    const lanes: any[] = [];
+    for (let c = 0; c < chunks; c++) {
+      const chunk = await withRetry(`read chunk ${c}`, () =>
+        baseProgram.account.chunkDefinition.fetch(chunkPda(day, c)),
+      );
+      for (const l of chunk.lanes as any[]) lanes.push(l);
+    }
+    laneCache.set(key, lanes);
+    return lanes;
+  }
+
   async function tick(mode: number) {
     const day = BigInt(Math.floor(Date.now() / 1000 / 86400));
     const world = worldPda(mode, day);
@@ -173,6 +261,11 @@ async function main() {
     // `world.record_score` only moves when someone calls claim_record, which
     // is deliberately decoupled from movement — so it is not a reliable
     // picture of where players actually are. Ask the live runs directly.
+    if (CRANK_HAZARDS) {
+      const lanes = await revealedLanes(day, Math.ceil(live.revealedRows / CHUNK_ROWS));
+      await crankHazards(mode, world, day, lanes).catch(() => {});
+    }
+
     const leader = await frontierLeader(world, live.recordScore);
     const target = (Math.floor(leader / CHUNK_ROWS) + LOOKAHEAD_CHUNKS) * CHUNK_ROWS;
     if (live.revealedRows >= target) return;
