@@ -174,6 +174,30 @@ describe("shared golden vectors", () => {
     for (const v of a) assert.ok(v.assetId.startsWith("vehicle."));
   });
 
+  it("smooth car positions still land on the authoritative tile each tick", () => {
+    // Smoothing may glide a car between tiles for the eye, but it must pass
+    // through exactly the position the program has at every tick, or what
+    // the player sees stops predicting what kills them.
+    const seed = new Uint8Array(32).fill(3);
+    for (let tick = 0; tick < 12; tick++) {
+      const t = tick * 1000;
+      for (const v of laneVehicles(roadLane, 4, seed, t)) {
+        assert.equal(v.renderX, v.x, `tick ${tick} car ${v.index}`);
+      }
+      // Mid-tick the drawn position leads the authoritative one, never lags
+      // and never overshoots the next tick's position.
+      const mid = laneVehicles(roadLane, 4, seed, t + 500);
+      const next = laneVehicles(roadLane, 4, seed, t + 1000);
+      for (const v of mid) {
+        const after = next.find((n) => n.index === v.index);
+        if (!after) continue;
+        const lo = Math.min(v.x, after.x);
+        const hi = Math.max(v.x, after.x);
+        assert.ok(v.renderX >= lo && v.renderX <= hi, `car ${v.index} strayed`);
+      }
+    }
+  });
+
   it("world time is quantised to the authoritative second", () => {
     // The program derives time from Clock::unix_timestamp, so a client that
     // predicts on a finer grid disagrees with it.

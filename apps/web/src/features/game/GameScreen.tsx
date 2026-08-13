@@ -12,10 +12,7 @@ import { Bootstrapped } from "../../lib/client";
 import { WorldScene } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
 import { attachInput } from "../../game/input/keys";
-import { evaluateTile, LANE_RIVER } from "../../game/simulation/hazards";
-
-/** The program derives hazard time from Clock::unix_timestamp — whole seconds. */
-const quantiseTick = (tMs: number) => Math.floor(tMs / 1000) * 1000;
+import { evaluateTile, LANE_RIVER, tickOf } from "../../game/simulation/hazards";
 import { CountUp } from "../../ui/CountUp";
 import { Confetti } from "../../ui/Confetti";
 import { agentModelIdFor } from "../../lib/agent";
@@ -169,6 +166,16 @@ export function GameScreen({
   const reconcileNowRef = useRef<() => void>(() => {});
   /** Timestamp of the last authoritative push for OUR run. */
   const lastOwnPushRef = useRef(0);
+  /**
+   * Highest action sequence the chain has accepted for our run.
+   *
+   * A rejected action produces no state change, so waiting for "a push"
+   * cannot detect one — the hazard crank rewrites our run several times a
+   * second and would keep resetting that timer. The sequence only advances
+   * when the program actually accepted something, so it is the one signal
+   * that distinguishes an accepted move from a refused one.
+   */
+  const lastAuthSeqRef = useRef(-1);
   /** Last celebrated score decade (milestone bursts every 10 rows). */
   const scoreDecadeRef = useRef(0);
 
@@ -202,6 +209,10 @@ export function GameScreen({
       const state = Object.keys(run.state)[0] ?? "?";
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
+        lastAuthSeqRef.current = Math.max(
+          lastAuthSeqRef.current,
+          run.actionSeq.toNumber(),
+        );
         hazardRef.current = {
           nonce: run.hazardNonce,
           deadlineMs: Number(run.hazardDeadlineMs?.toString() ?? 0),
@@ -344,6 +355,11 @@ export function GameScreen({
         boot.client.getWorld(route.mode, route.day).catch(() => null),
       ]);
       if (!live) return;
+      // Heal the run FIRST. This is the only thing that pulls a rejected
+      // prediction back to the truth, so it must never sit behind work that
+      // can fail: a chunk that will not load would otherwise leave the
+      // player standing wherever they predicted, forever.
+      if (run) applyRun(run, true);
       if (worldAcc) {
         // Anchor the hazard clock to the world's own timeline. Re-running
         // this on every sweep must converge, not creep forward.
@@ -352,9 +368,10 @@ export function GameScreen({
         setHud((h) =>
           h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },
         );
-        await loadChunks(worldAcc.revealedRows);
+        await loadChunks(worldAcc.revealedRows).catch((e) =>
+          console.error("chunk load failed:", e),
+        );
       }
-      if (run) applyRun(run, true);
     };
     void reconcile();
     reconcileNowRef.current = () => void reconcile();
@@ -491,7 +508,7 @@ export function GameScreen({
             // Hazards move on whole authoritative seconds; asking on the
             // render clock would disagree with the program about what is
             // where.
-            const tMs = quantiseTick(sceneRef.current!.worldTimeMs());
+            const tMs = tickOf(sceneRef.current!.worldTimeMs());
             if (evaluateTile(destLane, nx, tMs) === "blocked") {
               sceneRef.current?.bumpLocal(dx, dy);
               setHud((h) =>
@@ -541,13 +558,12 @@ export function GameScreen({
               setHud((h) => ({ ...h, lastRejection: errorText(e) }));
             })
             .finally(() => {});
-          // Silence reconciler: a REJECTED move produces no push (no state
-          // change on-chain), which would strand the optimistic mirror. If no
-          // authoritative push has arrived since this send, refetch now
-          // instead of waiting for the 5s sweep.
-          const sentAt = performance.now();
+          // A REJECTED move changes nothing on chain, so the optimistic
+          // mirror would sit a tile ahead of the truth forever. If the
+          // sequence we spent has not been consumed by then, force a heal.
+          const spentSeq = sent.actionSeq;
           setTimeout(() => {
-            if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+            if (lastAuthSeqRef.current <= spentSeq) reconcileNowRef.current();
           }, 1300);
         } else if (action.kind === "kick") {
           const now = performance.now();
@@ -594,9 +610,9 @@ export function GameScreen({
                 : undefined,
             })
             .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
-          const sentAt = performance.now();
+          const spentSeq = sent.actionSeq;
           setTimeout(() => {
-            if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+            if (lastAuthSeqRef.current <= spentSeq) reconcileNowRef.current();
           }, 1300);
         }
       },

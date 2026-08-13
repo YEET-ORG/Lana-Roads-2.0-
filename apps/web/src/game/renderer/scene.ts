@@ -923,7 +923,7 @@ export class WorldScene {
               ? this.refreshVehicleSlot(row, slot, lane, v.index, v.assetId)
               : meshes[slot];
           if (!m) continue;
-          if (v.x < -6 || v.x > WIDTH + 6) {
+          if (v.renderX < -6 || v.renderX > WIDTH + 6) {
             m.visible = false;
             continue;
           }
@@ -933,16 +933,10 @@ export class WorldScene {
             lane.kind === LANE_ROAD
               ? Math.sin(tMs / 85 + v.x * 2.1) * 0.012
               : Math.sin(tMs / 420 + row * 1.7) * 0.025;
-          const targetX = v.x + lane.footprint / 2;
-          // Hazards advance a whole tile at a time on the authoritative
-          // clock. Easing into each step keeps the motion readable without
-          // ever parking the mesh somewhere the program disagrees with:
-          // it settles on the true tile within a frame or two of the tick.
-          if (!m.visible || Math.abs(m.position.x - targetX) > lane.gapTiles) {
-            m.position.x = targetX; // first sighting or a wrap: snap
-          } else {
-            m.position.x += (targetX - m.position.x) * 0.45;
-          }
+          // `renderX` glides across the tick and lands exactly on the
+          // authoritative tile at every tick boundary, so the motion is
+          // continuous without ever drawing a car where it is not.
+          m.position.x = v.renderX + lane.footprint / 2;
           m.visible = true;
           m.position.y = (submerged ? -0.28 : 0) + bob;
           m.position.z = -row;

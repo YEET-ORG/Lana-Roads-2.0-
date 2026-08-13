@@ -86,6 +86,11 @@ export function objectTileX(lane: Lane, index: number, tMs: number): number {
     : index * lane.gapTiles - traveled;
 }
 
+/** The authoritative tick containing `tMs`. Hazards only move on these. */
+export function tickOf(tMs: number): number {
+  return Math.floor(tMs / 1000) * 1000;
+}
+
 /** Every object of this lane with any part inside the world, at `tMs`. */
 export function laneObjects(
   lane: Lane,
@@ -255,8 +260,19 @@ export function vehicleVariant(
  * and which model to draw. Resolve it from chunk data — never at random.
  */
 export interface RenderedVehicle {
+  /** Stable identity of this object on its lane. */
   index: number;
+  /**
+   * Authoritative tile the object occupies, spanning `[x, x + footprint)`.
+   * This is what collides; it only ever changes on a whole second.
+   */
   x: number;
+  /**
+   * Where to draw it. Interpolated across the tick so motion is continuous,
+   * and equal to `x` exactly at each tick boundary — the object passes
+   * through every authoritative position rather than drifting off it.
+   */
+  renderX: number;
   footprint: number;
   dirPositive: number;
   cls: VehicleClass;
@@ -273,11 +289,19 @@ export function laneVehicles(
 ): RenderedVehicle[] {
   const cls = laneVehicleClass(lane);
   if (cls === null) return [];
-  return laneObjects(lane, tMs).map(({ index, x }) => {
+  // Positions are resolved on the authoritative tick — passing a render
+  // clock straight through would put objects a tile away from where the
+  // program has them — and the leftover fraction only smooths the draw.
+  const tick = tickOf(tMs);
+  const frac = Math.min(1, Math.max(0, (tMs - tick) / 1000));
+  const step = traveledTiles(lane, tick + 1000) - traveledTiles(lane, tick);
+  const drift = (lane.dirPositive === 1 ? 1 : -1) * step * frac;
+  return laneObjects(lane, tick).map(({ index, x }) => {
     const variant = vehicleVariant(randomness, row, index, cls);
     return {
       index,
       x,
+      renderX: x + drift,
       footprint: lane.footprint,
       dirPositive: lane.dirPositive,
       cls,

@@ -29,6 +29,7 @@ export {
   logSubmerged,
   objectIndex,
   objectTileX,
+  tickOf,
   vehicleVariant,
   worldTimeMs,
 } from "@crossy-world/sdk";
