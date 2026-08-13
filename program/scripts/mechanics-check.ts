@@ -77,6 +77,32 @@ function safeToEnter(lane: any, x: number, tMs: number): boolean {
   return !trainOnRails(lane, tMs);
 }
 
+/**
+ * The program's clock is `Clock::unix_timestamp`, so `world_time_ms` is
+ * always a whole number of seconds: hazards advance in one-second steps, not
+ * continuously. Predicting at millisecond resolution disagrees with the
+ * chain, so quantise to the same grid the program evaluates on.
+ */
+function quantise(tMs: number): number {
+  return Math.floor(tMs / 1000) * 1000;
+}
+
+/**
+ * A transaction lands a few hundred milliseconds after the client decides to
+ * send it, so the state must hold across every authoritative tick it could
+ * execute on.
+ */
+function stableOver(
+  predicate: (tMs: number) => boolean,
+  fromMs: number,
+  toMs: number,
+): boolean {
+  for (let t = quantise(fromMs); t <= quantise(toMs); t += 1000) {
+    if (!predicate(t)) return false;
+  }
+  return true;
+}
+
 const results: string[] = [];
 const record = (name: string, pass: boolean, detail: string) => {
   results.push(`${pass ? "PASS" : "FAIL"}  ${name} — ${detail}`);
@@ -309,10 +335,21 @@ async function main() {
     if (Object.keys(run.state)[0] === "active" && run.y === roadRow - 1) {
       // Wait for a car to cover the tile straight ahead, then step into it.
       const lane = lanes[roadRow];
-      for (let i = 0; i < 400; i++) {
+      for (let i = 0; i < 300; i++) {
         run = await p.er.account.playerRun.fetch(p.runPda());
         if (Object.keys(run.state)[0] !== "active") break;
-        if (covers(lane, run.x, Date.now() - startMs)) {
+        if (run.y === roadRow) {
+          // Survived the crossing (the car had moved on by the time the
+          // transaction executed). Step back and try to time it again.
+          await move(p, 1).catch(() => {});
+          await sleep(150);
+          continue;
+        }
+        if (run.y !== roadRow - 1) break;
+        const now = Date.now() - startMs;
+        // Deliberately step under a car that covers the tile on the
+        // authoritative tick this move is most likely to execute on.
+        if (stableOver((t) => covers(lane, run.x, t), now + 200, now + 900)) {
           await move(p, 0).catch(() => {});
           run = await p.er.account.playerRun.fetch(p.runPda());
           died = Object.keys(run.state)[0] !== "active";
@@ -348,7 +385,10 @@ async function main() {
       for (let i = 0; i < 400 && boardedAt < 0; i++) {
         run = await p.er.account.playerRun.fetch(p.runPda());
         if (Object.keys(run.state)[0] !== "active") break;
-        if (covers(lane, run.x, Date.now() - startMs)) {
+        if (run.y !== riverRow - 1) break;
+        const now = Date.now() - startMs;
+        // Board a log that will still be under the tile on arrival.
+        if (stableOver((t) => safeToEnter(lane, run.x, t), now + 200, now + 1_200)) {
           await move(p, 0).catch(() => {});
           run = await p.er.account.playerRun.fetch(p.runPda());
           if (run.y === riverRow && Object.keys(run.state)[0] === "active") {
@@ -401,7 +441,43 @@ async function main() {
   }
 
   // -------------------------------------------------------------------
-  // 3. A kick at empty space is a legal wasted swing
+  // 3. Stepping into open water drowns
+  // -------------------------------------------------------------------
+  if (riverRow > 0 && (PHASE === "all" || PHASE === "water")) {
+    console.log(`\n[water] open water at row ${riverRow}`);
+    const lane = lanes[riverRow];
+    const p = await newPlayer("water");
+    let run: any = await walkTo(p, riverRow - 1);
+    let drowned = false;
+    if (Object.keys(run.state)[0] === "active" && run.y === riverRow - 1) {
+      for (let i = 0; i < 200; i++) {
+        run = await p.er.account.playerRun.fetch(p.runPda());
+        if (Object.keys(run.state)[0] !== "active") break;
+        const now = Date.now() - startMs;
+        // Step in when there is definitely no log under the tile — water is
+        // lethal for seconds at a time, so this needs no fine timing.
+        if (stableOver((t) => !safeToEnter(lane, run.x, t), now, now + 1_500)) {
+          await move(p, 0).catch(() => {});
+          run = await p.er.account.playerRun.fetch(p.runPda());
+          drowned = Object.keys(run.state)[0] !== "active";
+          if (drowned) break;
+        }
+        await sleep(150);
+      }
+    }
+    record(
+      "stepping into open water drowns",
+      drowned,
+      drowned
+        ? `run ended at row ${run.y} in the river`
+        : `still ${Object.keys(run.state)[0]} at (${run.x}, ${run.y})`,
+    );
+  } else if (PHASE === "all" || PHASE === "water") {
+    record("stepping into open water drowns", false, "no river lane revealed");
+  }
+
+  // -------------------------------------------------------------------
+  // 4. A kick at empty space is a legal wasted swing
   // -------------------------------------------------------------------
   if (PHASE === "all" || PHASE === "kick") {
     console.log(`\n[kick] swinging at nothing`);
