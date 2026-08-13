@@ -10,7 +10,7 @@ import {
   LANE_RAIL,
   LANE_RIVER,
   LANE_ROAD,
-  railPhase,
+  railPhaseVisual,
   TileState,
 } from "./hazards";
 
@@ -22,7 +22,7 @@ import {
  */
 export function demoEvaluateTile(lane: Lane, x: number, tMs: number): TileState {
   if (lane.kind === LANE_RAIL) {
-    const { phase, trainX } = railPhase(lane, tMs);
+    const { phase, trainX } = railPhaseVisual(lane, tMs);
     if (phase !== "train") return "safe";
     return x + 1 > trainX && x < trainX + lane.footprint ? "lethal" : "safe";
   }
@@ -122,4 +122,20 @@ export function makeLane(row: number, seed = 7): Lane {
     blockerMask: 0n,
     sinking: 0,
   };
+}
+
+/**
+ * Stand-in for a chunk's committed randomness on offline surfaces. Practice
+ * and the menu backdrop have no chain entropy, but the renderer still needs
+ * a seed to name their traffic, and it should differ per run so the same
+ * cars do not line up every time.
+ */
+export function demoSeed(salt: number): Uint8Array {
+  const out = new Uint8Array(32);
+  let h = (salt ^ 0x9e3779b9) >>> 0;
+  for (let i = 0; i < 32; i++) {
+    h = (Math.imul(h ^ (h >>> 15), 2246822519) + i) >>> 0;
+    out[i] = h & 0xff;
+  }
+  return out;
 }

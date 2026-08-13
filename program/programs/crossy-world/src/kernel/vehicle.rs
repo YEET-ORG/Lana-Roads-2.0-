@@ -16,7 +16,7 @@ use super::chunkgen::{LaneDescriptor, LaneKind};
 
 /// Bump when the roster or the derivation below changes. Clients pin this to
 /// know their model table still agrees with the chain.
-pub const ROSTER_VERSION: u16 = 1;
+pub const ROSTER_VERSION: u16 = 2;
 
 /// The mechanical archetype a rendered object belongs to. Derived from lane
 /// kind and footprint — never from a filename or a client's choice.
@@ -40,12 +40,14 @@ impl VehicleClass {
     /// geometry, footprint and behaviour; only the look differs.
     pub const fn variant_count(self) -> u8 {
         match self {
-            // compact.a / compact.b / compact.c
-            VehicleClass::Compact => 3,
-            // pickup.a / pickup.b
-            VehicleClass::Pickup => 2,
+            // compact.a / compact.b / compact.c / police.a — one coherent
+            // vehicle set, and the class carrying most of the traffic.
+            VehicleClass::Compact => 4,
+            VehicleClass::Pickup => 1,
             VehicleClass::Bus => 1,
-            VehicleClass::Log => 2,
+            // Logs and trains are built procedurally by the renderer, so
+            // they have nothing to choose between.
+            VehicleClass::Log => 1,
             VehicleClass::Train => 1,
         }
     }

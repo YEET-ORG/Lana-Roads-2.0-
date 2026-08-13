@@ -12,6 +12,7 @@ import {
   demoBlockedReason,
   demoEvaluateTile,
   demoIsTraversable,
+  demoSeed,
   makeLane,
 } from "../../game/simulation/demoLanes";
 import { Direction } from "@crossy-world/sdk";
@@ -51,7 +52,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
     const reveal = (upTo: number) => {
       if (!scene) return;
       for (let r = revealedRef.current; r <= upTo; r++)
-        scene.setLane(r, makeLane(r, 7 + runNonce));
+        scene.setLane(r, makeLane(r, 7 + runNonce), demoSeed(7 + runNonce));
       revealedRef.current = Math.max(revealedRef.current, upTo + 1);
     };
 

@@ -15,18 +15,11 @@ import {
   LANE_RAIL,
   LANE_RIVER,
   LANE_ROAD,
-  laneObjects,
+  laneVehicles,
   logSubmerged,
-  railPhase,
+  railPhaseVisual,
 } from "../simulation/hazards";
-import {
-  agentId,
-  instantiate,
-  LONG_VEHICLE_POOL,
-  pickDeterministic,
-  ROCK_POOL,
-  VEHICLE_POOL,
-} from "./assets";
+import { agentId, instantiate, pickDeterministic, ROCK_POOL } from "./assets";
 import { BlockDust } from "./effects";
 import { sfx } from "../audio";
 import { arc, clamp01, easeOutBack, noise1d, smoothFactor } from "./tween";
@@ -67,6 +60,9 @@ const LAND_SQUASH = { y: 0.86, xz: 1.08 };
 const PLAYER_HEIGHT = 0.85; // world units for a normalized 1-unit-tall agent
 
 const WIDTH = 64;
+/** Chunks always carry randomness; this only covers a row seen before its
+ * chunk finished loading. */
+const EMPTY_SEED = new Uint8Array(32);
 
 /** yaw per Direction (Forward = -z in scene space; the VoxelAnimals models
  * natively face -z, so Forward is yaw 0). */
@@ -290,6 +286,10 @@ export class WorldScene {
   private camera: THREE.OrthographicCamera;
   private laneMeshes = new Map<number, THREE.Group>();
   private lanes = new Map<number, Lane>();
+  /** Committed chunk randomness per row — decides which car is which. */
+  private laneSeeds = new Map<number, Uint8Array>();
+  /** Conveyor index and model currently held by each mover slot. */
+  private moverSlots = new Map<number, Array<{ index: number; assetId: string }>>();
   private movers = new Map<number, THREE.Object3D[]>();
   private railStripMats = new Map<number, THREE.MeshLambertMaterial>();
   private players = new Map<string, PlayerRig>();
@@ -421,8 +421,9 @@ export class WorldScene {
   }
 
   /** Install or replace a revealed lane row. */
-  setLane(row: number, lane: Lane) {
+  setLane(row: number, lane: Lane, randomness?: Uint8Array) {
     this.lanes.set(row, lane);
+    if (randomness) this.laneSeeds.set(row, randomness);
     const old = this.laneMeshes.get(row);
     if (old) {
       this.scene.remove(old);
@@ -505,20 +506,14 @@ export class WorldScene {
       const count =
         lane.kind === LANE_RAIL ? 1 : Math.ceil(WIDTH / Math.max(2, lane.gapTiles)) + 2;
       const objs: THREE.Object3D[] = [];
+      const slots: Array<{ index: number; assetId: string }> = [];
       for (let i = 0; i < count; i++) {
         let obj: THREE.Object3D;
         if (lane.kind === LANE_ROAD) {
-          const pool = lane.footprint >= 3 ? LONG_VEHICLE_POOL : VEHICLE_POOL;
-          obj = instantiate(pickDeterministic(pool, row * 31, i));
-          // Chunky Crossy proportions: slight visual overhang past the
-          // canonical footprint (forgiving, never the reverse). Every
-          // vehicle gets the SAME cross-lane width regardless of the
-          // model's intrinsic proportions, so traffic reads uniform.
-          const s = Math.max(1, lane.footprint) * 0.95 + 0.22;
-          const widthRatio = (obj.userData?.widthRatio as number) ?? 0.5;
-          const cross = Math.min(s * 1.25, 0.62 / Math.max(0.25, widthRatio));
-          obj.scale.set(s, cross, cross);
-          if (lane.dirPositive !== 1) obj.rotation.y = Math.PI;
+          // The model is decided per *car*, not per pool slot, once the
+          // lane starts moving — see `refreshVehicleSlot`. This is only the
+          // initial fill.
+          obj = this.buildVehicle(lane, "vehicle.compact.a");
         } else if (lane.kind === LANE_RIVER) {
           obj = this.buildLog(lane.footprint);
         } else {
@@ -528,11 +523,68 @@ export class WorldScene {
         obj.visible = false;
         group.add(obj);
         objs.push(obj);
+        slots.push({ index: Number.NaN, assetId: "vehicle.compact.a" });
       }
       this.movers.set(row, objs);
+      this.moverSlots.set(row, slots);
     }
     this.laneMeshes.set(row, group);
     this.scene.add(group);
+  }
+
+  /** One traffic mesh, scaled to the lane's canonical footprint. */
+  private buildVehicle(lane: Lane, assetId: string): THREE.Object3D {
+    const obj = instantiate(assetId);
+    // Chunky Crossy proportions: slight visual overhang past the canonical
+    // footprint (forgiving, never the reverse). Every vehicle gets the SAME
+    // cross-lane width regardless of the model's intrinsic proportions, so
+    // traffic reads uniform.
+    const s = Math.max(1, lane.footprint) * 0.95 + 0.22;
+    const widthRatio = (obj.userData?.widthRatio as number) ?? 0.5;
+    const cross = Math.min(s * 1.25, 0.62 / Math.max(0.25, widthRatio));
+    obj.scale.set(s, cross, cross);
+    if (lane.dirPositive !== 1) obj.rotation.y = Math.PI;
+    return obj;
+  }
+
+  /**
+   * Make sure the mesh in `slot` is the model this car is supposed to be.
+   *
+   * Which car wears which body is derived from the chunk's committed
+   * randomness and the car's conveyor index, so every client resolves the
+   * same answer and a given car keeps its body for its whole journey. The
+   * mesh is only rebuilt when a slot is recycled for a different car.
+   */
+  private refreshVehicleSlot(
+    row: number,
+    slot: number,
+    lane: Lane,
+    index: number,
+    assetId: string,
+  ): THREE.Object3D | undefined {
+    const meshes = this.movers.get(row);
+    const slots = this.moverSlots.get(row);
+    if (!meshes || !slots) return undefined;
+    const current = slots[slot];
+    if (current && current.index === index && current.assetId === assetId) {
+      return meshes[slot];
+    }
+    if (current && current.assetId === assetId) {
+      slots[slot] = { index, assetId };
+      return meshes[slot];
+    }
+    const group = this.laneMeshes.get(row);
+    const old = meshes[slot];
+    if (group && old) {
+      group.remove(old);
+      disposeLaneGroup(old as THREE.Group);
+    }
+    const replacement = this.buildVehicle(lane, assetId);
+    replacement.visible = false;
+    group?.add(replacement);
+    meshes[slot] = replacement;
+    slots[slot] = { index, assetId };
+    return replacement;
   }
 
   private addInstanced(
@@ -856,25 +908,50 @@ export class WorldScene {
       const meshes = this.movers.get(row);
       if (!meshes) continue;
       if (lane.kind === LANE_ROAD || lane.kind === LANE_RIVER) {
-        const xs = laneObjects(lane, tMs);
         const submerged = lane.kind === LANE_RIVER && logSubmerged(lane, tMs);
-        meshes.forEach((m, i) => {
-          const x = xs[i];
-          if (x === undefined || x < -6 || x > WIDTH + 6) {
+        // Authoritative traffic: positions and models both come from the
+        // chain's own view of this lane, so what is drawn is what collides.
+        const seed = this.laneSeeds.get(row) ?? EMPTY_SEED;
+        const vehicles = laneVehicles(lane, row, seed, tMs);
+        const seen = new Set<number>();
+        for (const v of vehicles) {
+          const slot = ((v.index % meshes.length) + meshes.length) % meshes.length;
+          if (seen.has(slot)) continue; // more cars than slots: skip the overflow
+          seen.add(slot);
+          const m =
+            lane.kind === LANE_ROAD
+              ? this.refreshVehicleSlot(row, slot, lane, v.index, v.assetId)
+              : meshes[slot];
+          if (!m) continue;
+          if (v.x < -6 || v.x > WIDTH + 6) {
             m.visible = false;
-            return;
+            continue;
           }
-          m.visible = true;
           // Life in the lanes: cars ride with a fast micro-bounce, logs
           // bob slowly on the water.
           const bob =
             lane.kind === LANE_ROAD
-              ? Math.sin(tMs / 85 + x * 2.1) * 0.012
+              ? Math.sin(tMs / 85 + v.x * 2.1) * 0.012
               : Math.sin(tMs / 420 + row * 1.7) * 0.025;
-          m.position.set(x + lane.footprint / 2, (submerged ? -0.28 : 0) + bob, -row);
-        });
+          const targetX = v.x + lane.footprint / 2;
+          // Hazards advance a whole tile at a time on the authoritative
+          // clock. Easing into each step keeps the motion readable without
+          // ever parking the mesh somewhere the program disagrees with:
+          // it settles on the true tile within a frame or two of the tick.
+          if (!m.visible || Math.abs(m.position.x - targetX) > lane.gapTiles) {
+            m.position.x = targetX; // first sighting or a wrap: snap
+          } else {
+            m.position.x += (targetX - m.position.x) * 0.45;
+          }
+          m.visible = true;
+          m.position.y = (submerged ? -0.28 : 0) + bob;
+          m.position.z = -row;
+        }
+        for (let i = 0; i < meshes.length; i++) {
+          if (!seen.has(i)) meshes[i].visible = false;
+        }
       } else if (lane.kind === LANE_RAIL) {
-        const { phase, trainX } = railPhase(lane, tMs);
+        const { phase, trainX } = railPhaseVisual(lane, tMs);
         const stripMat = this.railStripMats.get(row);
         if (stripMat) {
           // Stepped warning blink (voxel-arcade: hard steps, not fades).

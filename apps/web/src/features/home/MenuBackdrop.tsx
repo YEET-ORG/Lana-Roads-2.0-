@@ -7,7 +7,7 @@
 import { useEffect, useRef } from "react";
 import { WorldScene } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
-import { makeLane } from "../../game/simulation/demoLanes";
+import { makeLane, demoSeed } from "../../game/simulation/demoLanes";
 
 export function MenuBackdrop({
   modelId,
@@ -28,7 +28,7 @@ export function MenuBackdrop({
       scene = new WorldScene(canvas, { modelId });
       sceneRef.current = scene;
       scene.resize();
-      for (let r = 0; r < 36; r++) scene.setLane(r, makeLane(r, 11));
+      for (let r = 0; r < 36; r++) scene.setLane(r, makeLane(r, 11), demoSeed(11));
       // Rows 0–2 are always safe grass: the agent poses there.
       scene.setLocal(32, 2);
       onScene?.(scene);

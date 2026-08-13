@@ -14,6 +14,10 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program, web3, BN } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  isTraversable,
+  laneObjectCovers,
+} from "../../packages/crossy-world-sdk/src/hazards.js";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
@@ -46,35 +50,35 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errText = (e: any) =>
   String(e?.transactionMessage ?? e?.message ?? e).slice(0, 100);
 
-/** Transcription of kernel/hazard.rs `lane_object_covers`. */
-function covers(lane: any, x: number, tMs: number): boolean {
-  if (lane.gapTiles === 0) return false;
-  const cycleMt = lane.gapTiles * 1000;
-  const offset = (Math.floor((tMs * lane.speedMtps) / 1000) + lane.phaseMt) % cycleMt;
-  const patternPos =
-    lane.dirPositive === 1
-      ? (x * 1000 + cycleMt - (offset % cycleMt)) % cycleMt
-      : (x * 1000 + offset) % cycleMt;
-  return patternPos < lane.footprint * 1000 || patternPos + 1000 > cycleMt;
-}
-
-/** Transcription of kernel/hazard.rs `rail_phase` — is a train on the rails? */
-function trainOnRails(lane: any, tMs: number): boolean {
-  const crossingMs = ((64 + lane.footprint) * 1_000_000) / Math.max(1, lane.speedMtps);
-  const cycle = lane.periodMs + lane.warningMs + crossingMs;
-  const pos = (tMs + lane.phaseMt) % cycle;
-  return pos >= lane.periodMs + lane.warningMs;
-}
-
-/** Mirror of `evaluate_tile`: is entering this tile survivable right now? */
+/**
+ * Hazard prediction comes from the SDK, which is pinned to the program's
+ * kernel by golden vectors. A local transcription here silently rots the
+ * moment the kernel changes — it did exactly that when objects started
+ * snapping to whole tiles, and this harness began stepping into water it
+ * believed was a log.
+ */
 function safeToEnter(lane: any, x: number, tMs: number): boolean {
-  if (lane.kind === LANE_GRASS) return true; // blockers just reject the move
-  if (lane.kind === LANE_ROAD) return !covers(lane, x, tMs);
-  if (lane.kind === LANE_RIVER) {
-    const submerged = lane.sinking !== 0 && (tMs + lane.phaseMt) % 8000 >= 6000;
-    return covers(lane, x, tMs) && !submerged;
-  }
-  return !trainOnRails(lane, tMs);
+  return isTraversable(toLane(lane), x, tMs);
+}
+
+function covers(lane: any, x: number, tMs: number): boolean {
+  return laneObjectCovers(toLane(lane), x, tMs);
+}
+
+/** Anchor decodes `blocker_mask` as BN; the shared math wants a bigint. */
+function toLane(lane: any) {
+  return {
+    kind: lane.kind,
+    dirPositive: lane.dirPositive,
+    footprint: lane.footprint,
+    gapTiles: lane.gapTiles,
+    speedMtps: lane.speedMtps,
+    phaseMt: lane.phaseMt,
+    warningMs: lane.warningMs,
+    periodMs: lane.periodMs,
+    blockerMask: BigInt(lane.blockerMask?.toString() ?? "0"),
+    sinking: lane.sinking,
+  };
 }
 
 /**

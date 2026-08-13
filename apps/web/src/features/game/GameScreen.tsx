@@ -12,7 +12,10 @@ import { Bootstrapped } from "../../lib/client";
 import { WorldScene } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
 import { attachInput } from "../../game/input/keys";
-import { evaluateTile } from "../../game/simulation/hazards";
+import { evaluateTile, LANE_RIVER } from "../../game/simulation/hazards";
+
+/** The program derives hazard time from Clock::unix_timestamp — whole seconds. */
+const quantiseTick = (tMs: number) => Math.floor(tMs / 1000) * 1000;
 import { CountUp } from "../../ui/CountUp";
 import { Confetti } from "../../ui/Confetti";
 import { agentModelIdFor } from "../../lib/agent";
@@ -298,18 +301,24 @@ export function GameScreen({
         const chunk = await boot.client.getChunk(route.day, c).catch(() => null);
         if (!chunk || !live || !scene) continue;
         chunk.lanes.forEach((lane: any, i: number) => {
-          scene!.setLane(chunk.rowStart + i, {
-            kind: lane.kind,
-            dirPositive: lane.dirPositive,
-            footprint: lane.footprint,
-            gapTiles: lane.gapTiles,
-            speedMtps: lane.speedMtps,
-            phaseMt: lane.phaseMt,
-            warningMs: lane.warningMs,
-            periodMs: lane.periodMs,
-            blockerMask: BigInt(lane.blockerMask.toString()),
-            sinking: lane.sinking,
-          });
+          scene!.setLane(
+            chunk.rowStart + i,
+            {
+              kind: lane.kind,
+              dirPositive: lane.dirPositive,
+              footprint: lane.footprint,
+              gapTiles: lane.gapTiles,
+              speedMtps: lane.speedMtps,
+              phaseMt: lane.phaseMt,
+              warningMs: lane.warningMs,
+              periodMs: lane.periodMs,
+              blockerMask: BigInt(lane.blockerMask.toString()),
+              sinking: lane.sinking,
+            },
+            // The chunk's committed randomness names every car on the row, so
+            // all clients draw the same traffic.
+            Uint8Array.from(chunk.randomnessHash as number[]),
+          );
         });
         loadedChunks = c + 1;
       }
@@ -374,6 +383,13 @@ export function GameScreen({
         const lane = scene?.laneAt(y);
         return lane != null && lane.kind !== 0;
       };
+      // A river carries its riders downstream; the program needs the sector
+      // at the far end of that ride to be able to move them.
+      const driftOf = (y: number) => {
+        const lane = scene?.laneAt(y);
+        if (!lane || lane.kind !== LANE_RIVER) return 0;
+        return lane.dirPositive === 1 ? 1 : -1;
+      };
       const crank = (
         wallet: PublicKey | undefined,
         x: number,
@@ -389,6 +405,7 @@ export function GameScreen({
             x,
             y,
             hazardNonce: nonce,
+            driftDirection: driftOf(y),
           })
           .catch(() => {
             /* stale nonce / already resolved */
@@ -471,7 +488,10 @@ export function GameScreen({
           // water are enterable and lethal, so authority records the death.
           const destLane = sceneRef.current?.laneAt(ny);
           if (destLane) {
-            const tMs = sceneRef.current!.worldTimeMs();
+            // Hazards move on whole authoritative seconds; asking on the
+            // render clock would disagree with the program about what is
+            // where.
+            const tMs = quantiseTick(sceneRef.current!.worldTimeMs());
             if (evaluateTile(destLane, nx, tMs) === "blocked") {
               sceneRef.current?.bumpLocal(dx, dy);
               setHud((h) =>

@@ -17,6 +17,8 @@ import { sectorBit, sectorOf } from "../src/pda.js";
 import {
   LANE_ROAD,
   Lane,
+  VEHICLE_ASSET_IDS,
+  VEHICLE_VARIANT_COUNT,
   VehicleClass,
   laneObjectCovers,
   laneVehicleClass,
@@ -134,17 +136,33 @@ describe("shared golden vectors", () => {
     }
   });
 
+  it("every class has exactly as many ids as variants", () => {
+    // A count the asset table cannot satisfy would resolve cars to models
+    // that do not exist.
+    for (const [cls, count] of Object.entries(VEHICLE_VARIANT_COUNT)) {
+      assert.equal(
+        VEHICLE_ASSET_IDS[Number(cls) as VehicleClass].length,
+        count,
+        `class ${cls}`,
+      );
+    }
+  });
+
   it("vehicle variants match kernel::vehicle", () => {
     const seed = new Uint8Array(32).fill(7);
     const variants = [];
     for (let i = -4; i < 8; i++) {
       variants.push(vehicleVariant(seed, 9, i, VehicleClass.Compact));
     }
-    assert.deepEqual(variants, [0, 2, 0, 1, 2, 1, 1, 2, 1, 0, 0, 2]);
+    assert.deepEqual(variants, [3, 3, 2, 3, 2, 2, 2, 1, 0, 1, 0, 1]);
   });
 
   it("class comes from footprint, and every car resolves to one asset", () => {
     assert.equal(laneVehicleClass(roadLane), VehicleClass.Pickup); // footprint 2
+    // Every id the roster can return must be a model that actually ships.
+    for (const ids of Object.values(VEHICLE_ASSET_IDS)) {
+      assert.ok(ids.length > 0);
+    }
     assert.equal(laneVehicleClass({ ...roadLane, footprint: 1 }), VehicleClass.Compact);
     assert.equal(laneVehicleClass({ ...roadLane, footprint: 4 }), VehicleClass.Bus);
 

@@ -19,7 +19,7 @@ import { WORLD_WIDTH } from "./constants.js";
 export const MAX_CARRY_TILES = 8;
 
 /** Bump in step with `kernel::vehicle::ROSTER_VERSION`. */
-export const ROSTER_VERSION = 1;
+export const ROSTER_VERSION = 2;
 
 export interface Lane {
   kind: number;
@@ -176,19 +176,25 @@ export enum VehicleClass {
 
 /** Interchangeable skins per class — geometry and behaviour are identical. */
 export const VEHICLE_VARIANT_COUNT: Record<VehicleClass, number> = {
-  [VehicleClass.Compact]: 3,
-  [VehicleClass.Pickup]: 2,
+  [VehicleClass.Compact]: 4,
+  [VehicleClass.Pickup]: 1,
   [VehicleClass.Bus]: 1,
-  [VehicleClass.Log]: 2,
+  [VehicleClass.Log]: 1,
   [VehicleClass.Train]: 1,
 };
 
 /** Stable semantic asset IDs. Pack filenames must never reach protocol data. */
 export const VEHICLE_ASSET_IDS: Record<VehicleClass, string[]> = {
-  [VehicleClass.Compact]: ["vehicle.compact.a", "vehicle.compact.b", "vehicle.compact.c"],
-  [VehicleClass.Pickup]: ["vehicle.pickup.a", "vehicle.pickup.b"],
+  [VehicleClass.Compact]: [
+    "vehicle.compact.a",
+    "vehicle.compact.b",
+    "vehicle.compact.c",
+    "vehicle.police.a",
+  ],
+  [VehicleClass.Pickup]: ["vehicle.pickup.a"],
   [VehicleClass.Bus]: ["vehicle.bus.a"],
-  [VehicleClass.Log]: ["prop.log.a", "prop.log.b"],
+  // Built procedurally by the renderer; the id is descriptive only.
+  [VehicleClass.Log]: ["prop.log.a"],
   [VehicleClass.Train]: ["vehicle.train.a"],
 };
 
