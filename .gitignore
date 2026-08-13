@@ -19,6 +19,8 @@ magicblock-engine-examples/
 # tooling
 .claude/
 .DS_Store
+SourceAssets/**/__MACOSX/
+SourceAssets/**/._*
 *.log
 .vercel/
 

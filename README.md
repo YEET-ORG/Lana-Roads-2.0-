@@ -8,9 +8,9 @@ Art and asset work starts with [`docs/ASSETS.md`](docs/ASSETS.md), which records
 
 It is bootstrapped from the open-source solsocket starter so its MagicBlock connection, session, delegation, and subscription patterns can be selectively adapted. The generic solsocket engine is reference code, not the authoritative Crossy World game contract. Read [`AGENTS.md`](AGENTS.md) before making changes.
 
-`VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Keep this repository private and do not redistribute the raw pack.
+`VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Other supplied source packs are under `SourceAssets/`. Binary art payloads use Git LFS. Keep this repository private and do not redistribute raw packs.
 
-The private source workspace also contains `Low_Poly_Cars_DevilsWorkShop_V03/` and `SportsCar_Yellow/`. Only the curated vehicle subset defined in [`docs/FRONTEND.md`](docs/FRONTEND.md) should be converted into distributable runtime derivatives; do not import every source model into the web bundle.
+Only the curated vehicle subset defined in [`docs/FRONTEND.md`](docs/FRONTEND.md) should be converted into distributable runtime derivatives; do not import every source model into the web bundle.
 
 ## Starter reference documentation
 

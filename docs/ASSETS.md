@@ -1,8 +1,8 @@
-# Lana Roads 2.0 — Source Asset Catalog and Runtime Policy
+﻿# Lana Roads 2.0 â€” Source Asset Catalog and Runtime Policy
 
 **Status:** Coding-agent source of truth for supplied art assets
 
-**Workspace inspected:** `D:\Code\YEET\LanaRoads2.0`
+**Repository asset roots:** `SourceAssets/` and `VoxelAnimals/`
 
 **Last inventory:** 2026-08-13
 
@@ -10,7 +10,7 @@
 
 This document tells coding agents what source art exists, what it may be used for, which licensing evidence is present, and how selected sources become optimized Three.js runtime assets.
 
-The source folders live beside the repository because they include third-party raw files that should not automatically enter Git or the public web bundle. Presence in the workspace does **not** by itself grant production approval.
+The source packs are stored in this private repository under `SourceAssets/`, except the original purchased Unity pack retained at `VoxelAnimals/` for compatibility. Binary model, texture, scene, and editor payloads use Git LFS. Presence in the repository does **not** by itself grant production approval or permission to redistribute these packs outside this private project.
 
 Read this document before importing, converting, renaming, copying, committing, or shipping third-party art. Also read the [master frontend specification](./FRONTEND.md).
 
@@ -41,23 +41,25 @@ Read this document before importing, converting, renaming, copying, committing, 
 
 ## 4. Workspace overview
 
-| Source folder                         | Category            | Approximate contents                         | License evidence                                                                        | Status                       | Intended role                                      |
-| ------------------------------------- | ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------- |
-| `VoxelAnimals/`                       | agents              | 40 OBJ animals plus Unity/MagicaVoxel source | user-confirmed purchased Unity Asset Store commercial rights; no license file in folder | `APPROVED-SOURCE`, `CURATED` | primary playable agents                            |
-| `Voxel_Animal_Asset_Pack/`            | agents and props    | 110 OBJ/MTL/PNG sets                         | none found                                                                              | `HOLD`                       | possible secondary agents, collectibles, and props |
-| `Low_Poly_Cars_DevilsWorkShop_V03/`   | vehicles            | 11 vehicle/accessory names in FBX, OBJ, DAE  | embedded commercial-use license                                                         | `APPROVED-SOURCE`, `CURATED` | initial traffic hazards                            |
-| `Free_Low_Poly_Vehicles_Rgsdev/`      | vehicles            | 22 FBX files                                 | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | expanded traffic and service vehicles              |
-| `Free_Cars/`                          | vehicles            | 11 FBX vehicles and two atlas textures       | none found                                                                              | `HOLD`                       | candidate stylized traffic                         |
-| `SportsCar_Yellow/`                   | vehicle             | one 220-vertex car in several formats        | descriptive readme only                                                                 | `HOLD`                       | candidate rare sports-car variant                  |
-| `pack_cartoon_cars/`                  | vehicles            | combined FBX and Blender source              | none found                                                                              | `HOLD`                       | candidate vehicle source after separation          |
-| `KayKit_BlockBits_1.0_FREE/`          | terrain             | 40 designs in FBX, glTF, and OBJ             | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | terrain prototypes and materials                   |
-| `KayKit_Forest_Nature_Pack_1.0_FREE/` | environment         | 105 designs in FBX, glTF, and OBJ            | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | trees, rocks, bushes, and grass                    |
-| `chicken_-_crossy_road/`              | reference character | glTF scene and binary                        | embedded CC-BY-4.0 record                                                               | `REFERENCE-ONLY`             | scale/readability study only                       |
-| `crossy_road_3d_scene/`               | reference scene     | glTF scene and binary                        | embedded CC-BY-4.0 record                                                               | `REFERENCE-ONLY`             | composition/readability study only                 |
+Paths below are repository-relative. `VoxelAnimals/` remains at the root; every other raw source pack is nested below `SourceAssets/`.
+
+| Source folder                                      | Category            | Approximate contents                         | License evidence                                                                        | Status                       | Intended role                                      |
+| -------------------------------------------------- | ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------- |
+| `VoxelAnimals/`                                    | agents              | 40 OBJ animals plus Unity/MagicaVoxel source | user-confirmed purchased Unity Asset Store commercial rights; no license file in folder | `APPROVED-SOURCE`, `CURATED` | primary playable agents                            |
+| `SourceAssets/Voxel_Animal_Asset_Pack/`            | agents and props    | 110 OBJ/MTL/PNG sets                         | none found                                                                              | `HOLD`                       | possible secondary agents, collectibles, and props |
+| `SourceAssets/Low_Poly_Cars_DevilsWorkShop_V03/`   | vehicles            | 11 vehicle/accessory names in FBX, OBJ, DAE  | embedded commercial-use license                                                         | `APPROVED-SOURCE`, `CURATED` | initial traffic hazards                            |
+| `SourceAssets/Free_Low_Poly_Vehicles_Rgsdev/`      | vehicles            | 22 FBX files                                 | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | expanded traffic and service vehicles              |
+| `SourceAssets/Free_Cars/`                          | vehicles            | 11 FBX vehicles and two atlas textures       | none found                                                                              | `HOLD`                       | candidate stylized traffic                         |
+| `SourceAssets/SportsCar_Yellow/`                   | vehicle             | one 220-vertex car in several formats        | descriptive readme only                                                                 | `HOLD`                       | candidate rare sports-car variant                  |
+| `SourceAssets/pack_cartoon_cars/`                  | vehicles            | combined FBX and Blender source              | none found                                                                              | `HOLD`                       | candidate vehicle source after separation          |
+| `SourceAssets/KayKit_BlockBits_1.0_FREE/`          | terrain             | 40 designs in FBX, glTF, and OBJ             | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | terrain prototypes and materials                   |
+| `SourceAssets/KayKit_Forest_Nature_Pack_1.0_FREE/` | environment         | 105 designs in FBX, glTF, and OBJ            | embedded CC0 license                                                                    | `APPROVED-SOURCE`, `CURATED` | trees, rocks, bushes, and grass                    |
+| `SourceAssets/chicken_-_crossy_road/`              | reference character | glTF scene and binary                        | embedded CC-BY-4.0 record                                                               | `REFERENCE-ONLY`             | scale/readability study only                       |
+| `SourceAssets/crossy_road_3d_scene/`               | reference scene     | glTF scene and binary                        | embedded CC-BY-4.0 record                                                               | `REFERENCE-ONLY`             | composition/readability study only                 |
 
 ## 5. Detailed inventory
 
-### 5.1 `VoxelAnimals/` — primary agents
+### 5.1 `VoxelAnimals/` â€” primary agents
 
 - 40 OBJ models named `animal-0` through `animal-39`.
 - Shared material/texture sources, Unity files, and a MagicaVoxel source.
@@ -72,7 +74,7 @@ Before implementation:
 - normalize scale, pivot, forward axis, ground contact, shadow, and animation anchor;
 - preserve proof of purchase privately outside the web bundle.
 
-### 5.2 `Voxel_Animal_Asset_Pack/` — secondary voxel source
+### 5.2 `SourceAssets/Voxel_Animal_Asset_Pack/` â€” secondary voxel source
 
 Recognized animal candidates include axolotl, bear, bunny, cat, chicken, cow, crocodile, dog, elephant, fish, fox, frog, mole, monkey, mouse, panda, parrot, penguin, piglet, turtle, unicorn, and worm.
 
@@ -86,7 +88,7 @@ Technical notes:
 
 Status is `HOLD`: no license/readme was found. Do not commit or ship derivatives until the user supplies a store page, receipt, or license grant.
 
-### 5.3 `Low_Poly_Cars_DevilsWorkShop_V03/` — initial vehicles
+### 5.3 `SourceAssets/Low_Poly_Cars_DevilsWorkShop_V03/` â€” initial vehicles
 
 Complete candidates:
 
@@ -101,33 +103,33 @@ The embedded license grants ongoing, non-exclusive worldwide commercial use for 
 
 Start with three compact variants, one pickup, and the bus. Treat the police car as an uncommon visual variant and retain the other pickup for future cosmetic variety.
 
-### 5.4 `Free_Low_Poly_Vehicles_Rgsdev/` — expanded vehicles
+### 5.4 `SourceAssets/Free_Low_Poly_Vehicles_Rgsdev/` â€” expanded vehicles
 
 Individual FBX models include Ambulance, Bus, Firetruck, Hatchback, Limousine, Monster Truck, Pickup, Muscle, Muscle 2, Roadster, Sedan, Sports, SUV, Taxi, Van, four Police variants, Truck, and Truck with trailer.
 
 Do not use `All vehicles.fbx` at runtime. Individual models keep culling, pooling, manifests, and bundles deterministic.
 
-The embedded license declares CC0/public-domain use, including commercial projects. Creator: Raphael Gonçalves / Rgsdev; credit is optional.
+The embedded license declares CC0/public-domain use, including commercial projects. Creator: Raphael GonÃ§alves / Rgsdev; credit is optional.
 
 Prioritize Sedan/Hatchback, Taxi, Van, Bus, Truck, and one service vehicle. Emergency vehicles remain cosmetic variants unless canonical gameplay defines a distinct hazard. Long models require footprint-readability tests.
 
-### 5.5 `Free_Cars/` — unverified vehicles
+### 5.5 `SourceAssets/Free_Cars/` â€” unverified vehicles
 
 Contains Ambulance, Bus, two regular cars, two ice-cream trucks, Pickup, Police Car, Sport Car, Taxi, `SMAT`, and two shared textures.
 
-Status is `HOLD`: “Free” in a filename is not licensing evidence. If cleared, the ice-cream trucks and taxi may offer useful silhouette variety.
+Status is `HOLD`: â€œFreeâ€ in a filename is not licensing evidence. If cleared, the ice-cream trucks and taxi may offer useful silhouette variety.
 
-### 5.6 `SportsCar_Yellow/` — unverified lightweight car
+### 5.6 `SourceAssets/SportsCar_Yellow/` â€” unverified lightweight car
 
-Contains FBX, OBJ, Collada 1.4/1.5, PNG, and PSD. The readme reports 220 vertices, 222 polygons, UV mapping, a 1024×1024 diffuse texture, and mobile readiness.
+Contains FBX, OBJ, Collada 1.4/1.5, PNG, and PSD. The readme reports 220 vertices, 222 polygons, UV mapping, a 1024Ã—1024 diffuse texture, and mobile readiness.
 
 Status is `HOLD`: the descriptive readme does not include an explicit license grant. If cleared, use it as a visual compact-car variant with canonical mechanics.
 
-### 5.7 `pack_cartoon_cars/` — unverified combined scene
+### 5.7 `SourceAssets/pack_cartoon_cars/` â€” unverified combined scene
 
 Contains `pack_cartoon_cars.fbx` and `pack_cartoon_cars.blend`. Status is `HOLD` because no license/readme was present. Separate, name, normalize, and review individual models after clearance; never load the complete source scene in the browser.
 
-### 5.8 `KayKit_BlockBits_1.0_FREE/` — blocks and terrain
+### 5.8 `SourceAssets/KayKit_BlockBits_1.0_FREE/` â€” blocks and terrain
 
 Useful designs include grass, dirt, gravel, sand, snow, water, lava, stone, metal, glass, wood, ore stones, bricks, colored blocks, decorative blocks, and striped blocks.
 
@@ -135,7 +137,7 @@ FBX, glTF/BIN, and OBJ/MTL are duplicate delivery formats for the same 40 design
 
 Use for tile/material prototypes and world dressing, not authoritative map geometry. Recolor into the Lana Roads palette. Prefer instanced procedural geometry when it is smaller than many nearly identical meshes.
 
-### 5.9 `KayKit_Forest_Nature_Pack_1.0_FREE/` — environment
+### 5.9 `SourceAssets/KayKit_Forest_Nature_Pack_1.0_FREE/` â€” environment
 
 Includes 22 bush variants, grass mesh/color variants, more than 60 rock variants, and leafy/bare tree families. The 105 designs are redundantly delivered as FBX, glTF/BIN, and OBJ/MTL.
 
@@ -143,13 +145,13 @@ The embedded license is CC0; creator credit to Kay Lousberg / KayKit is optional
 
 Curate approximately four trees, four rocks, three bushes, and two grass clusters per initial biome. Use instancing, palette variants, rotation, mirroring, and scale bands. Decorative vegetation cannot obscure hazard approach, occupied tiles, or the local player.
 
-### 5.10 `chicken_-_crossy_road/` — reference-only
+### 5.10 `SourceAssets/chicken_-_crossy_road/` â€” reference-only
 
 Contains `scene.gltf`, `scene.bin`, and a license identifying a Sketchfab model by `micaela.reyes0059` under CC-BY-4.0.
 
 It is `REFERENCE-ONLY` because it explicitly represents a Crossy Road character. Do not ship, trace, recolor, derive an agent from it, or use it in marketing. Private inspection is limited to broad camera-scale and silhouette-readability study.
 
-### 5.11 `crossy_road_3d_scene/` — reference-only
+### 5.11 `SourceAssets/crossy_road_3d_scene/` â€” reference-only
 
 Contains `scene.gltf`, `scene.bin`, and a license identifying a Sketchfab model by `ROMANProJects` under CC-BY-4.0.
 
@@ -159,7 +161,7 @@ It is `REFERENCE-ONLY` due to explicit Crossy Road scene identity. Do not ship i
 
 ### Agents
 
-- Select 6–10 visually distinct models from `VoxelAnimals/`.
+- Select 6â€“10 visually distinct models from `VoxelAnimals/`.
 - Include one free starter and representatives for class/rarity presentation.
 - Produce GLB models, portraits, shadows, and standard animation anchors.
 
@@ -250,16 +252,16 @@ Create a credits page before launch for required attribution and voluntary creat
 
 On 2026-08-13, these archives were inspected for unsafe paths, extracted to new sibling folders, verified by exact file count, and deleted at the user's request:
 
-| Deleted archive                              | SHA-256                                                            | Destination                           | Files |
-| -------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------- | ----: |
-| `chicken_-_crossy_road.zip`                  | `60E599B323C18C41253C273AC3DB02FA6B8C3809BE331D67AAFCC68D66200BDB` | `chicken_-_crossy_road/`              |     3 |
-| `crossy_road_3d_scene.dae.zip`               | `75B80C097CB4B041ABB779E9B8E0047D49F80A06BE2A1A7A28B89E2965865DEC` | `crossy_road_3d_scene/`               |     3 |
-| `Free Cars.zip`                              | `642229E30CAB6A603AF6DBD8B23FAD23B45F9A26E574B6B0FFD6A90516191A24` | `Free_Cars/`                          |    13 |
-| `Free Low Poly Vehicles Pack by Rgsdev.zip`  | `9091E478BD211A7CF8B562F04E8F061A2188D323E2FA0878F3F1641E5E67C800` | `Free_Low_Poly_Vehicles_Rgsdev/`      |    27 |
-| `KayKit_BlockBits_1.0_FREE.zip`              | `0729D8E701B79EA20B329EAE170BFE2C6AB7843D88B24F208E6675BCB8524334` | `KayKit_BlockBits_1.0_FREE/`          |   251 |
-| `KayKit_Forest_Nature_Pack_1.0_FREE (1).zip` | `2EE83E63BB7695F2D884EC27DDF6FCE020789A452E7D5C5B0BBDFC4F6EA1FC8C` | `KayKit_Forest_Nature_Pack_1.0_FREE/` |   641 |
-| `pack_cartoon_cars.zip`                      | `1D015EBBECE634DF53872F551B63D4A45FF3DEE56791C44DC334A8ECEFA9CDC6` | `pack_cartoon_cars/`                  |     2 |
-| `Voxel_Animal_Asset_Pack.zip`                | `C806138B4BAAB99B10A176CA05EC6B5289B799F24FD5398BC5CFC69F49FDBDEB` | `Voxel_Animal_Asset_Pack/`            |   430 |
+| Deleted archive                              | SHA-256                                                            | Destination                                        | Files |
+| -------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------- | ----: |
+| `chicken_-_crossy_road.zip`                  | `60E599B323C18C41253C273AC3DB02FA6B8C3809BE331D67AAFCC68D66200BDB` | `SourceAssets/chicken_-_crossy_road/`              |     3 |
+| `crossy_road_3d_scene.dae.zip`               | `75B80C097CB4B041ABB779E9B8E0047D49F80A06BE2A1A7A28B89E2965865DEC` | `SourceAssets/crossy_road_3d_scene/`               |     3 |
+| `Free Cars.zip`                              | `642229E30CAB6A603AF6DBD8B23FAD23B45F9A26E574B6B0FFD6A90516191A24` | `SourceAssets/Free_Cars/`                          |    13 |
+| `Free Low Poly Vehicles Pack by Rgsdev.zip`  | `9091E478BD211A7CF8B562F04E8F061A2188D323E2FA0878F3F1641E5E67C800` | `SourceAssets/Free_Low_Poly_Vehicles_Rgsdev/`      |    27 |
+| `KayKit_BlockBits_1.0_FREE.zip`              | `0729D8E701B79EA20B329EAE170BFE2C6AB7843D88B24F208E6675BCB8524334` | `SourceAssets/KayKit_BlockBits_1.0_FREE/`          |   251 |
+| `KayKit_Forest_Nature_Pack_1.0_FREE (1).zip` | `2EE83E63BB7695F2D884EC27DDF6FCE020789A452E7D5C5B0BBDFC4F6EA1FC8C` | `SourceAssets/KayKit_Forest_Nature_Pack_1.0_FREE/` |   641 |
+| `pack_cartoon_cars.zip`                      | `1D015EBBECE634DF53872F551B63D4A45FF3DEE56791C44DC334A8ECEFA9CDC6` | `SourceAssets/pack_cartoon_cars/`                  |     2 |
+| `Voxel_Animal_Asset_Pack.zip`                | `C806138B4BAAB99B10A176CA05EC6B5289B799F24FD5398BC5CFC69F49FDBDEB` | `SourceAssets/Voxel_Animal_Asset_Pack/`            |   430 |
 
 The ZIP deletion is not recoverable from this workspace. The verified extracted folders are the retained copies.
 

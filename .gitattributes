@@ -1,2 +1,33 @@
-# Purchased Unity Asset Store source pack. Preserve bytes and suppress source-style diffs.
+# Third-party source art. Licenses and readmes remain normal Git files, while
+# model, texture, scene, and editor payloads are stored in Git LFS.
 VoxelAnimals/** -text -diff
+VoxelAnimals/**/*.obj filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.fbx filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.dae filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.gltf filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.glb filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.bin filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.blend filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.vox filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.png filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.tga filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.psd filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.exr filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.unity filter=lfs diff=lfs merge=lfs -text
+VoxelAnimals/**/*.asset filter=lfs diff=lfs merge=lfs -text
+
+SourceAssets/** -text -diff
+SourceAssets/**/*.obj filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.fbx filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.dae filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.gltf filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.glb filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.bin filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.blend filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.vox filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.png filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.tga filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.psd filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.exr filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.unity filter=lfs diff=lfs merge=lfs -text
+SourceAssets/**/*.asset filter=lfs diff=lfs merge=lfs -text
