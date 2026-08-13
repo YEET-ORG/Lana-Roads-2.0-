@@ -234,6 +234,10 @@ pub mod crossy_world {
         instructions::gameplay::rotate_session(ctx, new_authority, new_expiry)
     }
 
+    pub fn end_session(ctx: Context<RotateSession>) -> Result<()> {
+        instructions::gameplay::end_session(ctx)
+    }
+
     pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Result<()> {
         instructions::gameplay::spawn(ctx, attempt_nonce)
     }

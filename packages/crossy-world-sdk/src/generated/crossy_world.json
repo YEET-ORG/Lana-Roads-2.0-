@@ -2983,6 +2983,30 @@
       "args": []
     },
     {
+      "name": "end_session",
+      "discriminator": [
+        11,
+        244,
+        61,
+        154,
+        212,
+        249,
+        15,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "run",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "ensure_profile",
       "discriminator": [
         63,

@@ -221,6 +221,28 @@ pub fn rotate_session(
     Ok(())
 }
 
+/// Hand the gameplay authority back to the wallet.
+///
+/// A session key lives in browser storage and keeps working until it
+/// expires, so a player who walks away, dies, or closes the tab leaves a
+/// usable credential behind for as long as it has left to run. Ending it is
+/// the wallet saying "nothing may act for me until I say so again": the
+/// authority is cleared and the expiry zeroed, so every session-signed
+/// action is refused from the next instruction onward.
+///
+/// This touches no score, position, or ownership, and the wallet can always
+/// act on its own run or register a fresh session with `rotate_session`.
+pub fn end_session(ctx: Context<RotateSession>) -> Result<()> {
+    let run = &mut ctx.accounts.run;
+    run.session_authority = Pubkey::default();
+    run.session_expiry = 0;
+    run.session_rotation = run
+        .session_rotation
+        .checked_add(1)
+        .ok_or(CrossyError::Overflow)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // spawn (ER) — paid via receipt, casual free
 // ---------------------------------------------------------------------------

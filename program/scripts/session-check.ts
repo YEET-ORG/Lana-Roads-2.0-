@@ -254,7 +254,48 @@ async function main() {
       ? `PASS  renewed session moves again — (${before.x}, ${before.y}) -> (${after.x}, ${after.y}), score ${after.score}`
       : `FAIL  still stuck after rotation: ${refused}`,
   );
-  process.exitCode = moved && staleIgnored ? 0 : 1;
+  // Ending it hands authority back: the same key that just worked stops.
+  await erAsWallet.methods
+    .endSession()
+    .accountsPartial({ run: runPda, wallet: player.publicKey })
+    .rpc({ commitment: "processed" });
+  const ended: any = await erAsWallet.account.playerRun.fetch(runPda);
+  const cleared =
+    ended.sessionAuthority.equals(web3.PublicKey.default) &&
+    ended.sessionExpiry.toNumber() === 0;
+
+  const seqBefore = ended.actionSeq.toNumber();
+  await move(erAsFresh, fresh).catch(() => {});
+  await sleep(1_500);
+  const afterEnd: any = await erAsWallet.account.playerRun.fetch(runPda);
+  const revoked = afterEnd.actionSeq.toNumber() === seqBefore;
+  console.log(
+    cleared && revoked
+      ? `PASS  ended session is revoked — authority cleared, run still at (${afterEnd.x}, ${afterEnd.y})`
+      : `FAIL  cleared=${cleared} revoked=${revoked} (run at ${afterEnd.x},${afterEnd.y})`,
+  );
+
+  // And the wallet can always take the key back.
+  await erAsWallet.methods
+    .rotateSession(fresh.publicKey, new BN(Math.floor(Date.now() / 1000) + 3600))
+    .accountsPartial({ run: runPda, wallet: player.publicKey })
+    .rpc({ commitment: "processed" });
+  let resumed = false;
+  await move(erAsFresh, fresh)
+    .then(() => {
+      resumed = true;
+    })
+    .catch(() => {});
+  await sleep(1_500);
+  const finalRun: any = await erAsWallet.account.playerRun.fetch(runPda);
+  resumed = finalRun.actionSeq.toNumber() > seqBefore;
+  console.log(
+    resumed
+      ? `PASS  the wallet takes it back — moved to (${finalRun.x}, ${finalRun.y}), score ${finalRun.score}`
+      : `FAIL  could not resume after ending the session`,
+  );
+
+  process.exitCode = moved && staleIgnored && cleared && revoked && resumed ? 0 : 1;
 }
 
 main().catch((e) => {

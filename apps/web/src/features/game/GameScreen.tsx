@@ -40,6 +40,9 @@ function errorText(e: unknown): string {
     : msg.slice(0, 140);
 }
 
+/** Quiet spell after which the session is handed back to the wallet. */
+const IDLE_SESSION_MS = 3 * 60 * 1000;
+
 type PlayRoute = Extract<Route, { name: "play" }>;
 
 interface Hud {
@@ -178,6 +181,10 @@ export function GameScreen({
   const lastAuthSeqRef = useRef(-1);
   /** Consecutive actions the chain never accepted. */
   const rejectedRunRef = useRef(0);
+  /** True while gameplay authority is back with the wallet. */
+  const sessionEndedRef = useRef(false);
+  /** Last time the player actually did something. */
+  const lastInputAtRef = useRef(performance.now());
   /** Last celebrated score decade (milestone bursts every 10 rows). */
   const scoreDecadeRef = useRef(0);
 
@@ -482,6 +489,7 @@ export function GameScreen({
         mode: route.mode,
         sessionAuthority: boot.session.publicKey,
       });
+      sessionEndedRef.current = false;
       if (rotated) {
         setHud((h) => ({ ...h, lastRejection: null }));
         reconcileNowRef.current();
@@ -489,6 +497,26 @@ export function GameScreen({
     } catch (e) {
       setHud((h) => ({ ...h, lastRejection: `session: ${errorText(e)}` }));
     }
+  }
+
+  /**
+   * Hand gameplay authority back to the wallet.
+   *
+   * The session key lives in browser storage and keeps working until it
+   * expires, so every way of stopping play — leaving, dying, walking away —
+   * otherwise leaves a usable credential behind. `renewSession` mints a
+   * fresh one the moment the player acts again.
+   */
+  async function endSession(reason: string) {
+    if (sessionEndedRef.current) return;
+    sessionEndedRef.current = true;
+    try {
+      await boot.client.endSession({ day: route.day, mode: route.mode });
+    } catch {
+      // Best effort: the session still lapses on its own, and any action
+      // taken with it is refused once the wallet rotates a new one in.
+    }
+    void reason;
   }
 
   // Sessions are time-limited and a run outlives them; top ours up long
@@ -500,14 +528,51 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
 
+  // Idle players are not playing. Give the key back after a quiet spell and
+  // take it again on the next input.
+  useEffect(() => {
+    const check = setInterval(() => {
+      const idleFor = performance.now() - lastInputAtRef.current;
+      if (idleFor > IDLE_SESSION_MS && !sessionEndedRef.current) {
+        void endSession("idle");
+        setHud((h) => ({ ...h, lastRejection: "session paused — press to resume" }));
+      }
+    }, 15_000);
+    return () => clearInterval(check);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.day, route.mode]);
+
+  // Leaving the game hands the key back too. The unload path is best-effort
+  // by nature; the idle timer is the reliable backstop behind it.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") void endSession("hidden");
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      void endSession("unmount");
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.day, route.mode]);
+
   // Input: fire-and-forget with local prediction. The session key signs and
   // pays (zero-fee ER); authority corrections arrive on the subscription.
   useEffect(() => {
     let lastMoveAt = 0;
     const detach = attachInput(
       (action) => {
+        lastInputAtRef.current = performance.now();
         const mine = liveRun.current;
         if (!mine || mine.state !== "active") return;
+        // Coming back from an idle pause: take the key again first. The
+        // action that woke us is spent on the handshake, and the next one
+        // plays normally.
+        if (sessionEndedRef.current) {
+          setHud((h) => ({ ...h, lastRejection: "resuming session…" }));
+          void renewSession();
+          return;
+        }
         if (action.kind === "move") {
           const now = performance.now();
           if (now - lastMoveAt < 60) return; // debounce bursts

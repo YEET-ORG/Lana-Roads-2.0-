@@ -2989,6 +2989,30 @@ export type CrossyWorld = {
       "args": []
     },
     {
+      "name": "endSession",
+      "discriminator": [
+        11,
+        244,
+        61,
+        154,
+        212,
+        249,
+        15,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "run",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "ensureProfile",
       "discriminator": [
         63,

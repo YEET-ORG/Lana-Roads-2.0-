@@ -866,6 +866,31 @@ export class CrossyClient {
   }
 
   /**
+   * Hand gameplay authority back to the wallet.
+   *
+   * The session key sits in browser storage and keeps working until it
+   * expires, so leaving the game, dying, or walking away all leave a live
+   * credential behind. Ending it costs one wallet-signed transaction and
+   * makes every session-signed action fail immediately; `ensureSession`
+   * mints a fresh one when the player comes back.
+   */
+  async endSession(params: { day: bigint; mode?: WorldMode }): Promise<boolean> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const runAddr = pda.run(world, wallet);
+    const run = await this.erProgram.account.playerRun
+      .fetchNullable(runAddr)
+      .catch(() => null);
+    // Nothing to revoke if the run never existed or is already handed back.
+    if (!run || run.sessionAuthority.equals(PublicKey.default)) return false;
+    await this.erProgram.methods
+      .endSession()
+      .accountsPartial({ run: runAddr, wallet })
+      .rpc({ commitment: "processed" });
+    return true;
+  }
+
+  /**
    * Fire-and-forget record claim. Movement deliberately does not touch the
    * world's record field (it would make every move contend on one hot
    * account), so a client that beats the record publishes it separately.
