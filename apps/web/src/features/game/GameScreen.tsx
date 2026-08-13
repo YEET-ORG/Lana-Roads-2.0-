@@ -138,7 +138,9 @@ export function GameScreen({
     attempt: number;
     state: string;
     score: number;
+    facing: number;
   } | null>(null);
+  const lastKickAtRef = useRef(0);
   /** Remote occupancy mirror for prediction (never send a doomed move). */
   const occupiedRef = useRef<Map<string, { x: number; y: number; state: string }>>(
     new Map(),
@@ -188,6 +190,7 @@ export function GameScreen({
             attempt: run.attemptNonce,
             state,
             score: run.score,
+            facing: run.facing,
           };
           scene.setLocal(run.x, run.y);
         }
@@ -351,7 +354,13 @@ export function GameScreen({
           actionSeq: mine.seq,
         };
         // Optimistic: advance the local mirror + visual immediately.
-        liveRun.current = { ...mine, x: nx, y: ny, seq: mine.seq + 1 };
+        liveRun.current = {
+          ...mine,
+          x: nx,
+          y: ny,
+          seq: mine.seq + 1,
+          facing: action.direction,
+        };
         sceneRef.current?.setLocal(nx, ny);
         setHud((h) =>
           h.lastRejection == null && h.x === nx && h.y === ny
@@ -379,7 +388,56 @@ export function GameScreen({
           if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
         }, 1300);
       } else if (action.kind === "kick") {
-        setHud((h) => ({ ...h, lastRejection: "kick: aim at an adjacent player" }));
+        const now = performance.now();
+        const coolLeft = 5000 - (now - lastKickAtRef.current);
+        if (coolLeft > 0) {
+          setHud((h) => ({
+            ...h,
+            lastRejection: `kick cooldown ${(coolLeft / 1000).toFixed(1)}s`,
+          }));
+          return;
+        }
+        // Target: the adjacent tile in facing direction, from the live map.
+        const dx =
+          mine.facing === Direction.Left ? -1 : mine.facing === Direction.Right ? 1 : 0;
+        const dy =
+          mine.facing === Direction.Forward
+            ? 1
+            : mine.facing === Direction.Backward
+              ? -1
+              : 0;
+        const [tx, ty] = [mine.x + dx, mine.y + dy];
+        let targetWallet: string | null = null;
+        for (const [w, r] of occupiedRef.current) {
+          if (r.x === tx && r.y === ty && r.state === "active") {
+            targetWallet = w;
+            break;
+          }
+        }
+        if (!targetWallet) {
+          setHud((h) => ({ ...h, lastRejection: "kick: face an adjacent player" }));
+          return;
+        }
+        lastKickAtRef.current = now;
+        const sent = { attemptNonce: mine.attempt, actionSeq: mine.seq };
+        liveRun.current = { ...mine, seq: mine.seq + 1 };
+        setHud((h) => ({ ...h, lastRejection: null }));
+        boot.client
+          .sendKick({
+            day: route.day,
+            mode: route.mode,
+            session: boot.session,
+            ...sent,
+            facing: mine.facing as Direction,
+            targetWallet: new PublicKey(targetWallet),
+            targetX: tx,
+            targetY: ty,
+          })
+          .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
+        const sentAt = performance.now();
+        setTimeout(() => {
+          if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+        }, 1300);
       }
     });
     return detach;

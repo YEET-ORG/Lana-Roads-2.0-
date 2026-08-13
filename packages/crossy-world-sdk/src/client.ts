@@ -754,6 +754,55 @@ export class CrossyClient {
   }
 
   /**
+   * Fire-and-forget Kick (same hot path as sendMove): the caller supplies
+   * its own state and the target's tile from the live push mirror — no
+   * fetches. Displacement lands as a push on the target's run.
+   */
+  async sendKick(params: {
+    day: bigint;
+    mode?: WorldMode;
+    session: Keypair;
+    attemptNonce: number;
+    actionSeq: number;
+    facing: Direction;
+    targetWallet: PublicKey;
+    targetX: number;
+    targetY: number;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    // Knockback destination: one tile beyond the target, same direction.
+    let [dx, dy] = [params.targetX, params.targetY];
+    if (params.facing === Direction.Forward) dy += 1;
+    else if (params.facing === Direction.Backward) dy -= 1;
+    else if (params.facing === Direction.Left) dx -= 1;
+    else dx += 1;
+    if (dx < 0 || dx > 63 || dy < 0) throw new Error("knockback out of bounds");
+    const targetSector = sectorForTile(world, params.targetX, params.targetY);
+    const destSector = sectorForTile(world, dx, dy);
+    const ix = await this.erProgram.methods
+      .kick(params.attemptNonce, new BN(params.actionSeq), new BN(Date.now()))
+      .accountsPartial({
+        world,
+        kicker: pda.run(world, wallet),
+        target: pda.run(world, params.targetWallet),
+        targetSector,
+        destSector: destSector.equals(targetSector) ? null : destSector,
+        chunk: pda.chunk(params.day, Math.floor(dy / 16)),
+        signer: params.session.publicKey,
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.erConnection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+      maxRetries: 0,
+    });
+  }
+
+  /**
    * Solsocket-style realtime feed: ONE processed-commitment programSubscribe
    * on the ER websocket, filtered by the world address at offset 8 — which
    * matches every PlayerRun, OccupancySector, and DailyBest of that world.
