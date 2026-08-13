@@ -192,9 +192,9 @@ export class WorldScene {
     const tMs = performance.now() - this.startMs + this.worldTimeOffsetMs;
 
     // Smooth local follow + camera.
-    this.localMesh.position.lerp(this.localTarget, 0.25);
+    this.localMesh.position.lerp(this.localTarget, 0.35);
     for (const [wallet, target] of this.remoteTargets) {
-      this.players.get(wallet)?.position.lerp(target, 0.2);
+      this.players.get(wallet)?.position.lerp(target, 0.28);
     }
     const cam = this.localMesh.position;
     this.camera.position.set(cam.x, 14, cam.z + 10);

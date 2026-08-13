@@ -139,6 +139,14 @@ export function GameScreen({
     state: string;
     score: number;
   } | null>(null);
+  /** Remote occupancy mirror for prediction (never send a doomed move). */
+  const occupiedRef = useRef<Map<string, { x: number; y: number; state: string }>>(
+    new Map(),
+  );
+  /** Force an immediate authoritative refetch (silence reconciler). */
+  const reconcileNowRef = useRef<() => void>(() => {});
+  /** Timestamp of the last authoritative push for OUR run. */
+  const lastOwnPushRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -150,11 +158,13 @@ export function GameScreen({
     let live = true;
     const me = boot.wallet.publicKey.toBase58();
     const remotes = new Map<string, { x: number; y: number; state: string }>();
+    occupiedRef.current = remotes;
 
     const applyRun = (run: any) => {
       const wallet = run.wallet.toBase58();
       const state = Object.keys(run.state)[0] ?? "?";
       if (wallet === me) {
+        lastOwnPushRef.current = performance.now();
         const mine = liveRun.current;
         liveRun.current = {
           x: run.x,
@@ -243,7 +253,15 @@ export function GameScreen({
       if (run) applyRun(run);
     };
     void reconcile();
+    reconcileNowRef.current = () => void reconcile();
     const sweep = setInterval(() => void reconcile(), 5000);
+
+    // Hot-path prewarm: persistent HTTP connection + background blockhash.
+    let stopPrewarm: (() => void) | null = null;
+    boot.client.prewarmEr().then((stop) => {
+      if (live) stopPrewarm = stop;
+      else stop();
+    });
 
     // Ping meter: ER RPC round-trip every 3s.
     const pingTimer = setInterval(async () => {
@@ -256,6 +274,7 @@ export function GameScreen({
       live = false;
       clearInterval(sweep);
       clearInterval(pingTimer);
+      stopPrewarm?.();
       unsubscribe();
       window.removeEventListener("resize", onResize);
       scene.destroy();
@@ -289,6 +308,13 @@ export function GameScreen({
               : 0;
         const [nx, ny] = [mine.x + dx, mine.y + dy];
         if (nx < 0 || nx > 63 || ny < 0) return;
+        // Prediction knows remote occupancy: don't send a doomed move.
+        for (const r of occupiedRef.current.values()) {
+          if (r.x === nx && r.y === ny) {
+            setHud((h) => ({ ...h, lastRejection: "tile occupied" }));
+            return;
+          }
+        }
         const sent = {
           x: mine.x,
           y: mine.y,
@@ -311,6 +337,14 @@ export function GameScreen({
             setHud((h) => ({ ...h, lastRejection: errorText(e) }));
           })
           .finally(() => setHud((h) => ({ ...h, pending: false })));
+        // Silence reconciler: a REJECTED move produces no push (no state
+        // change on-chain), which would strand the optimistic mirror. If no
+        // authoritative push has arrived since this send, refetch now
+        // instead of waiting for the 5s sweep.
+        const sentAt = performance.now();
+        setTimeout(() => {
+          if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+        }, 1300);
       } else if (action.kind === "kick") {
         setHud((h) => ({ ...h, lastRejection: "kick: aim at an adjacent player" }));
       }

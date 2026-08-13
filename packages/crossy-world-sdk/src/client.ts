@@ -661,6 +661,7 @@ export class CrossyClient {
 
   /** Cached ER blockhash for the zero-fee fire-and-forget hot path. */
   private erBlockhashCache: { value: string; fetchedAt: number } | null = null;
+  private erBlockhashTimer: ReturnType<typeof setInterval> | null = null;
 
   private async erBlockhash(): Promise<string> {
     const now = Date.now();
@@ -669,6 +670,33 @@ export class CrossyClient {
       this.erBlockhashCache = { value: blockhash, fetchedAt: now };
     }
     return this.erBlockhashCache.value;
+  }
+
+  /**
+   * Prewarm the ER hot path: opens/keeps the HTTP connection (so the first
+   * move never pays TLS setup) and refreshes the blockhash proactively in
+   * the background (so no move ever pays a blockhash round trip). Returns a
+   * disposer that stops the refresher.
+   */
+  async prewarmEr(): Promise<() => void> {
+    // Two sequential requests: the first performs the TLS handshake, the
+    // second confirms the connection is reused and hot.
+    await this.erConnection.getSlot("processed").catch(() => {});
+    const { blockhash } = await this.erConnection.getLatestBlockhash("processed");
+    this.erBlockhashCache = { value: blockhash, fetchedAt: Date.now() };
+    if (this.erBlockhashTimer) clearInterval(this.erBlockhashTimer);
+    this.erBlockhashTimer = setInterval(async () => {
+      try {
+        const { blockhash: b } = await this.erConnection.getLatestBlockhash("processed");
+        this.erBlockhashCache = { value: b, fetchedAt: Date.now() };
+      } catch {
+        /* next tick retries */
+      }
+    }, 10_000);
+    return () => {
+      if (this.erBlockhashTimer) clearInterval(this.erBlockhashTimer);
+      this.erBlockhashTimer = null;
+    };
   }
 
   /**
@@ -721,6 +749,7 @@ export class CrossyClient {
     tx.sign(params.session);
     return this.erConnection.sendRawTransaction(tx.serialize(), {
       skipPreflight: true,
+      maxRetries: 0,
     });
   }
 
