@@ -19,6 +19,7 @@ import { Direction } from "@crossy-world/sdk";
 import { CountUp } from "../../ui/CountUp";
 import { Confetti } from "../../ui/Confetti";
 import { agentModelIdFor } from "../../lib/agent";
+import { deathHeadline, type DeathCause } from "../../game/renderer/scene";
 
 export function DemoScreen({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,7 +30,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
   const [best, setBest] = useState(() =>
     Number(localStorage.getItem("crossy-world:demo-best") ?? 0),
   );
-  const [dead, setDead] = useState<number | null>(null);
+  const [dead, setDead] = useState<{ score: number; cause: DeathCause } | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
   const scoreRef = useRef(0);
   const revealedRef = useRef(0);
@@ -85,8 +86,9 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
         deadRef.current = true;
         s.killLocal();
         const final = scoreRef.current;
+        const cause = s.lastDeathCause;
         setTimeout(() => {
-          setDead(final);
+          setDead({ score: final, cause });
           setBest((b) => {
             const nb = Math.max(b, final);
             localStorage.setItem("crossy-world:demo-best", String(nb));
@@ -165,24 +167,20 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
         <span className="score-value" key={score}>
           {score}
         </span>
+        <span className="score-best">BEST {best}</span>
       </div>
-      <div className="hud top-left">
-        <div>
-          best <b>row {best}</b>
-        </div>
-        {rejection && (
+      {rejection && (
+        <div className="hud top-left">
           <div className="rejection" key={rejection}>
             {rejection}
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="hud top-right">
-        <span className="badge casual">PRACTICE · OFFLINE</span>
-        <button className="ghost" onClick={onExit}>
-          Exit
+        <button className="icon-btn" onClick={onExit} aria-label="exit">
+          ×
         </button>
       </div>
-      <div className="hud bottom-left">WASD / arrows or swipe to hop</div>
       {score === 0 && dead == null && (
         <div className="hud hop-hint">Tap or press W to hop</div>
       )}
@@ -190,20 +188,20 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
       {dead != null && (
         <div className="modal-backdrop">
           <div className="modal card death">
-            {dead >= best && dead > 0 && <Confetti />}
-            <h2>Squished!</h2>
+            {dead.score >= best && dead.score > 0 && <Confetti />}
+            <h2>{deathHeadline(dead.cause)}</h2>
             <div className="final-label">You reached</div>
             <div className="final-score">
-              row <CountUp value={dead} durationMs={650} />
+              row <CountUp value={dead.score} durationMs={650} />
             </div>
-            {dead >= best && dead > 0 && (
+            {dead.score >= best && dead.score > 0 && (
               <div className="final-label" style={{ color: "var(--sun-400)" }}>
                 New practice best
               </div>
             )}
             <div className="row">
               <button className="play" onClick={() => setRunNonce((n) => n + 1)}>
-                Play again
+                TAP TO RETRY
               </button>
               <button className="ghost" onClick={onExit}>
                 Exit

@@ -1,13 +1,12 @@
 /**
  * Home / mode selection, world-first: the live game world fills the screen
- * behind floating UI (Crossy grammar). Stats ride in compact chips; the two
- * entry paths sit in a bottom dock; the agent carousel swaps your animal
- * live in the world. Paid and casual stay visually distinct.
+ * behind a Crossy-style overlay. The selected agent is the hero; Play is
+ * the only giant CTA. Paid details live on a ticket sheet.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { dayEnd, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
-import { agentModelIdFor, getAgentChoice, setAgentChoice } from "../../lib/agent";
+import { agentModelIdFor, agentName, getAgentChoice, setAgentChoice } from "../../lib/agent";
 import { agentId, AGENT_COUNT } from "../../game/renderer/assets";
 import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
@@ -33,20 +32,35 @@ export function Home({
   boot,
   onPlay,
 }: {
-  boot: Bootstrapped;
+  boot: Bootstrapped | null;
   onPlay: (r: Route) => void;
 }) {
   const [info, setInfo] = useState<DayInfo | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
   const [countdown, setCountdown] = useState("");
   const [entering, setEntering] = useState(false);
-  const wallet = boot.wallet.publicKey.toBase58();
+  const [paidOpen, setPaidOpen] = useState(false);
+  const wallet = boot?.wallet.publicKey.toBase58() ?? "offline";
   const [agentIdx, setAgentIdx] = useState(
     () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
   );
   const menuSceneRef = useRef<WorldScene | null>(null);
+  const swipeRef = useRef<{ x: number; t: number } | null>(null);
 
   useEffect(() => {
+    if (!boot) {
+      setWarn("Cluster offline — practice is still open.");
+      setInfo({
+        day: 0n,
+        pool: 0n,
+        rollover: 0n,
+        recordScore: 0,
+        recordHolder: "",
+        activePlayers: 0,
+        status: "offline",
+      });
+      return;
+    }
     let live = true;
     (async () => {
       try {
@@ -55,9 +69,7 @@ export function Home({
         const world = await boot.client.getWorld(WorldMode.Paid, day).catch(() => null);
         if (!live) return;
         if (!daily || !world) {
-          setWarn(
-            `Today's competition (day ${day}) is not prepared on this cluster yet.`,
-          );
+          setWarn(`Today's competition (day ${day}) is not prepared on this cluster yet.`);
           setInfo({
             day,
             pool: 0n,
@@ -79,8 +91,7 @@ export function Home({
           status: Object.keys(daily.status)[0] ?? "?",
         });
       } catch {
-        if (live)
-          setWarn("Can't reach the cluster — the daily competition is unavailable.");
+        if (live) setWarn("Can't reach the cluster — the daily competition is unavailable.");
       }
     })();
     return () => {
@@ -109,6 +120,20 @@ export function Home({
     sfx.hop();
   }
 
+  function onSwipeStart(e: PointerEvent) {
+    swipeRef.current = { x: e.clientX, t: performance.now() };
+  }
+  function onSwipeEnd(e: PointerEvent) {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    if (Math.abs(dx) < 40) return;
+    cycleAgent(dx < 0 ? 1 : -1);
+  }
+
+  const paidOpenable = info?.status === "open";
+
   return (
     <div className="world-home">
       <MenuBackdrop
@@ -118,50 +143,102 @@ export function Home({
       <div className="home-overlay">
         {warn && <div className="banner floating">{warn}</div>}
 
-        <div className="chips">
-          {info ? (
-            <>
-              <span className="chip">
-                <label>day</label> {info.day.toString()}
-              </span>
-              <span className="chip">
-                <label>cutoff</label> {countdown || "…"}
-              </span>
-              <span className="chip gold">
-                <label>pool</label> {(Number(info.pool) / 1e6).toFixed(2)} USDC
-              </span>
-              <span className="chip">
-                <label>record</label> row {info.recordScore}
-              </span>
-              <span className="chip">
-                <label>live</label> {info.activePlayers}
-              </span>
-            </>
-          ) : (
-            <span className="chip">loading day…</span>
-          )}
-        </div>
+        <div className="home-spacer" />
 
-        <div className="agent-pick">
+        <div
+          className="agent-hero"
+          onPointerDown={onSwipeStart}
+          onPointerUp={onSwipeEnd}
+          onPointerCancel={() => {
+            swipeRef.current = null;
+          }}
+        >
           <button
-            className="arrow"
+            className="arrow round"
             aria-label="previous agent"
             onClick={() => cycleAgent(-1)}
           >
-            &lsaquo;
+            ‹
           </button>
-          <span className="agent-label">
-            <label>your agent</label>
-            {String(agentIdx).padStart(2, "0")}
-          </span>
-          <button className="arrow" aria-label="next agent" onClick={() => cycleAgent(1)}>
-            &rsaquo;
+          <div className="agent-nameplate">
+            <span className="agent-name" key={agentIdx}>
+              {agentName(agentIdx)}
+            </span>
+            <span className="agent-sub">swipe or tap to switch</span>
+          </div>
+          <button
+            className="arrow round"
+            aria-label="next agent"
+            onClick={() => cycleAgent(1)}
+          >
+            ›
           </button>
         </div>
 
-        <div className="dock">
-          <div className="dock-card paid">
+        <div className="home-cta">
+          <button
+            className="play giant"
+            onClick={() => {
+              if (!boot || !info || info.status === "offline" || info.status === "unprepared") {
+                onPlay({ name: "demo" });
+                return;
+              }
+              info &&
+                onPlay({
+                  name: "play",
+                  mode: WorldMode.Casual,
+                  day: info.day,
+                  attemptNonce: 0,
+                  receiptNonce: 0,
+                });
+            }}
+          >
+            PLAY
+          </button>
+          <button
+            className="ticket"
+            onClick={() => {
+              sfx.click();
+              setPaidOpen(true);
+            }}
+          >
+            <span>DAILY POT</span>
+            <b>1 USDC</b>
+          </button>
+          <button className="text-link" onClick={() => onPlay({ name: "demo" })}>
+            Practice offline
+          </button>
+        </div>
+      </div>
+
+      {paidOpen && info && (
+        <div className="sheet-backdrop" onClick={() => setPaidOpen(false)}>
+          <div
+            className="sheet paid-sheet"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Daily competition"
+          >
+            <div className="sheet-handle" />
             <h2>Daily competition</h2>
+            <div className="sheet-stats">
+              <span>
+                <label>pool</label>
+                {(Number(info.pool) / 1e6).toFixed(2)} USDC
+              </span>
+              <span>
+                <label>record</label>
+                row {info.recordScore}
+              </span>
+              <span>
+                <label>live</label>
+                {info.activePlayers}
+              </span>
+              <span>
+                <label>cutoff</label>
+                {countdown || "…"}
+              </span>
+            </div>
             <p>
               Entry <b>1 USDC</b> · winner takes <b>90%</b> · revival 10 → 20 → 40 USDC,
               doubling, 60s window.
@@ -169,50 +246,27 @@ export function Home({
             <p className="disclosure">
               Stronger classes come from rarer agents — intentionally pay-to-win.
             </p>
-            <button
-              className="primary"
-              disabled={entering || !info || info.status !== "open"}
-              onClick={() => setEntering(true)}
-            >
-              {!info
-                ? "Loading…"
-                : info.status === "open"
-                  ? "Enter for 1 USDC"
-                  : `Day is ${info.status}`}
-            </button>
-          </div>
-          <div className="dock-card casual">
-            <h2>Casual — free</h2>
-            <p>
-              No fee, no prize, no revival. Every class unlocked. Same world, separate
-              leaderboard.
-            </p>
             <div className="row">
               <button
-                className="play"
-                disabled={!info}
-                onClick={() =>
-                  info &&
-                  onPlay({
-                    name: "play",
-                    mode: WorldMode.Casual,
-                    day: info.day,
-                    attemptNonce: 0, // resolved by the game screen
-                    receiptNonce: 0,
-                  })
-                }
+                className="primary"
+                disabled={entering || !paidOpenable}
+                onClick={() => {
+                  sfx.confirm();
+                  setEntering(true);
+                  setPaidOpen(false);
+                }}
               >
-                Play free
+                {paidOpenable ? "Enter for 1 USDC" : `Day is ${info.status}`}
               </button>
-              <button className="ghost" onClick={() => onPlay({ name: "demo" })}>
-                Practice offline
+              <button className="ghost" onClick={() => setPaidOpen(false)}>
+                Back
               </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {entering && info && (
+      {entering && info && boot && (
         <EntryFlow
           boot={boot}
           day={info.day}

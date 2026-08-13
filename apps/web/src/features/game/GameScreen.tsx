@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { Direction, pda, ReceiptKind, revivePrice, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
-import { WorldScene } from "../../game/renderer/scene";
+import { deathHeadline, WorldScene, type DeathCause } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
 import { attachInput } from "../../game/input/keys";
 import { evaluateTile, LANE_RIVER, tickOf } from "../../game/simulation/hazards";
@@ -90,7 +90,10 @@ export function GameScreen({
   const [death, setDeath] = useState<DeathInfo | null>(null);
   const [reviving, setReviving] = useState(false);
   /** Casual runs end outright on death; the player just goes again. */
-  const [endedScore, setEndedScore] = useState<number | null>(null);
+  const [endedScore, setEndedScore] = useState<{ score: number; cause: DeathCause } | null>(
+    null,
+  );
+  const deathCauseRef = useRef<DeathCause>("impact");
   const [respawning, setRespawning] = useState(false);
   const world = pda.world(route.mode, route.day);
 
@@ -254,8 +257,10 @@ export function GameScreen({
           scene?.setLocal(run.x, run.y);
         }
         // Death/revive presentation: the world reacts before the overlay.
-        if (state === "deadAwaitingRevive" || state === "ended") scene?.killLocal();
-        else if (state === "active") scene?.reviveLocal();
+        if (state === "deadAwaitingRevive" || state === "ended") {
+          scene?.killLocal();
+          if (scene) deathCauseRef.current = scene.lastDeathCause;
+        } else if (state === "active") scene?.reviveLocal();
         // HUD updates only when something visible changed (uncontrolled
         // re-renders on every ~50ms push cause visible jank).
         setHud((h) =>
@@ -293,7 +298,7 @@ export function GameScreen({
           const score = liveRun.current!.score;
           window.clearTimeout(deathTimerRef.current);
           deathTimerRef.current = window.setTimeout(
-            () => live && setEndedScore(score),
+            () => live && setEndedScore({ score, cause: deathCauseRef.current }),
             450,
           );
         }
@@ -809,57 +814,38 @@ export function GameScreen({
         <span className="score-value" key={hud.score}>
           {hud.score}
         </span>
+        <span className="score-best">BEST {hud.record}</span>
       </div>
-      <div className="hud top-left">
-        <div>
-          best <b>row {hud.record}</b>
-        </div>
-        <div className="dim">
-          ({hud.x}, {hud.y}) · {hud.state}
-          {hud.pending && " · sending…"}
-        </div>
-        {hud.lastRejection && (
+      {hud.lastRejection && (
+        <div className="hud top-left">
           <div className="rejection" key={hud.lastRejection}>
             {hud.lastRejection}
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="hud top-right">
-        {hud.pingMs != null && (
-          <span
-            className={
-              hud.pingMs < 150 ? "ping good" : hud.pingMs < 400 ? "ping mid" : "ping bad"
-            }
-          >
-            {hud.pingMs}ms
-          </span>
-        )}
-        <span className={route.mode === WorldMode.Paid ? "badge paid" : "badge casual"}>
-          {route.mode === WorldMode.Paid ? "PAID · 1 USDC" : "CASUAL · FREE"}
-        </span>
-        <button className="ghost" onClick={onExit}>
-          Exit
+        <button className="icon-btn" onClick={onExit} aria-label="exit">
+          ×
         </button>
       </div>
-      <div className="hud bottom-left">WASD / arrows or swipe to hop · Space to kick</div>
 
       {endedScore != null && !death && (
         <div className="modal-backdrop">
           <div className="modal card death">
-            {endedScore >= hud.record && endedScore > 0 && <Confetti />}
-            <h2>Squished!</h2>
+            {endedScore.score >= hud.record && endedScore.score > 0 && <Confetti />}
+            <h2>{deathHeadline(endedScore.cause)}</h2>
             <div className="final-label">You reached</div>
             <div className="final-score">
-              row <CountUp value={endedScore} durationMs={650} />
+              row <CountUp value={endedScore.score} durationMs={650} />
             </div>
-            {endedScore >= hud.record && endedScore > 0 && (
+            {endedScore.score >= hud.record && endedScore.score > 0 && (
               <div className="final-label" style={{ color: "var(--sun-400)" }}>
                 New personal course record
               </div>
             )}
             <div className="row">
               <button className="play" disabled={respawning} onClick={playAgain}>
-                {respawning ? "Starting…" : "Play again"}
+                {respawning ? "Starting…" : "TAP TO RETRY"}
               </button>
               <button className="ghost" onClick={onExit}>
                 Exit
@@ -872,7 +858,7 @@ export function GameScreen({
       {death && (
         <div className="modal-backdrop">
           <div className="modal card death">
-            <h2>You died</h2>
+            <h2>{deathHeadline(deathCauseRef.current)}</h2>
             <div className="final-label">Score retained</div>
             <div className="final-score">
               row <CountUp value={hud.score} durationMs={650} />

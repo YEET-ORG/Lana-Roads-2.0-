@@ -1,13 +1,12 @@
 /**
  * World-first menu backdrop (Crossy grammar, docs §"world-first menus"):
  * the real game world runs live behind the home UI — traffic drives by,
- * trains pass, the player's agent idles mid-world. No input, no collision;
- * the same WorldScene the game uses, on synthetic lanes.
+ * trains pass, the player's agent idles on a grass pocket in the foreground.
  */
 import { useEffect, useRef } from "react";
 import { WorldScene } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
-import { makeLane, demoSeed } from "../../game/simulation/demoLanes";
+import { demoSeed, makeGrassLane, makeLane } from "../../game/simulation/demoLanes";
 
 export function MenuBackdrop({
   modelId,
@@ -27,10 +26,12 @@ export function MenuBackdrop({
       if (!live) return;
       scene = new WorldScene(canvas, { modelId });
       sceneRef.current = scene;
+      scene.setPresentation("menu");
       scene.resize();
-      for (let r = 0; r < 36; r++) scene.setLane(r, makeLane(r, 11), demoSeed(11));
-      // Rows 0–2 are always safe grass: the agent poses there.
-      scene.setLocal(32, 2);
+      for (let r = 0; r < 36; r++) {
+        scene.setLane(r, r < 5 ? makeGrassLane() : makeLane(r, 11), demoSeed(11));
+      }
+      scene.setLocal(32, 1);
       onScene?.(scene);
     });
     const onResize = () => sceneRef.current?.resize();

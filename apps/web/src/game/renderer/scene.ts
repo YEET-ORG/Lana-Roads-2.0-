@@ -20,7 +20,7 @@ import {
   railPhaseVisual,
 } from "../simulation/hazards";
 import { agentId, instantiate, pickDeterministic, ROCK_POOL } from "./assets";
-import { BlockDust } from "./effects";
+import { BlockDust, type Surface } from "./effects";
 import { sfx } from "../audio";
 import { arc, clamp01, easeOutBack, noise1d, smoothFactor } from "./tween";
 
@@ -28,6 +28,15 @@ export interface RemotePlayer {
   wallet: string;
   x: number;
   y: number;
+}
+
+export type DeathCause = "water" | "impact" | "train";
+export type Presentation = "play" | "menu";
+
+export function deathHeadline(cause: DeathCause): string {
+  if (cause === "water") return "SPLASHED!";
+  if (cause === "train") return "TOASTED!";
+  return "SQUISHED!";
 }
 
 /** Lana Roads palette (docs/FRONTEND.md §12.1). */
@@ -41,11 +50,18 @@ const COLORS = {
   river: 0x22b9e6,
   rail: 0x6b5d52,
   log: 0x8a5a2b,
+  logBark: 0x6b4220,
+  logEnd: 0xc9a06a,
+  moss: 0x3aa35c,
+  riverDeep: 0x0e6a92,
+  bank: 0xd7efe8,
   train: 0xffd23f,
   trainCab: 0x18243a,
+  trainTrim: 0xf45169,
   warning: 0xf45169,
   dust: 0xe8dfd0,
   shadow: 0x08111f,
+  lamp: 0xfff1a8,
 };
 
 // ---- motion constants (ms unless noted) ----
@@ -161,6 +177,24 @@ class PlayerRig {
       // Chained hops keep momentum: no fresh anticipation mid-run.
       skipAnticipation: airborne,
     };
+  }
+
+  /** In-place hop for menu agent swaps. */
+  flourish() {
+    if (this.state.name === "dead") return;
+    const here = this.root.position.clone();
+    this.state = {
+      name: "hop",
+      from: here,
+      to: here.clone(),
+      start: performance.now(),
+      skipAnticipation: true,
+    };
+  }
+
+  setVisualScale(scale: number) {
+    this.modelScale = scale;
+    this.model.scale.setScalar(scale);
   }
 
   /** Snap without animation (spawn / large corrections). */
@@ -306,12 +340,19 @@ export class WorldScene {
   private hitStopUntil = 0;
   private startMs = performance.now();
   private viewHeight = 13; // world units visible vertically
+  private presentation: Presentation = "play";
+  private waterTime = { value: 0 };
+  private lastWhooshAt = 0;
+  private lastBellAt = 0;
+  lastDeathCause: DeathCause = "impact";
   /** Offset between authoritative world time and performance.now(). */
   worldTimeOffsetMs = 0;
 
   // ---- shared static resources (never disposed per lane) ----
   private unitBox = new THREE.BoxGeometry(1, 1, 1);
   private stripGeo = new THREE.BoxGeometry(1, 0.2, 1);
+  private riverSurfaceGeo = new THREE.PlaneGeometry(1, 1, 40, 6);
+  private wheelGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.08, 8);
   private shadowGeo = new THREE.CircleGeometry(0.34, 12);
   private shadowMat = new THREE.MeshBasicMaterial({
     color: COLORS.shadow,
@@ -331,15 +372,23 @@ export class WorldScene {
   private matGrassEdge = new THREE.MeshLambertMaterial({ color: COLORS.grassEdge });
   private matRoad = new THREE.MeshLambertMaterial({ color: COLORS.road });
   private matRoadAlt = new THREE.MeshLambertMaterial({ color: COLORS.roadAlt });
-  // Subtle two-tone water checker keeps the grid readable on rivers too.
-  private matRiver = new THREE.MeshLambertMaterial({
-    map: makeCheckerTexture(0x22b9e6, 0x1fadd9),
-  });
+  private matRiverBed = new THREE.MeshLambertMaterial({ color: COLORS.riverDeep });
+  private matWater: THREE.MeshLambertMaterial;
+  private matBank = new THREE.MeshLambertMaterial({ color: COLORS.bank });
   private matLog = new THREE.MeshLambertMaterial({ color: COLORS.log });
+  private matLogBark = new THREE.MeshLambertMaterial({ color: COLORS.logBark });
+  private matLogEnd = new THREE.MeshLambertMaterial({ color: COLORS.logEnd });
+  private matMoss = new THREE.MeshLambertMaterial({ color: COLORS.moss });
   private matDash = new THREE.MeshLambertMaterial({ color: 0xdde3ee });
   private matRailBar = new THREE.MeshLambertMaterial({ color: 0x3a3f4d });
   private matTrain = new THREE.MeshLambertMaterial({ color: COLORS.train });
   private matTrainCab = new THREE.MeshLambertMaterial({ color: COLORS.trainCab });
+  private matTrainTrim = new THREE.MeshLambertMaterial({ color: COLORS.trainTrim });
+  private matLamp = new THREE.MeshLambertMaterial({
+    color: COLORS.lamp,
+    emissive: new THREE.Color(0xffc44d),
+    emissiveIntensity: 1.1,
+  });
 
   setWorldElapsed(elapsedMs: number) {
     this.worldTimeOffsetMs = elapsedMs - (performance.now() - this.startMs);
@@ -360,11 +409,14 @@ export class WorldScene {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.06;
     this.scene.background = new THREE.Color(COLORS.sky);
     // Fog only swallows the frontier; nearby lane colors must stay honest
     // (road vs river readability is a fairness issue, not just style).
     this.scene.fog = new THREE.Fog(COLORS.sky, 34, 58);
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -50, 120);
+    this.matWater = makeWaterMaterial(this.waterTime);
 
     const ambient = new THREE.AmbientLight(0xffffff, 1.15);
     const sun = new THREE.DirectionalLight(0xfff4dd, 1.5);
@@ -389,16 +441,7 @@ export class WorldScene {
     const modelId = opts.modelId ?? agentId(hashWallet(opts.wallet ?? "local"));
     this.local = new PlayerRig(modelId, PLAYER_HEIGHT, this.shadowMat, this.shadowGeo);
     this.local.root.position.copy(this.localTarget);
-    this.local.onLand((at) => {
-      this.dust.burst(at, {
-        count: 6,
-        color: COLORS.dust,
-        speed: 1.4,
-        up: 1.6,
-        size: 0.07,
-      });
-      sfx.land();
-    });
+    this.local.onLand((at) => this.landedAt(at));
     this.scene.add(this.local.root);
 
     this.resize();
@@ -444,15 +487,28 @@ export class WorldScene {
             ? this.matRoad
             : this.matRoadAlt
           : lane.kind === LANE_RIVER
-            ? this.matRiver
+            ? this.matRiverBed
             : new THREE.MeshLambertMaterial({ color: COLORS.rail });
     if (lane.kind === LANE_RAIL)
       this.railStripMats.set(row, stripMat as THREE.MeshLambertMaterial);
     const strip = new THREE.Mesh(this.stripGeo, stripMat);
     strip.scale.set(WIDTH, 1, 1);
     // Water sits visibly lower than land — banks read as edges.
-    strip.position.set(WIDTH / 2, lane.kind === LANE_RIVER ? -0.18 : -0.1, -row);
+    strip.position.set(WIDTH / 2, lane.kind === LANE_RIVER ? -0.34 : -0.1, -row);
     group.add(strip);
+    if (lane.kind === LANE_RIVER) {
+      const surface = new THREE.Mesh(this.riverSurfaceGeo, this.matWater);
+      surface.rotation.x = -Math.PI / 2;
+      surface.scale.set(WIDTH, 1, 1);
+      surface.position.set(WIDTH / 2, -0.13, -row);
+      group.add(surface);
+      for (const zOff of [-0.48, 0.48]) {
+        const bank = new THREE.Mesh(this.unitBox, this.matBank);
+        bank.scale.set(WIDTH, 0.07, 0.14);
+        bank.position.set(WIDTH / 2, -0.09, -row + zOff);
+        group.add(bank);
+      }
+    }
     for (const side of [-1, 1]) {
       const shoulder = new THREE.Mesh(this.stripGeo, this.matGrassEdge);
       shoulder.scale.set(24, 1, 1);
@@ -516,9 +572,11 @@ export class WorldScene {
           obj = this.buildVehicle(lane, "vehicle.compact.a");
         } else if (lane.kind === LANE_RIVER) {
           obj = this.buildLog(lane.footprint);
+          this.addMoverShadow(obj, lane.footprint);
         } else {
           obj = this.buildTrain(lane.footprint);
           if (lane.dirPositive !== 1) obj.rotation.y = Math.PI;
+          this.addMoverShadow(obj, Math.min(4, lane.footprint));
         }
         obj.visible = false;
         group.add(obj);
@@ -675,39 +733,105 @@ export class WorldScene {
     group.add(inst);
   }
 
-  /** Logs are original assets: a fat cylinder-ish box with end caps. */
+  private addMoverShadow(obj: THREE.Object3D, footprint: number) {
+    const sh = new THREE.Mesh(this.shadowGeo, this.shadowMat);
+    sh.rotation.x = -Math.PI / 2;
+    sh.position.y = 0.015;
+    sh.scale.set(Math.max(1.1, footprint * 0.42), 1, 0.85);
+    obj.add(sh);
+  }
+
+  /** Voxel timber: one chunky box + square end-grain, same language as trees. */
   private buildLog(footprint: number): THREE.Object3D {
     const g = new THREE.Group();
+    const len = Math.max(1, footprint) * 0.95;
     const body = new THREE.Mesh(this.unitBox, this.matLog);
-    body.scale.set(Math.max(1, footprint) * 0.95, 0.35, 0.72);
-    body.position.y = 0.05;
+    body.scale.set(len, 0.42, 0.72);
+    body.position.y = 0.2;
     g.add(body);
+    for (const t of [-0.18, 0.2]) {
+      const band = new THREE.Mesh(this.unitBox, this.matLogBark);
+      band.scale.set(0.12, 0.46, 0.76);
+      band.position.set(t * len, 0.2, 0);
+      g.add(band);
+    }
+    for (const side of [-1, 1]) {
+      const cap = new THREE.Mesh(this.unitBox, this.matLogEnd);
+      cap.scale.set(0.07, 0.34, 0.58);
+      cap.position.set(side * (len / 2 + 0.01), 0.2, 0);
+      g.add(cap);
+      const pith = new THREE.Mesh(this.unitBox, this.matLogBark);
+      pith.scale.set(0.04, 0.14, 0.22);
+      pith.position.set(side * (len / 2 + 0.04), 0.2, 0);
+      g.add(pith);
+    }
     return g;
   }
 
-  /** Trains are original assets (docs forbid the ripped Crossy train):
-   * a dark locomotive pulling yellow cars, with visible gaps. */
+  /** Original toy train (docs forbid the ripped Crossy train). */
   private buildTrain(footprint: number): THREE.Object3D {
     const g = new THREE.Group();
     const len = Math.max(2, footprint);
-    const segCount = Math.max(2, Math.round(len / 2.2));
+    const segCount = Math.max(2, Math.round(len / 2.35));
     const segLen = len / segCount;
     for (let i = 0; i < segCount; i++) {
       const isLoco = i === 0;
-      const body = new THREE.Mesh(
-        this.unitBox,
-        isLoco ? this.matTrainCab : this.matTrain,
-      );
-      body.scale.set(segLen * 0.84, isLoco ? 0.72 : 0.58, 0.8);
-      body.position.set(-len / 2 + segLen * (i + 0.5), isLoco ? 0.38 : 0.31, 0);
-      g.add(body);
-      const roof = new THREE.Mesh(
-        this.unitBox,
-        isLoco ? this.matTrain : this.matTrainCab,
-      );
-      roof.scale.set(segLen * 0.5, 0.12, 0.6);
-      roof.position.set(-len / 2 + segLen * (i + 0.5), isLoco ? 0.8 : 0.66, 0);
-      g.add(roof);
+      const x = -len / 2 + segLen * (i + 0.5);
+      if (isLoco) {
+        const chassis = new THREE.Mesh(this.unitBox, this.matTrain);
+        chassis.scale.set(segLen * 0.9, 0.28, 0.72);
+        chassis.position.set(x, 0.28, 0);
+        g.add(chassis);
+        const cab = new THREE.Mesh(this.unitBox, this.matTrainCab);
+        cab.scale.set(segLen * 0.38, 0.42, 0.7);
+        cab.position.set(x + segLen * 0.18, 0.58, 0);
+        g.add(cab);
+        const nose = new THREE.Mesh(this.unitBox, this.matTrain);
+        nose.scale.set(segLen * 0.42, 0.22, 0.58);
+        nose.position.set(x - segLen * 0.16, 0.42, 0);
+        g.add(nose);
+        const cow = new THREE.Mesh(this.unitBox, this.matTrainTrim);
+        cow.scale.set(0.14, 0.12, 0.78);
+        cow.position.set(x - segLen * 0.42, 0.18, 0);
+        g.add(cow);
+        const stack = new THREE.Mesh(this.unitBox, this.matTrainCab);
+        stack.scale.set(0.12, 0.22, 0.12);
+        stack.position.set(x - segLen * 0.12, 0.68, 0);
+        g.add(stack);
+        const lamp = new THREE.Mesh(this.unitBox, this.matLamp);
+        lamp.scale.set(0.08, 0.1, 0.1);
+        lamp.position.set(x - segLen * 0.38, 0.44, 0);
+        g.add(lamp);
+        g.userData.lamp = this.matLamp;
+      } else {
+        const body = new THREE.Mesh(this.unitBox, this.matTrain);
+        body.scale.set(segLen * 0.82, 0.46, 0.7);
+        body.position.set(x, 0.36, 0);
+        g.add(body);
+        const window = new THREE.Mesh(this.unitBox, this.matTrainCab);
+        window.scale.set(segLen * 0.62, 0.16, 0.72);
+        window.position.set(x, 0.44, 0);
+        g.add(window);
+        const roof = new THREE.Mesh(this.unitBox, this.matTrainCab);
+        roof.scale.set(segLen * 0.78, 0.08, 0.62);
+        roof.position.set(x, 0.62, 0);
+        g.add(roof);
+        const coupler = new THREE.Mesh(this.unitBox, this.matLogBark);
+        coupler.scale.set(segLen * 0.16, 0.06, 0.1);
+        coupler.position.set(x - segLen * 0.48, 0.22, 0);
+        g.add(coupler);
+      }
+      for (const [wx, wz] of [
+        [x - segLen * 0.22, 0.32],
+        [x + segLen * 0.22, 0.32],
+        [x - segLen * 0.22, -0.32],
+        [x + segLen * 0.22, -0.32],
+      ]) {
+        const wheel = new THREE.Mesh(this.wheelGeo, this.matTrainCab);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(wx, 0.11, wz);
+        g.add(wheel);
+      }
     }
     return g;
   }
@@ -742,6 +866,29 @@ export class WorldScene {
   /** Swap the local player's model live (agent picker preview). */
   setLocalModel(modelId: string) {
     this.local.setModel(modelId);
+    this.local.flourish();
+  }
+
+  flourishLocal() {
+    this.local.flourish();
+    sfx.hop();
+  }
+
+  setPresentation(mode: Presentation) {
+    this.presentation = mode;
+    this.viewHeight = mode === "menu" ? 6.6 : 13;
+    this.local.setVisualScale(mode === "menu" ? PLAYER_HEIGHT * 1.55 : PLAYER_HEIGHT);
+    this.resize();
+  }
+
+  private landedAt(at: THREE.Vector3) {
+    const row = Math.round(-at.z);
+    const surface = surfaceOf(this.lanes.get(row));
+    this.dust.land(at.clone().setY(0.12), surface);
+    if (surface === "river") sfx.plip();
+    else if (surface === "road") sfx.landRoad();
+    else if (surface === "rail") sfx.landRail();
+    else sfx.landGrass();
   }
 
   /** Rejected move: directional bump-back, dust tick, no progression. */
@@ -776,7 +923,7 @@ export class WorldScene {
     this.dust.burst(at, { count: 22, color: 0xffd23f, speed: 2.4, up: 3.2, size: 0.09 });
     this.dust.burst(at, { count: 10, color: 0xfffdf5, speed: 1.6, up: 2.4, size: 0.06 });
     this.addTrauma(0.12);
-    sfx.milestone();
+    sfx.fanfare();
   }
 
   /** Local death: cause inferred from terrain (water vs impact). */
@@ -784,18 +931,25 @@ export class WorldScene {
     if (this.local.dead) return;
     const y = Math.round(-this.local.root.position.z);
     const lane = this.lanes.get(y);
-    const cause = lane?.kind === LANE_RIVER ? "water" : "impact";
-    this.local.die(cause);
+    const cause: DeathCause =
+      lane?.kind === LANE_RIVER ? "water" : lane?.kind === LANE_RAIL ? "train" : "impact";
+    this.lastDeathCause = cause;
+    this.local.die(cause === "water" ? "water" : "impact");
     const at = this.local.root.position.clone().setY(0.25);
     if (cause === "water") {
-      this.dust.splash(at);
+      this.dust.splash(at, true);
       sfx.splash();
+    } else if (cause === "train") {
+      this.dust.burst(at, { count: 16, color: 0xffd23f, speed: 3.2, up: 3.2 });
+      this.dust.burst(at, { count: 10, color: 0xffffff, speed: 2.4, up: 2.6 });
+      sfx.horn();
+      sfx.death();
     } else {
       this.dust.burst(at, { count: 18, color: 0xffffff, speed: 3, up: 3 });
       sfx.death();
     }
-    this.addTrauma(cause === "water" ? 0.45 : 0.8);
-    if (cause === "impact") this.hitStopUntil = performance.now() + 110;
+    this.addTrauma(cause === "water" ? 0.45 : cause === "train" ? 0.95 : 0.8);
+    if (cause !== "water") this.hitStopUntil = performance.now() + 110;
     if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
   }
 
@@ -882,21 +1036,33 @@ export class WorldScene {
     // Camera: critically damped follow; player framed below center so the
     // road ahead gets most of the screen. Lateral tracking is softer.
     const p = this.local.root.position;
+    const lookAhead = this.presentation === "menu" ? 0.2 : 2.2;
+    const camSide = this.presentation === "menu" ? 2.1 : 3.5;
+    const camUp = this.presentation === "menu" ? 10.2 : 16;
+    const camBack = this.presentation === "menu" ? 6.6 : 11;
     this.camFocus.x += (p.x - this.camFocus.x) * smoothFactor(0.07, dtMs);
-    this.camFocus.z += (p.z - 2.2 - this.camFocus.z) * smoothFactor(0.12, dtMs);
+    this.camFocus.z += (p.z - lookAhead - this.camFocus.z) * smoothFactor(0.12, dtMs);
     this.trauma = Math.max(0, this.trauma - dt * 1.4);
     const shake = this.trauma * this.trauma;
     const sx = shake * 0.4 * noise1d(now / 45, 1);
     const sz = shake * 0.4 * noise1d(now / 45, 2);
     const roll = shake * 0.05 * noise1d(now / 45, 3);
     // Three-quarter view: back and up from the focus, slightly yawed.
-    this.camera.position.set(this.camFocus.x + 3.5 + sx, 16, this.camFocus.z + 11 + sz);
+    this.camera.position.set(
+      this.camFocus.x + camSide + sx,
+      camUp,
+      this.camFocus.z + camBack + sz,
+    );
     this.camera.lookAt(this.camFocus.x + sx, 0, this.camFocus.z + sz);
     this.camera.rotation.z += roll;
+
+    this.waterTime.value += dt;
+    if (this.matWater.map) this.matWater.map.offset.x = this.waterTime.value * 0.07;
 
     // Hazard visuals from deterministic descriptors.
     const nearRow = Math.round(-p.z);
     if (++this.frame % 120 === 0) this.pruneBehind(nearRow);
+    let riverNear = false;
     for (const [row, lane] of this.lanes) {
       const group = this.laneMeshes.get(row);
       if (group) {
@@ -905,6 +1071,7 @@ export class WorldScene {
         if (group.visible !== visible) group.visible = visible;
         if (!visible) continue;
       }
+      if (lane.kind === LANE_RIVER && Math.abs(row - nearRow) < 4) riverNear = true;
       const meshes = this.movers.get(row);
       if (!meshes) continue;
       if (lane.kind === LANE_ROAD || lane.kind === LANE_RIVER) {
@@ -936,7 +1103,21 @@ export class WorldScene {
           // `renderX` glides across the tick and lands exactly on the
           // authoritative tile at every tick boundary, so the motion is
           // continuous without ever drawing a car where it is not.
-          m.position.x = v.renderX + lane.footprint / 2;
+          const cx = v.renderX + lane.footprint / 2;
+          if (lane.kind === LANE_ROAD) {
+            const prev = (m.userData.prevX as number) ?? cx;
+            if (
+              Math.abs(row - nearRow) < 3 &&
+              (prev - p.x) * (cx - p.x) <= 0 &&
+              Math.abs(prev - cx) > 0.2 &&
+              now - this.lastWhooshAt > 280
+            ) {
+              sfx.whoosh();
+              this.lastWhooshAt = now;
+            }
+            m.userData.prevX = cx;
+          }
+          m.position.x = cx;
           m.visible = true;
           m.position.y = (submerged ? -0.28 : 0) + bob;
           m.position.z = -row;
@@ -946,19 +1127,34 @@ export class WorldScene {
         }
       } else if (lane.kind === LANE_RAIL) {
         const { phase, trainX } = railPhaseVisual(lane, tMs);
+        const blink = phase === "warning" && Math.floor(tMs / 220) % 2 === 0;
         const stripMat = this.railStripMats.get(row);
         if (stripMat) {
           // Stepped warning blink (voxel-arcade: hard steps, not fades).
-          const blink = phase === "warning" && Math.floor(tMs / 220) % 2 === 0;
           stripMat.color.set(blink ? COLORS.warning : COLORS.rail);
+        }
+        const prevPhase = meshes[0]?.userData.phase as string | undefined;
+        if (phase === "warning" && prevPhase !== "warning" && Math.abs(row - nearRow) < 8) {
+          if (now - this.lastBellAt > 400) {
+            sfx.bell();
+            this.lastBellAt = now;
+          }
+        }
+        if (phase === "train" && prevPhase !== "train" && Math.abs(row - nearRow) < 10) {
+          sfx.horn();
+          this.addTrauma(0.12);
         }
         const train = meshes[0];
         if (train) {
+          train.userData.phase = phase;
           train.visible = phase === "train";
           train.position.set(trainX + lane.footprint / 2, 0, -row);
+          const lamp = train.userData.lamp as THREE.MeshLambertMaterial | undefined;
+          if (lamp) lamp.emissiveIntensity = phase === "train" ? 1.35 : 0.25;
         }
       }
     }
+    sfx.river(riverNear && this.presentation === "play");
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -966,6 +1162,7 @@ export class WorldScene {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.dust.dispose();
+    sfx.river(false);
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.InstancedMesh) {
         o.geometry.dispose();
@@ -1022,4 +1219,55 @@ function yawFromDelta(to: THREE.Vector3, from: THREE.Vector3): number {
   const dz = to.z - from.z;
   if (Math.abs(dx) > Math.abs(dz)) return dx > 0 ? 3 : 2;
   return dz < 0 ? 0 : 1;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/** Length from footprint; width/height from native ratios — never squash YZ by length. */
+function fitVehicle(obj: THREE.Object3D, footprint: number) {
+  const long = footprint >= 3;
+  const widthRatio = (obj.userData?.widthRatio as number) ?? 0.45;
+  const heightRatio = (obj.userData?.heightRatio as number) ?? 0.35;
+  const length = Math.max(1, footprint) * 0.88 + 0.08;
+  const targetW = long ? 0.7 : 0.58;
+  const targetH = long ? 0.6 : 0.44;
+  const scaleZ = clamp(targetW / Math.max(0.22, widthRatio), 0.7, 1.22);
+  const scaleY = clamp(targetH / Math.max(0.18, heightRatio), 0.62, 1.45);
+  obj.scale.set(length, scaleY, scaleZ);
+}
+
+function surfaceOf(lane: Lane | undefined): Surface {
+  if (!lane) return "unknown";
+  if (lane.kind === LANE_RIVER) return "river";
+  if (lane.kind === LANE_ROAD) return "road";
+  if (lane.kind === LANE_RAIL) return "rail";
+  return "grass";
+}
+
+function makeWaterMaterial(uTime: { value: number }): THREE.MeshLambertMaterial {
+  const tex = makeCheckerTexture(0x1eb4e6, 0x0d6fa3);
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(32, 2);
+  const mat = new THREE.MeshLambertMaterial({
+    map: tex,
+    color: 0xffffff,
+    fog: true,
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uTime;
+    shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`;
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <begin_vertex>",
+      `
+      #include <begin_vertex>
+      float wave = sin((position.x * 14.0) + uTime * 1.6) * 0.012;
+      wave += sin((position.x * 6.0 - position.y * 8.0) - uTime * 1.1) * 0.01;
+      transformed.z += floor(wave * 16.0) / 16.0;
+      `,
+    );
+  };
+  mat.customProgramCacheKey = () => "lana-water-v1";
+  return mat;
 }

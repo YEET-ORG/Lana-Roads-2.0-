@@ -61,6 +61,10 @@ const SAFE_LANE: Omit<Lane, "blockerMask"> = {
   sinking: 0,
 };
 
+export function makeGrassLane(): Lane {
+  return { ...SAFE_LANE, blockerMask: 0n };
+}
+
 /** mulberry32 on (row, seed): stable across clients and reloads. */
 export function makeLane(row: number, seed = 7): Lane {
   let a = (row * 2654435761 + seed * 40503) >>> 0;

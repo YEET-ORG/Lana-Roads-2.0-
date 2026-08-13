@@ -7,6 +7,54 @@ import { AGENT_COUNT, agentId } from "../game/renderer/assets";
 
 const KEY = "crossy-world:agent";
 
+export const AGENT_NAMES = [
+  "UNICORN",
+  "HIPPO",
+  "RHINO",
+  "GIRAFFE",
+  "MOOSE",
+  "FROG",
+  "CROC",
+  "PUP",
+  "PANDA",
+  "PIGLET",
+  "PARROT",
+  "DUCK",
+  "CHICK",
+  "SPARROW",
+  "ROOSTER",
+  "OWL",
+  "HOG",
+  "COW",
+  "PENGUIN",
+  "SHEEP",
+  "PEEP",
+  "LION",
+  "BEAR",
+  "FOX",
+  "GOAT",
+  "MONKEY",
+  "TIGER",
+  "LOBSTER",
+  "WHALE",
+  "FISH",
+  "RACCOON",
+  "PENG",
+  "SQUIRREL",
+  "SEAL",
+  "CARDINAL",
+  "LLAMA",
+  "FIESTA",
+  "WORM",
+  "KITTY",
+  "CUB",
+] as const;
+
+export function agentName(index: number): string {
+  const i = ((index % AGENT_COUNT) + AGENT_COUNT) % AGENT_COUNT;
+  return AGENT_NAMES[i] ?? `AGENT ${String(i).padStart(2, "0")}`;
+}
+
 export function getAgentChoice(): number | null {
   const raw = localStorage.getItem(KEY);
   if (raw == null) return null;

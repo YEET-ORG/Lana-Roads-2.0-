@@ -58,7 +58,7 @@ function AppInner() {
   // Every button press ticks (game-feel: nothing is silent).
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement | null)?.closest("button")) sfx.land();
+      if ((e.target as HTMLElement | null)?.closest("button")) sfx.click();
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
@@ -102,17 +102,8 @@ function AppInner() {
   // Practice mode needs no cluster and no identity — always reachable.
   if (route.name === "demo")
     return <DemoScreen onExit={() => setRoute({ name: "home" })} />;
-  if (error)
-    return (
-      <div className="shell error">
-        <p>Failed to connect: {error}</p>
-        <button className="play" onClick={() => setRoute({ name: "demo" })}>
-          Practice offline
-        </button>
-      </div>
-    );
   if (!identity) return <IdentityGate onReady={setIdentity} />;
-  if (!boot)
+  if (!boot && !error)
     return (
       <div className="splash">
         <h1>LANA ROADS</h1>
@@ -121,10 +112,10 @@ function AppInner() {
       </div>
     );
 
-  const gameAddress = boot.wallet.publicKey.toBase58();
+  const gameAddress = boot?.wallet.publicKey.toBase58() ?? "";
 
   return (
-    <div className="shell">
+    <div className={`shell ${route.name === "home" ? "shell-home" : ""}`}>
       <header>
         <h1 onClick={() => setRoute({ name: "home" })}>LANA ROADS</h1>
         <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -133,18 +124,20 @@ function AppInner() {
               {identity.parent.slice(0, 4)}…{identity.parent.slice(-4)}
             </span>
           )}
-          <span
-            className="wallet"
-            title="game key — click to copy"
-            onClick={() => {
-              navigator.clipboard?.writeText(gameAddress);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? "copied!" : `${gameAddress.slice(0, 8)}…`}
-            {balance != null && ` · ${balance.toFixed(3)} SOL`}
-          </span>
+          {gameAddress && (
+            <span
+              className="wallet"
+              title="game key — click to copy"
+              onClick={() => {
+                navigator.clipboard?.writeText(gameAddress);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "copied!" : `${gameAddress.slice(0, 8)}…`}
+              {balance != null && ` · ${balance.toFixed(3)} SOL`}
+            </span>
+          )}
           <button
             className="ghost"
             style={{ minHeight: 34, padding: "6px 12px", fontSize: 13 }}
@@ -160,8 +153,8 @@ function AppInner() {
           </button>
         </span>
       </header>
-      {balance != null && balance < 0.01 && (
-        <div className="banner">
+      {boot && balance != null && balance < 0.01 && (
+        <div className="banner floating">
           Your game key needs devnet SOL to play (~0.02). Click the address above to copy
           it, then fund it from{" "}
           <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">
@@ -171,7 +164,7 @@ function AppInner() {
         </div>
       )}
       {route.name === "home" && <Home boot={boot} onPlay={(r) => setRoute(r)} />}
-      {route.name === "play" && (
+      {route.name === "play" && boot && (
         <GameScreen boot={boot} route={route} onExit={() => setRoute({ name: "home" })} />
       )}
     </div>
