@@ -56,8 +56,11 @@ export interface JoinRoomOptions<T, P = T, M = unknown> {
   messageCodec?: Codec<M>;
 }
 
-export interface JoinOrCreateOptions<T, P = T, M = unknown>
-  extends CreateRoomOptions<T, P, M> {
+export interface JoinOrCreateOptions<T, P = T, M = unknown> extends CreateRoomOptions<
+  T,
+  P,
+  M
+> {
   /** Whose named room to join. Defaults to this wallet — pass the room
    *  owner's pubkey to join someone else's named room. */
   creator?: PublicKey;
@@ -313,7 +316,14 @@ export class SolSocket {
     ];
     await this.sendBase(instructions);
     await this.waitForEr(room);
-    return new Room<T, P, M>(room, presence, this.roomContext(), codec, opts.messageCodec, opts.presenceCodec);
+    return new Room<T, P, M>(
+      room,
+      presence,
+      this.roomContext(),
+      codec,
+      opts.messageCodec,
+      opts.presenceCodec,
+    );
   }
 
   /**
@@ -347,7 +357,14 @@ export class SolSocket {
       // the wallet (allowed on-chain) and rejoining fresh.
       const current = decodePresence(this.program, info.data);
       if (current.authority.equals(this.session.publicKey)) {
-        return new Room<T, P, M>(room, presence, this.roomContext(), codec, opts.messageCodec, opts.presenceCodec);
+        return new Room<T, P, M>(
+          room,
+          presence,
+          this.roomContext(),
+          codec,
+          opts.messageCodec,
+          opts.presenceCodec,
+        );
       }
       await this.recoverPresence(presence);
     }
@@ -356,9 +373,7 @@ export class SolSocket {
     const fresh = await this.base.getAccountInfo(presence);
     const needsAuthorityRotation =
       fresh !== null &&
-      !decodePresence(this.program, fresh.data).authority.equals(
-        this.session.publicKey,
-      );
+      !decodePresence(this.program, fresh.data).authority.equals(this.session.publicKey);
     if (fresh === null || needsAuthorityRotation) {
       instructions.push(
         await this.program.methods
@@ -376,7 +391,14 @@ export class SolSocket {
     );
     await this.sendBase(instructions);
     await this.waitForErPresence(presence);
-    return new Room<T, P, M>(room, presence, this.roomContext(), codec, opts.messageCodec, opts.presenceCodec);
+    return new Room<T, P, M>(
+      room,
+      presence,
+      this.roomContext(),
+      codec,
+      opts.messageCodec,
+      opts.presenceCodec,
+    );
   }
 
   private roomContext() {
@@ -389,7 +411,9 @@ export class SolSocket {
     };
   }
 
-  private async sendBase(instructions: import("@solana/web3.js").TransactionInstruction[]) {
+  private async sendBase(
+    instructions: import("@solana/web3.js").TransactionInstruction[],
+  ) {
     try {
       await sendInstructions({
         connection: this.base,

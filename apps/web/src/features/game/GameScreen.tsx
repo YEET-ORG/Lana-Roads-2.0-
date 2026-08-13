@@ -10,8 +10,12 @@ import { PublicKey } from "@solana/web3.js";
 import { Direction, pda, ReceiptKind, revivePrice, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
 import { WorldScene } from "../../game/renderer/scene";
+import { preloadAssets } from "../../game/renderer/assets";
 import { attachInput } from "../../game/input/keys";
-import { evaluateTile, LANE_RIVER } from "../../game/simulation/hazards";
+import { evaluateTile } from "../../game/simulation/hazards";
+import { CountUp } from "../../ui/CountUp";
+import { Confetti } from "../../ui/Confetti";
+import { agentModelIdFor } from "../../lib/agent";
 import type { Route } from "../../app/App";
 
 /**
@@ -68,6 +72,7 @@ export function GameScreen({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<WorldScene | null>(null);
   const busyRef = useRef(false);
+  const deathTimerRef = useRef<number>(0);
   const [hud, setHud] = useState<Hud>({
     score: 0,
     record: 0,
@@ -161,16 +166,28 @@ export function GameScreen({
   const reconcileNowRef = useRef<() => void>(() => {});
   /** Timestamp of the last authoritative push for OUR run. */
   const lastOwnPushRef = useRef(0);
+  /** Last celebrated score decade (milestone bursts every 10 rows). */
+  const scoreDecadeRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const scene = new WorldScene(canvas);
-    sceneRef.current = scene;
-    const onResize = () => scene.resize();
-    window.addEventListener("resize", onResize);
-
+    let scene: WorldScene | null = null;
     let live = true;
+    let loadedChunks = 0;
     const me = boot.wallet.publicKey.toBase58();
+    // Assets resolve before first paint of the world; missing models fall
+    // back to footprint-correct primitives inside the scene.
+    void preloadAssets().then(() => {
+      if (!live) return;
+      scene = new WorldScene(canvas, { wallet: me, modelId: agentModelIdFor(me) });
+      sceneRef.current = scene;
+      scene.resize();
+      // Everything that arrived before the scene existed heals here.
+      loadedChunks = 0;
+      reconcileNowRef.current();
+    });
+    const onResize = () => sceneRef.current?.resize();
+    window.addEventListener("resize", onResize);
     const remotes = new Map<
       string,
       { x: number; y: number; state: string; hazardNonce: number }
@@ -211,8 +228,11 @@ export function GameScreen({
             score: run.score,
             facing: run.facing,
           };
-          scene.setLocal(run.x, run.y);
+          scene?.setLocal(run.x, run.y);
         }
+        // Death/revive presentation: the world reacts before the overlay.
+        if (state === "deadAwaitingRevive" || state === "ended") scene?.killLocal();
+        else if (state === "active") scene?.reviveLocal();
         // HUD updates only when something visible changed (uncontrolled
         // re-renders on every ~50ms push cause visible jank).
         setHud((h) =>
@@ -230,17 +250,29 @@ export function GameScreen({
               },
         );
         claimRecordRef.current(liveRun.current!.score, hudRecordRef.current);
+        const decade = Math.floor(liveRun.current!.score / 10);
+        if (decade > scoreDecadeRef.current && state === "active") scene?.celebrate();
+        scoreDecadeRef.current = decade;
         if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
-          setDeath({
+          // Let the death animation land before the card stamps in.
+          const info = {
             deathNonce: run.deathNonce,
             deadline: Number(run.reviveDeadline.toString()),
             price: revivePrice(run.successfulRevives),
-          });
+          };
+          window.clearTimeout(deathTimerRef.current);
+          deathTimerRef.current = window.setTimeout(() => live && setDeath(info), 450);
         } else if (state === "active") {
+          window.clearTimeout(deathTimerRef.current);
           setDeath(null);
           setEndedScore(null);
         } else if (state === "ended" && route.mode === WorldMode.Casual) {
-          setEndedScore(liveRun.current!.score);
+          const score = liveRun.current!.score;
+          window.clearTimeout(deathTimerRef.current);
+          deathTimerRef.current = window.setTimeout(
+            () => live && setEndedScore(score),
+            450,
+          );
         }
       } else {
         if (state === "active")
@@ -251,22 +283,22 @@ export function GameScreen({
             hazardNonce: run.hazardNonce,
           });
         else remotes.delete(wallet);
-        scene.setRemotes(
+        scene?.setRemotes(
           [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
         );
       }
     };
 
     // Chunk/lane loading (repeats when the frontier grows).
-    let loadedChunks = 0;
     const loadChunks = async (revealedRows: number) => {
+      if (!scene) return; // heals via reconcile once the scene exists
       const worldAcc = { revealedRows };
       const chunks = Math.ceil(worldAcc.revealedRows / 16);
       for (let c = loadedChunks; c < chunks; c++) {
         const chunk = await boot.client.getChunk(route.day, c).catch(() => null);
-        if (!chunk || !live) continue;
+        if (!chunk || !live || !scene) continue;
         chunk.lanes.forEach((lane: any, i: number) => {
-          scene.setLane(chunk.rowStart + i, {
+          scene!.setLane(chunk.rowStart + i, {
             kind: lane.kind,
             dirPositive: lane.dirPositive,
             footprint: lane.footprint,
@@ -306,7 +338,7 @@ export function GameScreen({
       if (worldAcc) {
         // Anchor the hazard clock to the world's own timeline. Re-running
         // this on every sweep must converge, not creep forward.
-        scene.setWorldElapsed(Date.now() - Number(worldAcc.startTs.toString()) * 1000);
+        scene?.setWorldElapsed(Date.now() - Number(worldAcc.startTs.toString()) * 1000);
         hudRecordRef.current = worldAcc.recordScore;
         setHud((h) =>
           h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },
@@ -339,13 +371,8 @@ export function GameScreen({
     const hazardTimer = setInterval(() => {
       if (!live) return;
       const onMovingTerrain = (y: number) => {
-        const lane = scene.laneAt(y);
+        const lane = scene?.laneAt(y);
         return lane != null && lane.kind !== 0;
-      };
-      const driftOf = (y: number) => {
-        const lane = scene.laneAt(y);
-        if (!lane || lane.kind !== LANE_RIVER) return 0;
-        return lane.dirPositive === 1 ? 1 : -1;
       };
       const crank = (
         wallet: PublicKey | undefined,
@@ -362,7 +389,6 @@ export function GameScreen({
             x,
             y,
             hazardNonce: nonce,
-            driftDirection: driftOf(y),
           })
           .catch(() => {
             /* stale nonce / already resolved */
@@ -401,10 +427,12 @@ export function GameScreen({
       clearInterval(sweep);
       clearInterval(pingTimer);
       clearInterval(hazardTimer);
+      window.clearTimeout(deathTimerRef.current);
       stopPrewarm?.();
       unsubscribe();
       window.removeEventListener("resize", onResize);
-      scene.destroy();
+      scene?.destroy();
+      scene = null;
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -414,139 +442,146 @@ export function GameScreen({
   // pays (zero-fee ER); authority corrections arrive on the subscription.
   useEffect(() => {
     let lastMoveAt = 0;
-    const detach = attachInput((action) => {
-      const mine = liveRun.current;
-      if (!mine || mine.state !== "active") return;
-      if (action.kind === "move") {
-        const now = performance.now();
-        if (now - lastMoveAt < 60) return; // debounce bursts
-        lastMoveAt = now;
-        const dx =
-          action.direction === Direction.Left
-            ? -1
-            : action.direction === Direction.Right
+    const detach = attachInput(
+      (action) => {
+        const mine = liveRun.current;
+        if (!mine || mine.state !== "active") return;
+        if (action.kind === "move") {
+          const now = performance.now();
+          if (now - lastMoveAt < 60) return; // debounce bursts
+          lastMoveAt = now;
+          const dx =
+            action.direction === Direction.Left
+              ? -1
+              : action.direction === Direction.Right
+                ? 1
+                : 0;
+          const dy =
+            action.direction === Direction.Forward
               ? 1
-              : 0;
-        const dy =
-          action.direction === Direction.Forward
-            ? 1
-            : action.direction === Direction.Backward
-              ? -1
-              : 0;
-        const [nx, ny] = [mine.x + dx, mine.y + dy];
-        if (nx < 0 || nx > 63 || ny < 0) return;
-        // Terrain gate, evaluated with the same math the program uses: a
-        // move into a tree, a car, a train or open water is refused on
-        // chain, so predicting it locally turns a rubber-band into a bump.
-        const destLane = sceneRef.current?.laneAt(ny);
-        if (destLane) {
-          const tMs = sceneRef.current!.worldTimeMs();
-          // Only walls stop a move. Traffic, trains and open water are
-          // enterable and fatal, so the move is sent and the death comes
-          // back from the program.
-          if (evaluateTile(destLane, nx, tMs) === "blocked") {
-            setHud((h) =>
-              h.lastRejection === "blocked" ? h : { ...h, lastRejection: "blocked" },
-            );
+              : action.direction === Direction.Backward
+                ? -1
+                : 0;
+          const [nx, ny] = [mine.x + dx, mine.y + dy];
+          if (nx < 0 || nx > 63 || ny < 0) {
+            sceneRef.current?.bumpLocal(dx, dy);
             return;
           }
-        }
-        // Prediction knows remote occupancy: don't send a doomed move.
-        for (const r of occupiedRef.current.values()) {
-          if (r.x === nx && r.y === ny) {
-            setHud((h) => ({ ...h, lastRejection: "tile occupied" }));
+          // Only static blockers refuse entry. Traffic, trains and unsupported
+          // water are enterable and lethal, so authority records the death.
+          const destLane = sceneRef.current?.laneAt(ny);
+          if (destLane) {
+            const tMs = sceneRef.current!.worldTimeMs();
+            if (evaluateTile(destLane, nx, tMs) === "blocked") {
+              sceneRef.current?.bumpLocal(dx, dy);
+              setHud((h) =>
+                h.lastRejection === "blocked" ? h : { ...h, lastRejection: "blocked" },
+              );
+              return;
+            }
+          }
+          // Prediction knows remote occupancy: don't send a doomed move.
+          for (const r of occupiedRef.current.values()) {
+            if (r.x === nx && r.y === ny) {
+              sceneRef.current?.bumpLocal(dx, dy);
+              setHud((h) => ({ ...h, lastRejection: "tile occupied" }));
+              return;
+            }
+          }
+          const sent = {
+            x: mine.x,
+            y: mine.y,
+            attemptNonce: mine.attempt,
+            actionSeq: mine.seq,
+          };
+          // Optimistic: advance the local mirror + visual immediately.
+          liveRun.current = {
+            ...mine,
+            x: nx,
+            y: ny,
+            seq: mine.seq + 1,
+            facing: action.direction,
+          };
+          sceneRef.current?.setLocal(nx, ny, action.direction);
+          if (navigator.vibrate) navigator.vibrate(10);
+          setHud((h) =>
+            h.lastRejection == null && h.x === nx && h.y === ny
+              ? h
+              : { ...h, lastRejection: null, x: nx, y: ny },
+          );
+          boot.client
+            .sendMove({
+              day: route.day,
+              mode: route.mode,
+              direction: action.direction,
+              session: boot.session,
+              ...sent,
+            })
+            .catch((e) => {
+              setHud((h) => ({ ...h, lastRejection: errorText(e) }));
+            })
+            .finally(() => {});
+          // Silence reconciler: a REJECTED move produces no push (no state
+          // change on-chain), which would strand the optimistic mirror. If no
+          // authoritative push has arrived since this send, refetch now
+          // instead of waiting for the 5s sweep.
+          const sentAt = performance.now();
+          setTimeout(() => {
+            if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+          }, 1300);
+        } else if (action.kind === "kick") {
+          const now = performance.now();
+          const coolLeft = 5000 - (now - lastKickAtRef.current);
+          if (coolLeft > 0) {
+            setHud((h) => ({
+              ...h,
+              lastRejection: `kick cooldown ${(coolLeft / 1000).toFixed(1)}s`,
+            }));
             return;
           }
-        }
-        const sent = {
-          x: mine.x,
-          y: mine.y,
-          attemptNonce: mine.attempt,
-          actionSeq: mine.seq,
-        };
-        // Optimistic: advance the local mirror + visual immediately.
-        liveRun.current = {
-          ...mine,
-          x: nx,
-          y: ny,
-          seq: mine.seq + 1,
-          facing: action.direction,
-        };
-        sceneRef.current?.setLocal(nx, ny);
-        setHud((h) =>
-          h.lastRejection == null && h.x === nx && h.y === ny
-            ? h
-            : { ...h, lastRejection: null, x: nx, y: ny },
-        );
-        boot.client
-          .sendMove({
-            day: route.day,
-            mode: route.mode,
-            direction: action.direction,
-            session: boot.session,
-            ...sent,
-          })
-          .catch((e) => {
-            setHud((h) => ({ ...h, lastRejection: errorText(e) }));
-          })
-          .finally(() => {});
-        // Silence reconciler: a REJECTED move produces no push (no state
-        // change on-chain), which would strand the optimistic mirror. If no
-        // authoritative push has arrived since this send, refetch now
-        // instead of waiting for the 5s sweep.
-        const sentAt = performance.now();
-        setTimeout(() => {
-          if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
-        }, 1300);
-      } else if (action.kind === "kick") {
-        const now = performance.now();
-        const coolLeft = 5000 - (now - lastKickAtRef.current);
-        if (coolLeft > 0) {
-          setHud((h) => ({
-            ...h,
-            lastRejection: `kick cooldown ${(coolLeft / 1000).toFixed(1)}s`,
-          }));
-          return;
-        }
-        // Target: the adjacent tile in facing direction, from the live map.
-        const dx =
-          mine.facing === Direction.Left ? -1 : mine.facing === Direction.Right ? 1 : 0;
-        const dy =
-          mine.facing === Direction.Forward
-            ? 1
-            : mine.facing === Direction.Backward
-              ? -1
-              : 0;
-        const [tx, ty] = [mine.x + dx, mine.y + dy];
-        let targetWallet: string | null = null;
-        for (const [w, r] of occupiedRef.current) {
-          if (r.x === tx && r.y === ty && r.state === "active") {
-            targetWallet = w;
-            break;
+          // Target: the adjacent tile in facing direction, from the live map.
+          const dx =
+            mine.facing === Direction.Left ? -1 : mine.facing === Direction.Right ? 1 : 0;
+          const dy =
+            mine.facing === Direction.Forward
+              ? 1
+              : mine.facing === Direction.Backward
+                ? -1
+                : 0;
+          const [tx, ty] = [mine.x + dx, mine.y + dy];
+          let targetWallet: string | null = null;
+          for (const [w, r] of occupiedRef.current) {
+            if (r.x === tx && r.y === ty && r.state === "active") {
+              targetWallet = w;
+              break;
+            }
           }
+          lastKickAtRef.current = now;
+          const sent = { attemptNonce: mine.attempt, actionSeq: mine.seq };
+          liveRun.current = { ...mine, seq: mine.seq + 1 };
+          sceneRef.current?.kickLocal(mine.facing);
+          if (navigator.vibrate) navigator.vibrate(20);
+          setHud((h) => ({ ...h, lastRejection: null }));
+          boot.client
+            .sendKick({
+              day: route.day,
+              mode: route.mode,
+              session: boot.session,
+              ...sent,
+              facing: mine.facing as Direction,
+              target: targetWallet
+                ? { wallet: new PublicKey(targetWallet), x: tx, y: ty }
+                : undefined,
+            })
+            .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
+          const sentAt = performance.now();
+          setTimeout(() => {
+            if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
+          }, 1300);
         }
-        lastKickAtRef.current = now;
-        const sent = { attemptNonce: mine.attempt, actionSeq: mine.seq };
-        liveRun.current = { ...mine, seq: mine.seq + 1 };
-        setHud((h) => ({ ...h, lastRejection: null }));
-        boot.client
-          .sendKick({
-            day: route.day,
-            mode: route.mode,
-            session: boot.session,
-            ...sent,
-            facing: mine.facing as Direction,
-            target: targetWallet
-              ? { wallet: new PublicKey(targetWallet), x: tx, y: ty }
-              : undefined,
-          })
-          .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
-        const sentAt = performance.now();
-        setTimeout(() => {
-          if (lastOwnPushRef.current < sentAt) reconcileNowRef.current();
-        }, 1300);
-      }
-    });
+      },
+      { surface: canvasRef.current ?? undefined },
+    );
     return detach;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
@@ -619,18 +654,25 @@ export function GameScreen({
   return (
     <div className="game">
       <canvas ref={canvasRef} className="world-canvas" />
+      <div className="hud score">
+        {/* key retriggers the pop on every score change */}
+        <span className="score-value" key={hud.score}>
+          {hud.score}
+        </span>
+      </div>
       <div className="hud top-left">
         <div>
-          score <b>row {hud.score}</b>
-        </div>
-        <div>
-          record <b>row {hud.record}</b>
+          best <b>row {hud.record}</b>
         </div>
         <div className="dim">
           ({hud.x}, {hud.y}) · {hud.state}
           {hud.pending && " · sending…"}
         </div>
-        {hud.lastRejection && <div className="rejection">✕ {hud.lastRejection}</div>}
+        {hud.lastRejection && (
+          <div className="rejection" key={hud.lastRejection}>
+            {hud.lastRejection}
+          </div>
+        )}
       </div>
       <div className="hud top-right">
         {hud.pingMs != null && (
@@ -643,23 +685,30 @@ export function GameScreen({
           </span>
         )}
         <span className={route.mode === WorldMode.Paid ? "badge paid" : "badge casual"}>
-          {route.mode === WorldMode.Paid ? "PAID" : "CASUAL — FREE"}
+          {route.mode === WorldMode.Paid ? "PAID · 1 USDC" : "CASUAL · FREE"}
         </span>
         <button className="ghost" onClick={onExit}>
           Exit
         </button>
       </div>
-      <div className="hud bottom-left">WASD / arrows to move · Space to kick</div>
+      <div className="hud bottom-left">WASD / arrows or swipe to hop · Space to kick</div>
 
       {endedScore != null && !death && (
         <div className="modal-backdrop">
           <div className="modal card death">
-            <h2>You died</h2>
-            <p>
-              You reached <b>row {endedScore}</b>.
-            </p>
+            {endedScore >= hud.record && endedScore > 0 && <Confetti />}
+            <h2>Squished!</h2>
+            <div className="final-label">You reached</div>
+            <div className="final-score">
+              row <CountUp value={endedScore} durationMs={650} />
+            </div>
+            {endedScore >= hud.record && endedScore > 0 && (
+              <div className="final-label" style={{ color: "var(--sun-400)" }}>
+                New personal course record
+              </div>
+            )}
             <div className="row">
-              <button disabled={respawning} onClick={playAgain}>
+              <button className="play" disabled={respawning} onClick={playAgain}>
                 {respawning ? "Starting…" : "Play again"}
               </button>
               <button className="ghost" onClick={onExit}>
@@ -674,17 +723,27 @@ export function GameScreen({
         <div className="modal-backdrop">
           <div className="modal card death">
             <h2>You died</h2>
-            <p>
-              Score retained: <b>row {hud.score}</b>
-            </p>
+            <div className="final-label">Score retained</div>
+            <div className="final-score">
+              row <CountUp value={hud.score} durationMs={650} />
+            </div>
             {death.price != null ? (
               <>
-                <p>
-                  Revive for <b>{(Number(death.price) / 1e6).toFixed(2)} USDC</b> —{" "}
-                  <b>{deadlineLeft}s</b> left. Later revivals double in price.
+                <p style={{ textAlign: "center" }}>
+                  Revive for{" "}
+                  <span className="price">
+                    {(Number(death.price) / 1e6).toFixed(2)} USDC
+                  </span>{" "}
+                  — <span className="deadline">{deadlineLeft}s</span> left.
+                  <br />
+                  <small className="dim">Later revivals double in price.</small>
                 </p>
                 <div className="row">
-                  <button disabled={reviving || deadlineLeft === 0} onClick={revive}>
+                  <button
+                    className="danger"
+                    disabled={reviving || deadlineLeft === 0}
+                    onClick={revive}
+                  >
                     {reviving
                       ? "Reviving…"
                       : `Continue (${(Number(death.price) / 1e6).toFixed(0)} USDC)`}

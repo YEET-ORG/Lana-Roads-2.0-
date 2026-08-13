@@ -9,7 +9,7 @@ invariants they preserve and the follow-ups they require.
 ## 1. Randomness transport: configured `vrf_authority` signer
 
 The spec requires MagicBlock VRF with `#[vrf]`/`#[vrf_callback]` binding.
-V1 implements the full *authorization and state machine* — request
+V1 implements the full _authorization and state machine_ — request
 generations, (day, chunk index, generation) and (pull, generation) binding,
 idempotent duplicate rejection, permissionless timeout retry that
 invalidates prior generations, never-reroll — behind one authenticated
@@ -21,7 +21,7 @@ oracle worker requires no state-machine changes.
 
 **Gate:** real MagicBlock VRF transport must be wired and devnet-verified
 before mainnet (testing/security spec §9). Until then the vrf key holder is
-trusted for randomness *liveness and value*; all binding/no-reroll rules
+trusted for randomness _liveness and value_; all binding/no-reroll rules
 are still program-enforced.
 
 ## 2. Metaplex Core CPIs are hand-rolled in `external/mpl_core.rs`

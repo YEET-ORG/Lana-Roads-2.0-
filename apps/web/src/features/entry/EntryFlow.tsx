@@ -101,10 +101,31 @@ export function EntryFlow({
     }
   }
 
+  const stepIndex =
+    stage.name === "loading" || stage.name === "review"
+      ? 0
+      : stage.name === "signing"
+        ? 1
+        : stage.name === "payment-confirmed" || stage.name === "spawn-pending"
+          ? 2
+          : 3;
+
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal card" onClick={(e) => e.stopPropagation()}>
         <h2>Paid entry</h2>
+        {stage.name !== "failed" && (
+          <div className="steps">
+            {["Review", "Sign", "Spawn", "Play"].map((label, i) => (
+              <span
+                key={label}
+                className={`step ${i < stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
         {stage.name === "loading" && <p>Preparing review…</p>}
         {stage.name === "review" && (
           <>
@@ -136,11 +157,11 @@ export function EntryFlow({
           </>
         )}
         {stage.name === "signing" && <p>Signing & sending payment…</p>}
-        {stage.name === "payment-confirmed" && <p>Payment confirmed on Solana ✓</p>}
+        {stage.name === "payment-confirmed" && <p>Payment confirmed on Solana.</p>}
         {stage.name === "spawn-pending" && (
-          <p>Payment confirmed ✓ — reserving your spawn tile…</p>
+          <p>Payment confirmed — reserving your spawn tile…</p>
         )}
-        {stage.name === "active" && <p>You're in! ✓</p>}
+        {stage.name === "active" && <p>You're in!</p>}
         {stage.name === "failed" && (
           <>
             <p className="error">{stage.message.slice(0, 300)}</p>

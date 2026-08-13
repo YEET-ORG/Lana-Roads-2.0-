@@ -31,3 +31,6 @@ SourceAssets/**/*.psd filter=lfs diff=lfs merge=lfs -text
 SourceAssets/**/*.exr filter=lfs diff=lfs merge=lfs -text
 SourceAssets/**/*.unity filter=lfs diff=lfs merge=lfs -text
 SourceAssets/**/*.asset filter=lfs diff=lfs merge=lfs -text
+
+# Optimized browser-ready 3D derivatives.
+apps/web/public/assets/models/**/*.glb filter=lfs diff=lfs merge=lfs -text

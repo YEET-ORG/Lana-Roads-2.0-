@@ -110,7 +110,10 @@ for (const lv of LEVELS) {
   if (lv.mech.locks === "levers") {
     // levers reachable; each breaker only while the matching lever is held
     ok(has(p1, lv, "i") && has(p1, lv, "j"), `${L} levers reachable after door 1`);
-    ok(!has(p1, lv, "a") && !has(p1, lv, "b"), `${L} breakers gated when nothing is held`);
+    ok(
+      !has(p1, lv, "a") && !has(p1, lv, "b"),
+      `${L} breakers gated when nothing is held`,
+    );
     const pi = reachable(lv, DOOR1, { i: true });
     const pj = reachable(lv, DOOR1, { j: true });
     ok(has(pi, lv, "a"), `${L} breaker a reachable while lever i held`);
@@ -131,16 +134,25 @@ for (const lv of LEVELS) {
     ok(!has(p2, lv, "S"), `${L} switch blocked by unheld gate`);
     const pHeld = reachable(lv, BOTH_LOCKS, { lever: true });
     ok(has(pHeld, lv, "S"), `${L} switch reachable while lever held`);
-    ok(has(pHeld, lv, "A") && has(pHeld, lv, "B"), `${L} keys reachable while lever held`);
+    ok(
+      has(pHeld, lv, "A") && has(pHeld, lv, "B"),
+      `${L} keys reachable while lever held`,
+    );
   } else if (lv.mech.latch === "vent") {
     ok(has(p2, lv, "V"), `${L} vent plate reachable after door 2`);
     ok(!has(p2, lv, "S"), `${L} purge switch unreachable while the stream is live`);
     const pVent = reachable(lv, BOTH_LOCKS, {}, { ventSafe: true });
-    ok(has(pVent, lv, "S"), `${L} purge switch reachable while partner freezes the stream`);
+    ok(
+      has(pVent, lv, "S"),
+      `${L} purge switch reachable while partner freezes the stream`,
+    );
   } else {
     const pOpen = reachable(lv, BOTH_LOCKS, {}, { pulse: true });
     const pClosed = reachable(lv, BOTH_LOCKS, {}, { pulse: false });
-    ok(has(pOpen, lv, "h") && has(pOpen, lv, "H"), `${L} charge pads reachable on the pulse beat`);
+    ok(
+      has(pOpen, lv, "h") && has(pOpen, lv, "H"),
+      `${L} charge pads reachable on the pulse beat`,
+    );
     ok(
       !has(pClosed, lv, "h") && !has(pClosed, lv, "H"),
       `${L} charge pads sealed while the pulse wall is closed`,
@@ -179,7 +191,10 @@ for (const ch of [..."~mvxy"])
 ok(count(reactorLv, "~") > 0, "level 2 has coolant hazards");
 ok(count(reactorLv, "v") >= 8, "level 2 has a vent stream to freeze");
 ok(count(coreLv, "m") > 0, "level 3 has pulse barriers");
-ok(count(coreLv, "x") >= 4 && count(coreLv, "y") >= 4, "level 3 has cracked glass on both crossings");
+ok(
+  count(coreLv, "x") >= 4 && count(coreLv, "y") >= 4,
+  "level 3 has cracked glass on both crossings",
+);
 
 // The Reactor: the vent stream fully seals the chamber — no safe path
 // around it (that's WHY the vent plate exists), and a safe fuel route
@@ -203,7 +218,10 @@ ok(count(coreLv, "x") >= 4 && count(coreLv, "y") >= 4, "level 3 has cracked glas
           Math.hypot(c * TILE - b.x, r * TILE - b.y) < 6 * TILE
         )
           nearBtn++;
-    ok(nearBtn >= 3, `[The Core] '${glass}' glass guards the approach to button ${button}`);
+    ok(
+      nearBtn >= 3,
+      `[The Core] '${glass}' glass guards the approach to button ${button}`,
+    );
   }
 }
 
@@ -220,13 +238,16 @@ ok(
   "different level, different codes",
 );
 ok(
-  JSON.stringify(codesFor(addr, 0)) !== JSON.stringify(codesFor(Keypair.generate().publicKey, 0)),
+  JSON.stringify(codesFor(addr, 0)) !==
+    JSON.stringify(codesFor(Keypair.generate().publicKey, 0)),
   "different vault, different codes",
 );
 {
   const c = codesFor(addr, 0);
   ok(
-    c.code1.length === 4 && c.code2.length === 4 && [...c.code1, ...c.code2].every((d) => d >= 0 && d <= 9),
+    c.code1.length === 4 &&
+      c.code2.length === 4 &&
+      [...c.code1, ...c.code2].every((d) => d >= 0 && d <= 9),
     "codes are 4 digits 0-9",
   );
 }
@@ -236,7 +257,10 @@ ok(deadlyTile("~", false) && deadlyTile("~", true), "coolant is always deadly");
 ok(deadlyTile("x", true) && deadlyTile("y", true), "glass is always deadly");
 ok(deadlyTile("v", false), "vent stream deadly while live");
 ok(!deadlyTile("v", true), "vent stream safe while suppressed");
-ok(!deadlyTile(".", false) && !deadlyTile("m", false), "floor and pulse tiles are not deadly");
+ok(
+  !deadlyTile(".", false) && !deadlyTile("m", false),
+  "floor and pulse tiles are not deadly",
+);
 
 // ── key window per level ──
 const now = Date.now();

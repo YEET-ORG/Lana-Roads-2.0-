@@ -66,7 +66,12 @@ export function drawAvatar(
   ctx.font = "bold 10px ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(x - ctx.measureText(a.name).width / 2 - 3, y - 27, ctx.measureText(a.name).width + 6, 12);
+  ctx.fillRect(
+    x - ctx.measureText(a.name).width / 2 - 3,
+    y - 27,
+    ctx.measureText(a.name).width + 6,
+    12,
+  );
   ctx.fillStyle = "#fff";
   ctx.fillText(a.name, x, y - 18);
 

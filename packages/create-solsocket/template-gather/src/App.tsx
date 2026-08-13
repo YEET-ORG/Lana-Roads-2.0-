@@ -23,12 +23,11 @@ import { loadBurnerWallet, requestAirdrop } from "./wallet";
 
 const wallet = loadBurnerWallet();
 const params = new URLSearchParams(location.search);
-const cluster = params.get("cluster") === "local" ? ("local" as const) : ("devnet" as const);
+const cluster =
+  params.get("cluster") === "local" ? ("local" as const) : ("devnet" as const);
 const REGIONS = ["asia", "eu", "us"] as const;
 const region =
-  cluster === "devnet"
-    ? REGIONS.find((r) => r === params.get("region"))
-    : undefined;
+  cluster === "devnet" ? REGIONS.find((r) => r === params.get("region")) : undefined;
 
 type Msg = ChatMsg | EmoteMsg;
 type World = Room<WorldState, Avatar, Msg>;
@@ -211,9 +210,7 @@ export default function App() {
 
     const counters = setInterval(() => {
       setTxCount(sent.current);
-      setOnline(
-        1 + [...remotes.current.keys()].filter((k) => k !== selfKey).length,
-      );
+      setOnline(1 + [...remotes.current.keys()].filter((k) => k !== selfKey).length);
       // Heartbeat keeps us on other players' rosters while idle.
       if (Date.now() - lastSend > 2_500) broadcast(true);
     }, 500);
@@ -263,7 +260,11 @@ export default function App() {
         ctx,
         selfKey,
         { x: me.x, y: me.y, facing: me.facing, emote: 0, name },
-        { self: true, chat: chats.current.get(selfKey), emote: emotes.current.get(selfKey) },
+        {
+          self: true,
+          chat: chats.current.get(selfKey),
+          emote: emotes.current.get(selfKey),
+        },
       );
 
       raf = requestAnimationFrame(frame);
@@ -338,16 +339,16 @@ export default function App() {
       {phase === "funding" && (
         <div className="panel">
           <p>
-            A tiny Gather-style world where <b>every avatar is a wallet</b>: movement
-            is a binary presence broadcast, chat and emotes are onchain events, the
-            door is shared room state — all zero-fee transactions on a MagicBlock
-            ephemeral rollup{cluster === "local" ? " (local stack)" : " (devnet)"}.
+            A tiny Gather-style world where <b>every avatar is a wallet</b>: movement is a
+            binary presence broadcast, chat and emotes are onchain events, the door is
+            shared room state — all zero-fee transactions on a MagicBlock ephemeral rollup
+            {cluster === "local" ? " (local stack)" : " (devnet)"}.
           </p>
           <p>
             burner: <code>{wallet.publicKey.toBase58()}</code>
             <br />
-            balance: {balance === null ? "…" : `${balance.toFixed(4)} SOL`} — needs
-            ~0.01 once for room rent
+            balance: {balance === null ? "…" : `${balance.toFixed(4)} SOL`} — needs ~0.01
+            once for room rent
           </p>
           <label>
             display name{" "}
@@ -390,8 +391,8 @@ export default function App() {
 
       {phase === "connecting" && (
         <div className="panel">
-          <span className="dot wait" /> {params.get("room") ? "joining" : "creating"}{" "}
-          the world on the ephemeral rollup… (one base-layer transaction)
+          <span className="dot wait" /> {params.get("room") ? "joining" : "creating"} the
+          world on the ephemeral rollup… (one base-layer transaction)
         </div>
       )}
 
@@ -417,7 +418,9 @@ export default function App() {
             <div>
               <kbd>1</kbd>–<kbd>4</kbd> emote
             </div>
-            <span className="hint-note">every action is an onchain tx · move to dismiss</span>
+            <span className="hint-note">
+              every action is an onchain tx · move to dismiss
+            </span>
           </div>
         )}
         <form className="chatbar" onSubmit={sendChat}>

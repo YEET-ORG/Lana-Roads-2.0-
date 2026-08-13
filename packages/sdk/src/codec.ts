@@ -24,16 +24,7 @@ export const rawCodec: Codec<Uint8Array> = {
 /** Field types for `structCodec`. Borsh-style wire format: little-endian
  *  integers/floats, bool as one byte, string as u32 length + UTF-8. */
 export type StructField =
-  | "u8"
-  | "i8"
-  | "u16"
-  | "i16"
-  | "u32"
-  | "i32"
-  | "f32"
-  | "f64"
-  | "bool"
-  | "string";
+  "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "f32" | "f64" | "bool" | "string";
 
 const FIXED_SIZE: Record<Exclude<StructField, "string">, number> = {
   u8: 1,
@@ -81,19 +72,48 @@ export function structCodec<T extends Record<string, number | boolean | string>>
       for (const [key, type] of fields) {
         const v = value[key];
         switch (type) {
-          case "u8": view.setUint8(o, v as number); o += 1; break;
-          case "i8": view.setInt8(o, v as number); o += 1; break;
-          case "bool": view.setUint8(o, v ? 1 : 0); o += 1; break;
-          case "u16": view.setUint16(o, v as number, true); o += 2; break;
-          case "i16": view.setInt16(o, v as number, true); o += 2; break;
-          case "u32": view.setUint32(o, v as number, true); o += 4; break;
-          case "i32": view.setInt32(o, v as number, true); o += 4; break;
-          case "f32": view.setFloat32(o, v as number, true); o += 4; break;
-          case "f64": view.setFloat64(o, v as number, true); o += 8; break;
+          case "u8":
+            view.setUint8(o, v as number);
+            o += 1;
+            break;
+          case "i8":
+            view.setInt8(o, v as number);
+            o += 1;
+            break;
+          case "bool":
+            view.setUint8(o, v ? 1 : 0);
+            o += 1;
+            break;
+          case "u16":
+            view.setUint16(o, v as number, true);
+            o += 2;
+            break;
+          case "i16":
+            view.setInt16(o, v as number, true);
+            o += 2;
+            break;
+          case "u32":
+            view.setUint32(o, v as number, true);
+            o += 4;
+            break;
+          case "i32":
+            view.setInt32(o, v as number, true);
+            o += 4;
+            break;
+          case "f32":
+            view.setFloat32(o, v as number, true);
+            o += 4;
+            break;
+          case "f64":
+            view.setFloat64(o, v as number, true);
+            o += 8;
+            break;
           case "string": {
             const bytes = strings.get(key)!;
-            view.setUint32(o, bytes.length, true); o += 4;
-            out.set(bytes, o); o += bytes.length;
+            view.setUint32(o, bytes.length, true);
+            o += 4;
+            out.set(bytes, o);
+            o += bytes.length;
             break;
           }
         }
@@ -107,18 +127,47 @@ export function structCodec<T extends Record<string, number | boolean | string>>
       let o = 0;
       for (const [key, type] of fields) {
         switch (type) {
-          case "u8": value[key] = view.getUint8(o); o += 1; break;
-          case "i8": value[key] = view.getInt8(o); o += 1; break;
-          case "bool": value[key] = view.getUint8(o) !== 0; o += 1; break;
-          case "u16": value[key] = view.getUint16(o, true); o += 2; break;
-          case "i16": value[key] = view.getInt16(o, true); o += 2; break;
-          case "u32": value[key] = view.getUint32(o, true); o += 4; break;
-          case "i32": value[key] = view.getInt32(o, true); o += 4; break;
-          case "f32": value[key] = view.getFloat32(o, true); o += 4; break;
-          case "f64": value[key] = view.getFloat64(o, true); o += 8; break;
+          case "u8":
+            value[key] = view.getUint8(o);
+            o += 1;
+            break;
+          case "i8":
+            value[key] = view.getInt8(o);
+            o += 1;
+            break;
+          case "bool":
+            value[key] = view.getUint8(o) !== 0;
+            o += 1;
+            break;
+          case "u16":
+            value[key] = view.getUint16(o, true);
+            o += 2;
+            break;
+          case "i16":
+            value[key] = view.getInt16(o, true);
+            o += 2;
+            break;
+          case "u32":
+            value[key] = view.getUint32(o, true);
+            o += 4;
+            break;
+          case "i32":
+            value[key] = view.getInt32(o, true);
+            o += 4;
+            break;
+          case "f32":
+            value[key] = view.getFloat32(o, true);
+            o += 4;
+            break;
+          case "f64":
+            value[key] = view.getFloat64(o, true);
+            o += 8;
+            break;
           case "string": {
-            const len = view.getUint32(o, true); o += 4;
-            value[key] = dec.decode(bytes.subarray(o, o + len)); o += len;
+            const len = view.getUint32(o, true);
+            o += 4;
+            value[key] = dec.decode(bytes.subarray(o, o + len));
+            o += len;
             break;
           }
         }

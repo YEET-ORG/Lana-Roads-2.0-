@@ -57,7 +57,13 @@ export function walkable(x: number, y: number, doorOpen: boolean, half = 8): boo
 }
 
 /** Squared-distance check used for proximity chat and the door hotspot. */
-export function near(ax: number, ay: number, bx: number, by: number, tiles: number): boolean {
+export function near(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  tiles: number,
+): boolean {
   const r = tiles * TILE;
   const dx = ax - bx;
   const dy = ay - by;

@@ -22,9 +22,9 @@ npm install solsocket
 import { SolSocket } from "solsocket";
 
 const sock = SolSocket.connect({
-  wallet,            // wallet adapter (browser) or Keypair (node)
+  wallet, // wallet adapter (browser) or Keypair (node)
   cluster: "devnet", // "devnet" (default), "local", or { rpc, er } endpoints
-  region: "eu",      // devnet ER region: "asia" (default) | "eu" | "us"
+  region: "eu", // devnet ER region: "asia" (default) | "eu" | "us"
 });
 ```
 
@@ -69,7 +69,7 @@ room.onStateChange(({ state }) => setDoor(state.doorOpen));
 ## Leave
 
 ```ts
-await room.leave();       // commit + undelegate your presence slot
+await room.leave(); // commit + undelegate your presence slot
 await room.closeToBase(); // creator only: commit + undelegate the room itself
 ```
 

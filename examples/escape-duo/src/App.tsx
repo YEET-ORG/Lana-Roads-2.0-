@@ -39,7 +39,8 @@ import { loadBurnerWallet, requestAirdrop } from "./wallet";
 
 const wallet = loadBurnerWallet();
 const params = new URLSearchParams(location.search);
-const cluster = params.get("cluster") === "local" ? ("local" as const) : ("devnet" as const);
+const cluster =
+  params.get("cluster") === "local" ? ("local" as const) : ("devnet" as const);
 const REGIONS = ["asia", "eu", "us"] as const;
 const region =
   cluster === "devnet" ? REGIONS.find((r) => r === params.get("region")) : undefined;
@@ -72,7 +73,14 @@ const vaultCodec = structCodec<VaultState>([
   ["start", "f64"],
   ["run", "f64"],
 ]);
-const FRESH_VAULT: VaultState = { level: 0, doors: 0, keyA: 0, keyB: 0, start: 0, run: 0 };
+const FRESH_VAULT: VaultState = {
+  level: 0,
+  doors: 0,
+  keyA: 0,
+  keyB: 0,
+  start: 0,
+  run: 0,
+};
 
 async function goLive(): Promise<Vault> {
   const sock = SolSocket.connect({ wallet, cluster, region });
@@ -264,8 +272,7 @@ export default function App() {
   const selfKey = wallet.publicKey.toBase58();
   const roleRef = useRef(0);
 
-  const partnerKey = () =>
-    [...remotes.current.keys()].find((k) => k !== selfKey) ?? null;
+  const partnerKey = () => [...remotes.current.keys()].find((k) => k !== selfKey) ?? null;
   /** Structural roles, stamped per room: the creator is 0 (key A), the
    *  joiner is 1 (key B). Stored so a refresh can't flip it — and the two
    *  clients can never disagree. */
@@ -321,7 +328,8 @@ export default function App() {
               const v = s.state;
               // Other apps' rooms share the program — filter to states that
               // genuinely look like finished vault runs.
-              if (!isFinal(v) || v.level >= LEVELS.length + 1 || !solvedKeys(v)) return [];
+              if (!isFinal(v) || v.level >= LEVELS.length + 1 || !solvedKeys(v))
+                return [];
               if (!plausibleTs(v.run) || !plausibleTs(v.keyA)) return [];
               const time = Math.max(v.keyA, v.keyB) - v.run;
               return time > 10_000 ? [{ addr, time }] : [];
@@ -483,7 +491,10 @@ export default function App() {
           text: (data as ChatMsg).text,
           until: Date.now() + 5_000,
         });
-        pushFeed("💬", `${player.toBase58().slice(0, 6)}…: ${(data as ChatMsg).text.slice(0, 40)}`);
+        pushFeed(
+          "💬",
+          `${player.toBase58().slice(0, 6)}…: ${(data as ChatMsg).text.slice(0, 40)}`,
+        );
       });
       room.onMessage("rematch", ({ player, data }) => {
         if (player.toBase58() !== selfKey) setRematchRoom((data as ChatMsg).text);
@@ -521,7 +532,11 @@ export default function App() {
     startAmbient(); // low vault hum for the whole run
     const keys = new Set<string>();
     let curLevel = vault.current.level;
-    const me = { x: levelOf(vault.current).spawn.x, y: levelOf(vault.current).spawn.y, facing: 0 };
+    const me = {
+      x: levelOf(vault.current).spawn.x,
+      y: levelOf(vault.current).spawn.y,
+      facing: 0,
+    };
     let lastSend = 0;
     let lastMoved = 0;
     let lastLatch = 0;
@@ -651,7 +666,11 @@ export default function App() {
         const cradle = mine ? L.pos.u : L.pos.U;
         const socket = mine ? L.pos.o : L.pos.O;
         const bit = mine ? LOCK2 : LOCK1;
-        if (!carryRef.current && !(d & bit) && near(me.x, me.y, cradle.x, cradle.y, 1.4)) {
+        if (
+          !carryRef.current &&
+          !(d & bit) &&
+          near(me.x, me.y, cradle.x, cradle.y, 1.4)
+        ) {
           carryRef.current = true;
           sfx.key();
           broadcast(true);
@@ -754,7 +773,12 @@ export default function App() {
         fxKeyA = 0;
         fxKeyB = 0;
         fxFrozen = false;
-        setLevelCard({ num: v.level + 1, name: L.name, win: L.keyWindowMs, until: Date.now() + 2_400 });
+        setLevelCard({
+          num: v.level + 1,
+          name: L.name,
+          win: L.keyWindowMs,
+          until: Date.now() + 2_400,
+        });
         broadcast(true);
       }
 
@@ -762,7 +786,11 @@ export default function App() {
       const watchEntries = watchMode ? [...remotes.current.values()] : [];
       const tiles = watchEntries.map((e) => tileUnder(L, e.data.x, e.data.y));
       const p = partner();
-      const pTile = watchMode ? (tiles[1] ?? "") : p ? tileUnder(L, p.data.x, p.data.y) : "";
+      const pTile = watchMode
+        ? (tiles[1] ?? "")
+        : p
+          ? tileUnder(L, p.data.x, p.data.y)
+          : "";
       let myTile = watchMode ? (tiles[0] ?? "") : tileUnder(L, me.x, me.y);
       const pulse = pulseOpen(v.run, Date.now());
       const mech = L.mech;
@@ -827,8 +855,10 @@ export default function App() {
       if (!(v.doors & DOOR1)) {
         if (mech.door1 === "valves") {
           // valves 1+2 together, then 3+4 inside the window
-          const pair1 = (myTile === "c" && pTile === "d") || (myTile === "d" && pTile === "c");
-          const pair2 = (myTile === "e" && pTile === "f") || (myTile === "f" && pTile === "e");
+          const pair1 =
+            (myTile === "c" && pTile === "d") || (myTile === "d" && pTile === "c");
+          const pair2 =
+            (myTile === "e" && pTile === "f") || (myTile === "f" && pTile === "e");
           if (vr.half === 1 && Date.now() - vr.at > VALVE_WINDOW_MS) {
             vr.half = 0;
             sfx.wrong();
@@ -837,7 +867,12 @@ export default function App() {
             vr.half = 1;
             vr.at = Date.now();
             sfx.plate();
-          } else if (vr.half === 1 && pair2 && !watchMode && Date.now() - lastLatch > 1_500) {
+          } else if (
+            vr.half === 1 &&
+            pair2 &&
+            !watchMode &&
+            Date.now() - lastLatch > 1_500
+          ) {
             lastLatch = Date.now();
             writeState({
               doors: v.doors | DOOR1,
@@ -865,7 +900,8 @@ export default function App() {
       const cr = chargeRef.current;
       let chargeFrac = 0;
       if (mech.latch === "charge" && !(v.doors & LATCH)) {
-        const both = (myTile === "h" && pTile === "H") || (myTile === "H" && pTile === "h");
+        const both =
+          (myTile === "h" && pTile === "H") || (myTile === "H" && pTile === "h");
         const nowMs = Date.now();
         if (both) {
           if (!cr.start) cr.start = nowMs;
@@ -874,14 +910,23 @@ export default function App() {
           cr.start = 0;
         }
         if (cr.start) chargeFrac = Math.min(1, (nowMs - cr.start) / CHARGE_MS);
-        if (!watchMode && cr.start && nowMs - cr.start >= CHARGE_MS && nowMs - lastLatch > 1_500) {
+        if (
+          !watchMode &&
+          cr.start &&
+          nowMs - cr.start >= CHARGE_MS &&
+          nowMs - lastLatch > 1_500
+        ) {
           lastLatch = nowMs;
           writeState({ doors: v.doors | LATCH });
         }
       }
 
       // A half-typed code shouldn't linger: walking away clears the keypad.
-      if (mech.locks === "codes" && buf.current && !near(me.x, me.y, myPad().x, myPad().y, 2.6))
+      if (
+        mech.locks === "codes" &&
+        buf.current &&
+        !near(me.x, me.y, myPad().x, myPad().y, 2.6)
+      )
         buf.current = "";
       mePos.current.x = me.x;
       mePos.current.y = me.y;
@@ -953,7 +998,9 @@ export default function App() {
         for (const ch of ["c", "d", "e", "f"])
           if (nearPos(ch)) {
             ctx.fillText(
-              vr.half === 0 ? "valves 1 + 2 together first" : "now 3 + 4 — before the ring runs out",
+              vr.half === 0
+                ? "valves 1 + 2 together first"
+                : "now 3 + 4 — before the ring runs out",
               L.pos[ch].x,
               L.pos[ch].y - 22,
             );
@@ -967,23 +1014,39 @@ export default function App() {
         if (!padSolved && near(me.x, me.y, pad.x, pad.y, 1.5))
           ctx.fillText("type the 4 digits your partner reads out", pad.x, pad.y - 24);
         if (near(me.x, me.y, theirPad.x, theirPad.y, 1.5))
-          ctx.fillText("your partner's keypad — read them your panel", theirPad.x, theirPad.y - 24);
+          ctx.fillText(
+            "your partner's keypad — read them your panel",
+            theirPad.x,
+            theirPad.y - 24,
+          );
       }
       if (mech.locks === "fuel") {
         const mine = myRole() === 0;
         const cradle = mine ? L.pos.u : L.pos.U;
         const socket = mine ? L.pos.o : L.pos.O;
         const bit = mine ? LOCK2 : LOCK1;
-        if (!(v.doors & bit) && !carryRef.current && near(me.x, me.y, cradle.x, cradle.y, 1.5))
+        if (
+          !(v.doors & bit) &&
+          !carryRef.current &&
+          near(me.x, me.y, cradle.x, cradle.y, 1.5)
+        )
           ctx.fillText("[E] grab your fuel cell", cradle.x, cradle.y - 22);
         if (carryRef.current && near(me.x, me.y, socket.x, socket.y, 1.5))
           ctx.fillText("[E] slot the cell", socket.x, socket.y - 22);
         else if (carryRef.current)
-          ctx.fillText("to your yellow socket — coolant knocks it loose", me.x, me.y + 30);
+          ctx.fillText(
+            "to your yellow socket — coolant knocks it loose",
+            me.x,
+            me.y + 30,
+          );
       }
       if (mech.locks === "levers") {
         if (nearPos("i") || nearPos("j"))
-          ctx.fillText("stand here — holds the FAR gate open for your partner", me.x, me.y - 34);
+          ctx.fillText(
+            "stand here — holds the FAR gate open for your partner",
+            me.x,
+            me.y - 34,
+          );
         if (!(v.doors & LOCK2) && nearPos("a"))
           ctx.fillText("[E] throw the breaker", L.pos.a.x, L.pos.a.y - 20);
         if (!(v.doors & LOCK1) && nearPos("b"))
@@ -993,16 +1056,28 @@ export default function App() {
         ctx.fillText("[E] lock the gate open", L.pos.S.x, L.pos.S.y - 20);
       if (mech.latch === "vent") {
         if (nearPos("V"))
-          ctx.fillText("stand here — freezes the vent stream for your partner", L.pos.V.x, L.pos.V.y - 22);
+          ctx.fillText(
+            "stand here — freezes the vent stream for your partner",
+            L.pos.V.x,
+            L.pos.V.y - 22,
+          );
         if (!(v.doors & LATCH) && nearPos("S"))
           ctx.fillText("[E] purge the vents for good", L.pos.S.x, L.pos.S.y - 20);
       }
       if (mech.latch === "charge" && !(v.doors & LATCH) && (nearPos("h") || nearPos("H")))
         ctx.fillText("hold BOTH pads together for 3s", L.pos.h.x, L.pos.h.y - 22);
       if (myRole() === 0 && nearPos("A"))
-        ctx.fillText(`[E] turn key A — together, within ${winS}s`, L.pos.A.x, L.pos.A.y - 24);
+        ctx.fillText(
+          `[E] turn key A — together, within ${winS}s`,
+          L.pos.A.x,
+          L.pos.A.y - 24,
+        );
       if (myRole() === 1 && nearPos("B"))
-        ctx.fillText(`[E] turn key B — together, within ${winS}s`, L.pos.B.x, L.pos.B.y - 24);
+        ctx.fillText(
+          `[E] turn key B — together, within ${winS}s`,
+          L.pos.B.x,
+          L.pos.B.y - 24,
+        );
 
       for (const [key, pp] of remotes.current) {
         if (key === selfKey) continue;
@@ -1017,7 +1092,12 @@ export default function App() {
           ctx,
           selfKey,
           { x: me.x, y: me.y, facing: me.facing, name },
-          { self: true, chat: chats.current.get(selfKey), carry: carryRef.current, t: now },
+          {
+            self: true,
+            chat: chats.current.get(selfKey),
+            carry: carryRef.current,
+            t: now,
+          },
         );
 
       // particles
@@ -1109,7 +1189,8 @@ export default function App() {
     codes:
       "② read your green panel to your partner (Enter to chat) — type the code they read you on your yellow keypad (0-9)",
     fuel: "② grab your fuel cell with E and carry it to your yellow socket — coolant knocks it loose",
-    levers: "② each breaker hides behind a gate only your partner's lever holds open — take turns",
+    levers:
+      "② each breaker hides behind a gate only your partner's lever holds open — take turns",
     gate: "③ one stands on the lever to hold the gate — the other walks through and presses E on the switch",
     vent: "③ one stands on the vent plate to freeze the pink stream — the other crosses it and presses E on the purge switch",
     charge: "③ slip past the pulse wall and hold BOTH charge pads together for 3 seconds",
@@ -1120,17 +1201,17 @@ export default function App() {
       ? `spectating${online ? "" : " — nobody inside right now"} · every move you see is a signed onchain transaction`
       : online < 2 && !(doors & DOOR1) && level === 0 && !out
         ? "waiting for your partner — this vault needs two"
-      : out
-        ? "you escaped — verify it on the explorer"
-        : cleared
-          ? "level cleared — hit next level when you're both ready"
-          : !(doors & DOOR1)
-            ? OBJ[curLv.mech.door1]
-            : !(doors & LOCK1) || !(doors & LOCK2)
-              ? OBJ[curLv.mech.locks]
-              : !(doors & LATCH)
-                ? OBJ[curLv.mech.latch]
-                : `④ you are key ${myRole() === 0 ? "A" : "B"} — count down in chat, both press E together`;
+        : out
+          ? "you escaped — verify it on the explorer"
+          : cleared
+            ? "level cleared — hit next level when you're both ready"
+            : !(doors & DOOR1)
+              ? OBJ[curLv.mech.door1]
+              : !(doors & LOCK1) || !(doors & LOCK2)
+                ? OBJ[curLv.mech.locks]
+                : !(doors & LATCH)
+                  ? OBJ[curLv.mech.latch]
+                  : `④ you are key ${myRole() === 0 ? "A" : "B"} — count down in chat, both press E together`;
   const STEP_LABEL: Record<string, string> = {
     plates: "plates",
     valves: "valves",
@@ -1162,7 +1243,9 @@ export default function App() {
             <button onClick={() => copyLink("invite")}>
               {copiedLink === "invite" ? "copied ✓" : "copy invite link"}
             </button>
-            <span>{watchMode ? `watching · ${online}/2 inside` : `${online}/2 inside`}</span>
+            <span>
+              {watchMode ? `watching · ${online}/2 inside` : `${online}/2 inside`}
+            </span>
             {!watchMode && (
               <button onClick={() => copyLink("watch")}>
                 {copiedLink === "watch" ? "copied ✓" : "copy watch link"}
@@ -1202,8 +1285,8 @@ export default function App() {
               <div className="kicker">solsocket presents</div>
               <h2 className="game-title">The Vault</h2>
               <div className="hero-sub">
-                Two players. Nine puzzles. Every move a zero-fee Solana
-                transaction at ~50ms.
+                Two players. Nine puzzles. Every move a zero-fee Solana transaction at
+                ~50ms.
               </div>
               <div className="hero-tags">
                 <span>~50ms rollup writes</span>
@@ -1216,9 +1299,8 @@ export default function App() {
           {watchMode ? (
             <div className="join-card">
               <p className="watch-blurb">
-                <b>spectator mode</b> — you're about to watch a live vault read
-                straight off the rollup. No transaction, no fees, your wallet
-                never needs funding.
+                <b>spectator mode</b> — you're about to watch a live vault read straight
+                off the rollup. No transaction, no fees, your wallet never needs funding.
               </p>
               <button className="primary cta" onClick={launch}>
                 {opening ? "opening the vault…" : "Watch the heist live"}
@@ -1296,7 +1378,9 @@ export default function App() {
                   {STEP_LABEL[lv.mech.door1]} · {STEP_LABEL[lv.mech.locks]} ·{" "}
                   {STEP_LABEL[lv.mech.latch]}
                 </div>
-                <div className="lv-window">key window {(lv.keyWindowMs / 1000).toFixed(1)}s</div>
+                <div className="lv-window">
+                  key window {(lv.keyWindowMs / 1000).toFixed(1)}s
+                </div>
               </div>
             ))}
           </div>
@@ -1349,8 +1433,8 @@ export default function App() {
 
       {phase === "connecting" && (
         <div className="panel">
-          <span className="dot wait" /> {joinTarget ? "entering" : "creating"} the
-          vault on the ephemeral rollup… (one base-layer transaction)
+          <span className="dot wait" /> {joinTarget ? "entering" : "creating"} the vault
+          on the ephemeral rollup… (one base-layer transaction)
         </div>
       )}
 
@@ -1371,189 +1455,208 @@ export default function App() {
 
       <div className="game-wrap" style={{ display: phase === "live" ? "grid" : "none" }}>
         <div>
-        <div className="hud">
-          <span className="hud-level">
-            CHAMBER 0{level + 1} — {lvName.toUpperCase()}
-          </span>
-          <span className="hud-right">
-            <span className="hud-online">
-              {watchMode ? `watching · ${online}/2 in` : `${online}/2 in`}
+          <div className="hud">
+            <span className="hud-level">
+              CHAMBER 0{level + 1} — {lvName.toUpperCase()}
             </span>
-            {clock && <span className="hud-clock">{clock}</span>}
-          </span>
-        </div>
-        <div className="stage">
-        <canvas
-          ref={canvasRef}
-          width={WIDTH * 2}
-          height={HEIGHT * 2}
-          aria-label="The Vault — live game view"
-        />
-        {phase === "live" && watchMode && (
-          <>
-            <div className="scanlines" />
-            <span className="live-chip">
-              <b>●</b> LIVE FEED
+            <span className="hud-right">
+              <span className="hud-online">
+                {watchMode ? `watching · ${online}/2 in` : `${online}/2 in`}
+              </span>
+              {clock && <span className="hud-clock">{clock}</span>}
             </span>
-          </>
-        )}
-        {phase === "live" && levelCard && Date.now() < levelCard.until && (
-          <div className="lvlcard">
-            <span>CHAMBER 0{levelCard.num}</span>
-            <b>{levelCard.name.toUpperCase()}</b>
-            <i>key window {(levelCard.win / 1000).toFixed(1)}s</i>
           </div>
-        )}
-        {phase === "live" && keypadOn && (
-          <div className="keypad">
-            <div className="keypad-buf">{padBuf.padEnd(4, "·").split("").join(" ")}</div>
-            <div className="keypad-grid">
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "⌫"].map((k) => (
+          <div className="stage">
+            <canvas
+              ref={canvasRef}
+              width={WIDTH * 2}
+              height={HEIGHT * 2}
+              aria-label="The Vault — live game view"
+            />
+            {phase === "live" && watchMode && (
+              <>
+                <div className="scanlines" />
+                <span className="live-chip">
+                  <b>●</b> LIVE FEED
+                </span>
+              </>
+            )}
+            {phase === "live" && levelCard && Date.now() < levelCard.until && (
+              <div className="lvlcard">
+                <span>CHAMBER 0{levelCard.num}</span>
+                <b>{levelCard.name.toUpperCase()}</b>
+                <i>key window {(levelCard.win / 1000).toFixed(1)}s</i>
+              </div>
+            )}
+            {phase === "live" && keypadOn && (
+              <div className="keypad">
+                <div className="keypad-buf">
+                  {padBuf.padEnd(4, "·").split("").join(" ")}
+                </div>
+                <div className="keypad-grid">
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "⌫"].map((k) => (
+                    <button
+                      key={k}
+                      className="keypad-key"
+                      aria-label={k === "⌫" ? "delete last digit" : `digit ${k}`}
+                      onClick={() => {
+                        if (k === "⌫") {
+                          buf.current = buf.current.slice(0, -1);
+                          setPadBuf(buf.current);
+                        } else {
+                          enterDigitRef.current?.(k);
+                        }
+                      }}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {phase === "live" &&
+              !watchMode &&
+              online < 2 &&
+              level === 0 &&
+              !(doors & DOOR1) &&
+              !out && (
+                <div className="hint">
+                  <b>waiting for your partner</b>
+                  <div>this vault needs two — send the invite link</div>
+                  <button onClick={() => navigator.clipboard.writeText(location.href)}>
+                    copy invite link
+                  </button>
+                </div>
+              )}
+            {phase === "live" &&
+              !watchMode &&
+              online >= 2 &&
+              showHint &&
+              !out &&
+              !cleared && (
+                <div className="hint" onClick={() => setShowHint(false)}>
+                  <b>escape together — {LEVELS.length} levels</b>
+                  <div>
+                    <kbd>W</kbd>
+                    <kbd>A</kbd>
+                    <kbd>S</kbd>
+                    <kbd>D</kbd> move · <kbd>Enter</kbd> chat · <kbd>E</kbd> use ·{" "}
+                    <kbd>0</kbd>–<kbd>9</kbd> keypad
+                  </div>
+                  <div>every level is a different set of puzzles — the banner</div>
+                  <div>at the bottom always tells you the current objective</div>
+                  <div>lvl 1 the vault: plates · code relay · held gate</div>
+                  <div>lvl 2 the reactor: valve sequence · fuel run · vent purge</div>
+                  <div>lvl 3 the core: glass bridge · cross levers · charge pads</div>
+                  <div>⚠ coolant, glass and vent steam send you back to spawn;</div>
+                  <div>cyan pulse walls only open on the beat — time your runs</div>
+                  <span className="hint-note">
+                    every action is an onchain tx · move to dismiss
+                  </span>
+                </div>
+              )}
+            {cleared && (
+              <div className="win">
+                <b>LEVEL {level + 1} CLEARED</b>
+                <div className="win-time">{clock}</div>
+                <div>
+                  next: {LEVELS[Math.min(level + 1, LEVELS.length - 1)].name} — key window{" "}
+                  {(
+                    LEVELS[Math.min(level + 1, LEVELS.length - 1)].keyWindowMs / 1000
+                  ).toFixed(1)}
+                  s
+                </div>
+                {!watchMode && (
+                  <button className="primary" onClick={advance}>
+                    next level →
+                  </button>
+                )}
+              </div>
+            )}
+            {out && (
+              <div className="win">
+                <b>ESCAPED — ALL {LEVELS.length} LEVELS</b>
+                <div className="win-time">{clock}</div>
+                <div>
+                  {txCount} onchain writes · every step a signed transaction
+                  {room && cluster === "devnet" && (
+                    <>
+                      {" · "}
+                      <a
+                        href={`https://explorer.solana.com/address/${room.address.toBase58()}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        verify the escape ↗
+                      </a>
+                    </>
+                  )}
+                </div>
+                {!watchMode && rematchRoom && (
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      location.href = `${location.pathname}?room=${rematchRoom}${linkSuffix}`;
+                    }}
+                  >
+                    join the rematch ▸
+                  </button>
+                )}
+                {!watchMode && !rematchRoom && (
+                  <button
+                    className="primary"
+                    onClick={async () => {
+                      try {
+                        const sock2 = SolSocket.connect({ wallet, cluster, region });
+                        const nr = await sock2.createRoom<VaultState, Player, ChatMsg>({
+                          codec: vaultCodec,
+                          presenceCodec: playerCodec,
+                          maxPlayers: 2,
+                          initialState: FRESH_VAULT,
+                        });
+                        const addr = nr.address.toBase58();
+                        // I created it → I am role 0 in the new vault.
+                        localStorage.setItem(`solsocket-escape:role:${addr}`, "0");
+                        void roomRef.current?.emit("rematch", { text: addr });
+                        setTimeout(() => {
+                          location.href = `${location.pathname}?room=${addr}${linkSuffix}`;
+                        }, 900);
+                      } catch {
+                        pushFeed("⚠️", "rematch failed — open a new vault instead");
+                      }
+                    }}
+                  >
+                    rematch ▸ same partner, fresh vault
+                  </button>
+                )}
                 <button
-                  key={k}
-                  className="keypad-key"
-                  aria-label={k === "⌫" ? "delete last digit" : `digit ${k}`}
                   onClick={() => {
-                    if (k === "⌫") {
-                      buf.current = buf.current.slice(0, -1);
-                      setPadBuf(buf.current);
-                    } else {
-                      enterDigitRef.current?.(k);
-                    }
+                    location.href =
+                      location.pathname +
+                      (cluster === "local"
+                        ? "?cluster=local"
+                        : region
+                          ? `?region=${region}`
+                          : "");
                   }}
                 >
-                  {k}
+                  open a new vault
                 </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {phase === "live" && !watchMode && online < 2 && level === 0 && !(doors & DOOR1) && !out && (
-          <div className="hint">
-            <b>waiting for your partner</b>
-            <div>this vault needs two — send the invite link</div>
-            <button onClick={() => navigator.clipboard.writeText(location.href)}>
-              copy invite link
-            </button>
-          </div>
-        )}
-        {phase === "live" && !watchMode && online >= 2 && showHint && !out && !cleared && (
-          <div className="hint" onClick={() => setShowHint(false)}>
-            <b>escape together — {LEVELS.length} levels</b>
-            <div>
-              <kbd>W</kbd>
-              <kbd>A</kbd>
-              <kbd>S</kbd>
-              <kbd>D</kbd> move · <kbd>Enter</kbd> chat · <kbd>E</kbd> use ·{" "}
-              <kbd>0</kbd>–<kbd>9</kbd> keypad
-            </div>
-            <div>every level is a different set of puzzles — the banner</div>
-            <div>at the bottom always tells you the current objective</div>
-            <div>lvl 1 the vault: plates · code relay · held gate</div>
-            <div>lvl 2 the reactor: valve sequence · fuel run · vent purge</div>
-            <div>lvl 3 the core: glass bridge · cross levers · charge pads</div>
-            <div>⚠ coolant, glass and vent steam send you back to spawn;</div>
-            <div>cyan pulse walls only open on the beat — time your runs</div>
-            <span className="hint-note">every action is an onchain tx · move to dismiss</span>
-          </div>
-        )}
-        {cleared && (
-          <div className="win">
-            <b>
-              LEVEL {level + 1} CLEARED
-            </b>
-            <div className="win-time">{clock}</div>
-            <div>
-              next: {LEVELS[Math.min(level + 1, LEVELS.length - 1)].name} — key window{" "}
-              {(LEVELS[Math.min(level + 1, LEVELS.length - 1)].keyWindowMs / 1000).toFixed(1)}s
-            </div>
-            {!watchMode && (
-              <button className="primary" onClick={advance}>
-                next level →
-              </button>
+              </div>
             )}
           </div>
-        )}
-        {out && (
-          <div className="win">
-            <b>ESCAPED — ALL {LEVELS.length} LEVELS</b>
-            <div className="win-time">{clock}</div>
-            <div>
-              {txCount} onchain writes · every step a signed transaction
-              {room && cluster === "devnet" && (
-                <>
-                  {" · "}
-                  <a
-                    href={`https://explorer.solana.com/address/${room.address.toBase58()}?cluster=devnet`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    verify the escape ↗
-                  </a>
-                </>
-              )}
-            </div>
-            {!watchMode && rematchRoom && (
-              <button
-                className="primary"
-                onClick={() => {
-                  location.href = `${location.pathname}?room=${rematchRoom}${linkSuffix}`;
-                }}
-              >
-                join the rematch ▸
-              </button>
-            )}
-            {!watchMode && !rematchRoom && (
-              <button
-                className="primary"
-                onClick={async () => {
-                  try {
-                    const sock2 = SolSocket.connect({ wallet, cluster, region });
-                    const nr = await sock2.createRoom<VaultState, Player, ChatMsg>({
-                      codec: vaultCodec,
-                      presenceCodec: playerCodec,
-                      maxPlayers: 2,
-                      initialState: FRESH_VAULT,
-                    });
-                    const addr = nr.address.toBase58();
-                    // I created it → I am role 0 in the new vault.
-                    localStorage.setItem(`solsocket-escape:role:${addr}`, "0");
-                    void roomRef.current?.emit("rematch", { text: addr });
-                    setTimeout(() => {
-                      location.href = `${location.pathname}?room=${addr}${linkSuffix}`;
-                    }, 900);
-                  } catch {
-                    pushFeed("⚠️", "rematch failed — open a new vault instead");
-                  }
-                }}
-              >
-                rematch ▸ same partner, fresh vault
-              </button>
-            )}
-            <button
-              onClick={() => {
-                location.href =
-                  location.pathname +
-                  (cluster === "local" ? "?cluster=local" : region ? `?region=${region}` : "");
-              }}
-            >
-              open a new vault
-            </button>
-          </div>
-        )}
-        </div>
-        {!watchMode && (
-          <form className="chatbar" onSubmit={sendChat}>
-            <input
-              ref={chatInputRef}
-              value={chatDraft}
-              maxLength={140}
-              placeholder="Enter to chat — relay those codes · WASD move · E use"
-              onChange={(e) => setChatDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && chatInputRef.current?.blur()}
-            />
-          </form>
-        )}
+          {!watchMode && (
+            <form className="chatbar" onSubmit={sendChat}>
+              <input
+                ref={chatInputRef}
+                value={chatDraft}
+                maxLength={140}
+                placeholder="Enter to chat — relay those codes · WASD move · E use"
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && chatInputRef.current?.blur()}
+              />
+            </form>
+          )}
         </div>
         <aside className="side">
           {objective && !out && !cleared && (
@@ -1579,8 +1682,8 @@ export default function App() {
             <div className="feed-stream">{txCount} zero-fee txs sent</div>
             {feed.current.length === 0 ? (
               <div className="feed-empty">
-                every chat line and puzzle write lands here the moment it hits
-                the rollup — movement streams above
+                every chat line and puzzle write lands here the moment it hits the rollup
+                — movement streams above
               </div>
             ) : (
               feed.current.slice(0, 7).map((f) => (
@@ -1597,7 +1700,11 @@ export default function App() {
       <div className="footer">
         <span>built on solsocket — Socket.io for Solana</span>
         <span className="sep">·</span>
-        <a href="https://github.com/Pratikkale26/solsocket" target="_blank" rel="noreferrer">
+        <a
+          href="https://github.com/Pratikkale26/solsocket"
+          target="_blank"
+          rel="noreferrer"
+        >
           GitHub
         </a>
         <span className="sep">·</span>

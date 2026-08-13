@@ -1,6 +1,11 @@
 import { AnchorProvider, BN, Program, utils } from "@coral-xyz/anchor";
 import type { Wallet } from "@coral-xyz/anchor/dist/cjs/provider";
-import { Connection, PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { IDL } from "./idl";
 
 export const PROGRAM_ID = new PublicKey(IDL.address);

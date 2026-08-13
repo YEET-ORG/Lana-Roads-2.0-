@@ -1,12 +1,18 @@
 /**
- * Home / mode selection: UTC countdown to the hard cutoff, live prize pool
- * from durable accounting, current champion, and the two entry paths. Paid
- * and casual are visually distinct and cannot be confused.
+ * Home / mode selection, world-first: the live game world fills the screen
+ * behind floating UI (Crossy grammar). Stats ride in compact chips; the two
+ * entry paths sit in a bottom dock; the agent carousel swaps your animal
+ * live in the world. Paid and casual stay visually distinct.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dayEnd, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
+import { agentModelIdFor, getAgentChoice, setAgentChoice } from "../../lib/agent";
+import { agentId, AGENT_COUNT } from "../../game/renderer/assets";
+import { sfx } from "../../game/audio";
+import { WorldScene } from "../../game/renderer/scene";
 import { EntryFlow } from "../entry/EntryFlow";
+import { MenuBackdrop } from "./MenuBackdrop";
 import type { Route } from "../../app/App";
 
 interface DayInfo {
@@ -19,6 +25,10 @@ interface DayInfo {
   status: string;
 }
 
+function agentIndexFromModelId(id: string): number {
+  return Number(id.slice(-2));
+}
+
 export function Home({
   boot,
   onPlay,
@@ -27,10 +37,14 @@ export function Home({
   onPlay: (r: Route) => void;
 }) {
   const [info, setInfo] = useState<DayInfo | null>(null);
-  const [regionPings, setRegionPings] = useState<Record<string, number> | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
   const [countdown, setCountdown] = useState("");
   const [entering, setEntering] = useState(false);
+  const wallet = boot.wallet.publicKey.toBase58();
+  const [agentIdx, setAgentIdx] = useState(
+    () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
+  );
+  const menuSceneRef = useRef<WorldScene | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -64,50 +78,15 @@ export function Home({
           activePlayers: world.activePlayers,
           status: Object.keys(daily.status)[0] ?? "?",
         });
-      } catch (e) {
-        if (live) setWarn(`${e}`);
+      } catch {
+        if (live)
+          setWarn("Can't reach the cluster — the daily competition is unavailable.");
       }
     })();
     return () => {
       live = false;
     };
   }, [boot]);
-
-  // Warm-connection ping to every MagicBlock ER region, measured FROM THE
-  // BROWSER — a world lives on one region's validator, so pin it wherever
-  // the players actually are.
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      const regions = ["as", "eu", "us"];
-      const out: Record<string, number> = {};
-      await Promise.all(
-        regions.map(async (r) => {
-          const url = `https://devnet-${r}.magicblock.app`;
-          const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot" });
-          const ping = async () => {
-            const t0 = performance.now();
-            await fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body,
-            });
-            return performance.now() - t0;
-          };
-          try {
-            await ping(); // warm the connection
-            out[r] = Math.round(await ping());
-          } catch {
-            out[r] = -1;
-          }
-        }),
-      );
-      if (live) setRegionPings(out);
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!info) return;
@@ -122,90 +101,118 @@ export function Home({
     return () => clearInterval(id);
   }, [info]);
 
-  if (!info) return <div className="card">Loading day…</div>;
+  function cycleAgent(delta: number) {
+    const next = (((agentIdx + delta) % AGENT_COUNT) + AGENT_COUNT) % AGENT_COUNT;
+    setAgentIdx(next);
+    setAgentChoice(next);
+    menuSceneRef.current?.setLocalModel(agentId(next));
+    sfx.hop();
+  }
 
   return (
-    <div className="home">
-      {warn && <div className="banner">{warn}</div>}
-      <div className="card hero">
-        <div className="stat">
-          <label>UTC day</label>
-          <b>{info.day.toString()}</b>
-        </div>
-        <div className="stat">
-          <label>Hard cutoff in</label>
-          <b>{countdown || "…"}</b>
-        </div>
-        <div className="stat">
-          <label>Prize pool</label>
-          <b>{(Number(info.pool) / 1e6).toFixed(2)} USDC</b>
-          {info.rollover > 0n && (
-            <small>incl. {(Number(info.rollover) / 1e6).toFixed(2)} rollover</small>
+    <div className="world-home">
+      <MenuBackdrop
+        modelId={agentId(agentIdx)}
+        onScene={(s) => (menuSceneRef.current = s)}
+      />
+      <div className="home-overlay">
+        {warn && <div className="banner floating">{warn}</div>}
+
+        <div className="chips">
+          {info ? (
+            <>
+              <span className="chip">
+                <label>day</label> {info.day.toString()}
+              </span>
+              <span className="chip">
+                <label>cutoff</label> {countdown || "…"}
+              </span>
+              <span className="chip gold">
+                <label>pool</label> {(Number(info.pool) / 1e6).toFixed(2)} USDC
+              </span>
+              <span className="chip">
+                <label>record</label> row {info.recordScore}
+              </span>
+              <span className="chip">
+                <label>live</label> {info.activePlayers}
+              </span>
+            </>
+          ) : (
+            <span className="chip">loading day…</span>
           )}
         </div>
-        <div className="stat">
-          <label>Record</label>
-          <b>row {info.recordScore}</b>
-          {info.recordHolder && <small>{info.recordHolder.slice(0, 8)}…</small>}
+
+        <div className="agent-pick">
+          <button
+            className="arrow"
+            aria-label="previous agent"
+            onClick={() => cycleAgent(-1)}
+          >
+            &lsaquo;
+          </button>
+          <span className="agent-label">
+            <label>your agent</label>
+            {String(agentIdx).padStart(2, "0")}
+          </span>
+          <button className="arrow" aria-label="next agent" onClick={() => cycleAgent(1)}>
+            &rsaquo;
+          </button>
         </div>
-        <div className="stat">
-          <label>Active players</label>
-          <b>{info.activePlayers}</b>
-        </div>
-        {regionPings && (
-          <div className="stat">
-            <label>ER regions (your ping)</label>
-            <b className="regions">
-              {Object.entries(regionPings)
-                .map(([r, ms]) => `${r} ${ms < 0 ? "✕" : `${ms}ms`}`)
-                .join(" · ")}
-            </b>
-            <small>world pinned via router resolution</small>
+
+        <div className="dock">
+          <div className="dock-card paid">
+            <h2>Daily competition</h2>
+            <p>
+              Entry <b>1 USDC</b> · winner takes <b>90%</b> · revival 10 → 20 → 40 USDC,
+              doubling, 60s window.
+            </p>
+            <p className="disclosure">
+              Stronger classes come from rarer agents — intentionally pay-to-win.
+            </p>
+            <button
+              className="primary"
+              disabled={entering || !info || info.status !== "open"}
+              onClick={() => setEntering(true)}
+            >
+              {!info
+                ? "Loading…"
+                : info.status === "open"
+                  ? "Enter for 1 USDC"
+                  : `Day is ${info.status}`}
+            </button>
           </div>
-        )}
-      </div>
-
-      <div className="modes">
-        <div className="card mode paid">
-          <h2>Paid competition</h2>
-          <p>
-            Entry <b>1 USDC</b> · winner takes <b>90%</b> of the pool, 10% to the team ·
-            death offers a 60s revival at 10 → 20 → 40 USDC (doubling).
-          </p>
-          <p className="disclosure">
-            Stronger classes are only available through rarer agents — this game
-            intentionally has pay-to-win elements.
-          </p>
-          <button
-            disabled={entering || info.status !== "open"}
-            onClick={() => setEntering(true)}
-          >
-            {info.status === "open" ? "Enter for 1 USDC" : `Day is ${info.status}`}
-          </button>
-        </div>
-        <div className="card mode casual">
-          <h2>Casual — free</h2>
-          <p>
-            No entry fee, no prize pool, no revival. Every class unlocked for practice.
-            Same world, separate leaderboard.
-          </p>
-          <button
-            onClick={() =>
-              onPlay({
-                name: "play",
-                mode: WorldMode.Casual,
-                day: info.day,
-                attemptNonce: 0, // resolved by the game screen
-                receiptNonce: 0,
-              })
-            }
-          >
-            Play free
-          </button>
+          <div className="dock-card casual">
+            <h2>Casual — free</h2>
+            <p>
+              No fee, no prize, no revival. Every class unlocked. Same world, separate
+              leaderboard.
+            </p>
+            <div className="row">
+              <button
+                className="play"
+                disabled={!info}
+                onClick={() =>
+                  info &&
+                  onPlay({
+                    name: "play",
+                    mode: WorldMode.Casual,
+                    day: info.day,
+                    attemptNonce: 0, // resolved by the game screen
+                    receiptNonce: 0,
+                  })
+                }
+              >
+                Play free
+              </button>
+              <button className="ghost" onClick={() => onPlay({ name: "demo" })}>
+                Practice offline
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {entering && (
+      {entering && info && (
         <EntryFlow
           boot={boot}
           day={info.day}

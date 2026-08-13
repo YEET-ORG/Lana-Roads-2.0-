@@ -47,11 +47,11 @@ transaction.
 State, presence, and messages are independent channels with independent codecs
 (`Room<TState, TPresence, TMessage>`):
 
-| Channel | Write | Read | On chain as |
-|---|---|---|---|
-| Shared state | `setState` | `getState` / `onStateChange` | Room account data |
-| Presence | `broadcast` | `onPresence` | Presence account data |
-| Messages | `emit` | `onMessage` | Transaction logs (no state write) |
+| Channel      | Write       | Read                         | On chain as                       |
+| ------------ | ----------- | ---------------------------- | --------------------------------- |
+| Shared state | `setState`  | `getState` / `onStateChange` | Room account data                 |
+| Presence     | `broadcast` | `onPresence`                 | Presence account data             |
+| Messages     | `emit`      | `onMessage`                  | Transaction logs (no state write) |
 
 Codecs are pluggable: JSON by default, `structCodec` for compact binary structs
 (a full game avatar fits in ~20 bytes), `rawCodec` for apps that manage their own

@@ -17,7 +17,7 @@ import {
   loadOrCreateSession,
 } from "@crossy-world/sdk";
 
-const BASE_RPC = import.meta.env.VITE_RPC ?? "http://localhost:8899";
+export const BASE_RPC = import.meta.env.VITE_RPC ?? "http://localhost:8899";
 const BASE_WS = import.meta.env.VITE_WS ?? "ws://localhost:8900";
 const ER_RPC = import.meta.env.VITE_ER_RPC ?? BASE_RPC;
 const ER_WS = import.meta.env.VITE_ER_WS ?? BASE_WS;
@@ -54,21 +54,6 @@ export class KeypairWallet {
   }
 }
 
-export function loadBurnerWallet(): Keypair {
-  const key = "crossy-world:wallet";
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try {
-      return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(stored)));
-    } catch {
-      /* rotate below */
-    }
-  }
-  const kp = Keypair.generate();
-  localStorage.setItem(key, JSON.stringify([...kp.secretKey]));
-  return kp;
-}
-
 export interface Bootstrapped {
   client: CrossyClient;
   wallet: Keypair;
@@ -76,8 +61,9 @@ export interface Bootstrapped {
   cluster: string;
 }
 
-export async function bootstrap(): Promise<Bootstrapped> {
-  const wallet = loadBurnerWallet();
+/** Build the game client around the resolved identity keypair (burner or
+ * wallet-derived — see lib/identity.ts). */
+export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
   const connection = new Connection(BASE_RPC, {
     wsEndpoint: BASE_WS,
     commitment: "confirmed",
@@ -102,16 +88,17 @@ export async function bootstrap(): Promise<Bootstrapped> {
 }
 
 export async function ensureFunded(b: Bootstrapped): Promise<void> {
-  const balance = await b.client.connection.getBalance(b.wallet.publicKey);
-  if (balance < 0.05 * LAMPORTS_PER_SOL && CLUSTER !== "mainnet") {
-    try {
+  try {
+    const balance = await b.client.connection.getBalance(b.wallet.publicKey);
+    if (balance < 0.05 * LAMPORTS_PER_SOL && CLUSTER !== "mainnet") {
       const sig = await b.client.connection.requestAirdrop(
         b.wallet.publicKey,
         LAMPORTS_PER_SOL,
       );
       await b.client.connection.confirmTransaction(sig, "confirmed");
-    } catch {
-      // Faucet unavailable: the UI surfaces the balance instead.
     }
+  } catch {
+    // RPC or faucet unavailable: never fatal — the UI surfaces balance
+    // state, and offline practice stays reachable regardless.
   }
 }

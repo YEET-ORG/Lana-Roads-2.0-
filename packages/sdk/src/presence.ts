@@ -106,7 +106,10 @@ export function smoothPresence<T, P extends Record<string, unknown>, M>(
   const staleMs = opts.staleMs ?? 5_000;
 
   type Sample = { data: P; at: number };
-  const buffers = new Map<string, { player: PublicKey; seq: number; a?: Sample; b: Sample }>();
+  const buffers = new Map<
+    string,
+    { player: PublicKey; seq: number; a?: Sample; b: Sample }
+  >();
 
   const unsub = room.onPresence(({ player, data, seq }) => {
     const key = player.toBase58();
@@ -132,26 +135,29 @@ export function smoothPresence<T, P extends Record<string, unknown>, M>(
     return out as P;
   };
 
-  const timer = setInterval(() => {
-    const now = Date.now();
-    const renderAt = now - delayMs;
-    const view = new Map<string, PresenceEntry<P>>();
-    for (const [key, buf] of buffers) {
-      if (now - buf.b.at > staleMs) {
-        buffers.delete(key);
-        continue;
+  const timer = setInterval(
+    () => {
+      const now = Date.now();
+      const renderAt = now - delayMs;
+      const view = new Map<string, PresenceEntry<P>>();
+      for (const [key, buf] of buffers) {
+        if (now - buf.b.at > staleMs) {
+          buffers.delete(key);
+          continue;
+        }
+        let data: P;
+        if (buf.a && buf.b.at > buf.a.at && renderAt < buf.b.at) {
+          const t = Math.max(0, (renderAt - buf.a.at) / (buf.b.at - buf.a.at));
+          data = lerpFields(buf.a.data, buf.b.data, Math.min(1, t));
+        } else {
+          data = buf.b.data;
+        }
+        view.set(key, { player: buf.player, data, seq: buf.seq, updatedAt: buf.b.at });
       }
-      let data: P;
-      if (buf.a && buf.b.at > buf.a.at && renderAt < buf.b.at) {
-        const t = Math.max(0, (renderAt - buf.a.at) / (buf.b.at - buf.a.at));
-        data = lerpFields(buf.a.data, buf.b.data, Math.min(1, t));
-      } else {
-        data = buf.b.data;
-      }
-      view.set(key, { player: buf.player, data, seq: buf.seq, updatedAt: buf.b.at });
-    }
-    render(view);
-  }, Math.max(1, Math.round(1000 / hz)));
+      render(view);
+    },
+    Math.max(1, Math.round(1000 / hz)),
+  );
 
   return () => {
     clearInterval(timer);

@@ -54,7 +54,10 @@ fs.renameSync(path.join(dest, "gitignore"), path.join(dest, ".gitignore"));
 
 const pkgPath = path.join(dest, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-pkg.name = path.basename(dest).toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+pkg.name = path
+  .basename(dest)
+  .toLowerCase()
+  .replace(/[^a-z0-9-_]/g, "-");
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
 console.log(`

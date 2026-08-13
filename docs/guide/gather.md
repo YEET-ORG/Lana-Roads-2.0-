@@ -15,10 +15,11 @@ broadcast at 10Hz; as a binary struct it's ~23:
 import { structCodec } from "solsocket";
 
 interface Avatar {
-  x: number; y: number;      // tile coords
-  facing: number;            // 0-3
-  emote: number;             // index into the emote table
-  name: string;              // display name
+  x: number;
+  y: number; // tile coords
+  facing: number; // 0-3
+  emote: number; // index into the emote table
+  name: string; // display name
 }
 
 const avatarCodec = structCodec<Avatar>([
@@ -64,7 +65,9 @@ the position ~10 times a second while moving. `smoothPresence` turns those
 void room.broadcast({ x, y, facing, emote: 0, name });
 
 // remote players: entity interpolation, no visible stutter
-smoothPresence(room, (players) => { remotes = players; });
+smoothPresence(room, (players) => {
+  remotes = players;
+});
 ```
 
 Broadcasts are fire-and-forget by default — the websocket subscription is the

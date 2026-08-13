@@ -87,7 +87,11 @@ class Client {
     const merged = s.doors | this.vault.doors;
     const chainMissedBits = merged !== s.doors;
     this.vault = { ...s, doors: merged };
-    if (this.myKeyAt > 0 && Date.now() - this.myKeyAt < 10_000 && this.vault[this.myKey] === 0) {
+    if (
+      this.myKeyAt > 0 &&
+      Date.now() - this.myKeyAt < 10_000 &&
+      this.vault[this.myKey] === 0
+    ) {
       this.write({ [this.myKey]: this.myKeyAt } as Partial<VaultState>);
       return;
     }
@@ -119,7 +123,8 @@ const check = (cond: boolean, msg: string) => {
 
 async function main() {
   const funderPath =
-    process.env.FUNDER_KEYPAIR ?? "/mnt/c/Users/Prati/Downloads/summit-devnet-keypair.json";
+    process.env.FUNDER_KEYPAIR ??
+    "/mnt/c/Users/Prati/Downloads/summit-devnet-keypair.json";
   const funder = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(funderPath, "utf8"))),
   );
@@ -206,7 +211,10 @@ async function main() {
   A.write({ doors: A.vault.doors | DOOR1, start, run: start });
   B.write({ doors: B.vault.doors | DOOR1, start, run: start });
   await sleep(4_000);
-  check((A.vault.doors & DOOR1) !== 0 && (B.vault.doors & DOOR1) !== 0, "DOOR1 on both clients");
+  check(
+    (A.vault.doors & DOOR1) !== 0 && (B.vault.doors & DOOR1) !== 0,
+    "DOOR1 on both clients",
+  );
 
   // ── race 2: the clobber case — A writes LOCK2 while B writes LOCK1 ──
   console.log("· race: concurrent LOCK writes (classic lost-update)");
@@ -217,7 +225,10 @@ async function main() {
   check((A.vault.doors & both) === both, `A converged (doors=${A.vault.doors})`);
   check((B.vault.doors & both) === both, `B converged (doors=${B.vault.doors})`);
   const chain1 = await roomA.getState();
-  check(((chain1?.state.doors ?? 0) & both) === both, `on-chain doors=${chain1?.state.doors}`);
+  check(
+    ((chain1?.state.doors ?? 0) & both) === both,
+    `on-chain doors=${chain1?.state.doors}`,
+  );
 
   // ── latch, then race 3: both keys inside the 2s window ──
   console.log("· LATCH + concurrent key turns");
@@ -227,8 +238,14 @@ async function main() {
   await sleep(300); // inside the window, but not the same slot
   B.turnKey();
   await sleep(6_000);
-  check(escaped(A.vault), `A sees the escape (Δ ${Math.abs(A.vault.keyA - A.vault.keyB)}ms)`);
-  check(escaped(B.vault), `B sees the escape (Δ ${Math.abs(B.vault.keyA - B.vault.keyB)}ms)`);
+  check(
+    escaped(A.vault),
+    `A sees the escape (Δ ${Math.abs(A.vault.keyA - A.vault.keyB)}ms)`,
+  );
+  check(
+    escaped(B.vault),
+    `B sees the escape (Δ ${Math.abs(B.vault.keyA - B.vault.keyB)}ms)`,
+  );
   const chain2 = await roomB.getState();
   check(escaped(chain2!.state), "escape is on-chain");
   check((chain2!.state.doors & LATCH) !== 0, "LATCH survived the key writes");
@@ -236,7 +253,10 @@ async function main() {
   // ── spectator + peekState verification ──
   console.log("· spectator + peekState");
   check(spectatorStates > 0, `spectator saw ${spectatorStates} state changes live`);
-  check(spectatorPresence > 0, `spectator saw ${spectatorPresence} presence updates live`);
+  check(
+    spectatorPresence > 0,
+    `spectator saw ${spectatorPresence} presence updates live`,
+  );
   const sBal = await sockS.base.getBalance(walletS.publicKey);
   check(sBal === 0, "spectator wallet still holds 0 lamports — watching is free");
   const peeked = await sockS.peekState<VaultState>(roomA.address, vaultCodec);
@@ -250,11 +270,17 @@ async function main() {
   A.advance();
   B.advance();
   await sleep(6_000);
-  check(A.vault.level === 1 && B.vault.level === 1, `both on level 1 (A=${A.vault.level} B=${B.vault.level})`);
+  check(
+    A.vault.level === 1 && B.vault.level === 1,
+    `both on level 1 (A=${A.vault.level} B=${B.vault.level})`,
+  );
   check(A.vault.doors === 0 && B.vault.doors === 0, "doors reset for the new level");
   check(A.vault.run === start, "run clock survives the level change");
   const chain3 = await roomA.getState();
-  check(chain3?.state.level === 1 && chain3.state.doors === 0, "level advance is on-chain");
+  check(
+    chain3?.state.level === 1 && chain3.state.doors === 0,
+    "level advance is on-chain",
+  );
   // and progress works on the new level
   A.write({ doors: A.vault.doors | DOOR1, start: Date.now() });
   await sleep(4_000);

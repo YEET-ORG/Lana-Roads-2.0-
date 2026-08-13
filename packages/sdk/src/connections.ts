@@ -32,9 +32,18 @@ export const LOCAL: ClusterConfig = {
 export type Region = "asia" | "eu" | "us";
 
 const DEVNET_REGIONS: Record<Region, { host: string; validator: string }> = {
-  asia: { host: "devnet-as.magicblock.app", validator: "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57" },
-  eu: { host: "devnet-eu.magicblock.app", validator: "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e" },
-  us: { host: "devnet-us.magicblock.app", validator: "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd" },
+  asia: {
+    host: "devnet-as.magicblock.app",
+    validator: "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  },
+  eu: {
+    host: "devnet-eu.magicblock.app",
+    validator: "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  },
+  us: {
+    host: "devnet-us.magicblock.app",
+    validator: "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+  },
 };
 
 function devnetCluster(region: Region): ClusterConfig {

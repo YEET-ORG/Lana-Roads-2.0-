@@ -106,9 +106,7 @@ export default function App() {
             <>
               <span className="dot live" /> room{" "}
               <code>{roomRef.current.address.toBase58().slice(0, 8)}…</code>
-              <button
-                onClick={() => navigator.clipboard.writeText(location.href)}
-              >
+              <button onClick={() => navigator.clipboard.writeText(location.href)}>
                 copy invite link
               </button>
               <span>{cursors.size + 1} online</span>
@@ -126,8 +124,8 @@ export default function App() {
       {phase === "funding" && (
         <div className="panel">
           <p>
-            This demo runs on <b>Solana devnet</b>. Your browser burner wallet needs
-            ~0.01 devnet SOL once (room rent); every cursor movement after that is a
+            This demo runs on <b>Solana devnet</b>. Your browser burner wallet needs ~0.01
+            devnet SOL once (room rent); every cursor movement after that is a
             <b> zero-fee onchain transaction</b>.
           </p>
           <p>
@@ -167,8 +165,8 @@ export default function App() {
         ))}
         {phase === "live" && cursors.size === 0 && (
           <p className="hint">
-            Open the invite link in a second window — every cursor you see is read
-            from Solana at ~50ms.
+            Open the invite link in a second window — every cursor you see is read from
+            Solana at ~50ms.
           </p>
         )}
       </div>

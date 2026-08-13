@@ -7,12 +7,7 @@ export type {
   RoomListing,
 } from "./client";
 export { Room } from "./room";
-export type {
-  BroadcastOptions,
-  PresenceUpdate,
-  RoomMessage,
-  StateUpdate,
-} from "./room";
+export type { BroadcastOptions, PresenceUpdate, RoomMessage, StateUpdate } from "./room";
 export { DEVNET, LOCAL, resolveCluster } from "./connections";
 export type { ClusterConfig, ClusterName, Region } from "./connections";
 export { jsonCodec, rawCodec, structCodec } from "./codec";

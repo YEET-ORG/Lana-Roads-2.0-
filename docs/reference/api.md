@@ -15,7 +15,7 @@ interface ConnectOptions {
   wallet: WalletLike | Keypair; // wallet adapter (browser) or Keypair (node); signs base-layer txs only
   cluster?: "devnet" | "local" | ClusterConfig; // default "devnet"
   region?: "asia" | "eu" | "us"; // devnet ER region, default "asia"
-  session?: Keypair;            // override the auto-managed session key
+  session?: Keypair; // override the auto-managed session key
 }
 ```
 
@@ -43,12 +43,12 @@ Create + join + delegate in a single base-layer transaction. Resolves to a
 
 ```ts
 interface CreateRoomOptions<T, P = T, M = unknown> {
-  id?: number | BN;     // unique per creator; random by default
+  id?: number | BN; // unique per creator; random by default
   maxPlayers?: number;
   initialState?: T;
-  codec?: Codec<T>;          // shared-state codec (default JSON)
-  presenceCodec?: Codec<P>;  // broadcast/onPresence codec (default: state codec)
-  messageCodec?: Codec<M>;   // emit/onMessage codec (default JSON)
+  codec?: Codec<T>; // shared-state codec (default JSON)
+  presenceCodec?: Codec<P>; // broadcast/onPresence codec (default: state codec)
+  messageCodec?: Codec<M>; // emit/onMessage codec (default JSON)
 }
 ```
 
@@ -69,8 +69,8 @@ interface RoomListing {
   creator: PublicKey;
   id: BN;
   maxPlayers: number;
-  players: number;    // players holding a presence slot (includes idle ones)
-  seq: number;        // total state writes — an activity proxy
+  players: number; // players holding a presence slot (includes idle ones)
+  seq: number; // total state writes — an activity proxy
 }
 ```
 
@@ -93,29 +93,29 @@ holds no presence slot.
 
 ### Writes (session-signed, zero-fee, on the ER)
 
-| Method | Does |
-|---|---|
+| Method                   | Does                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `broadcast(data, opts?)` | Write your presence slot. Fire-and-forget by default; pass `{ confirm: true }` to await `processed` confirmation. |
-| `emit(name, data)` | Ephemeral event in transaction logs — chat, hits, reactions. No state write. |
-| `setState(data)` | Write the shared room state. |
+| `emit(name, data)`       | Ephemeral event in transaction logs — chat, hits, reactions. No state write.                                      |
+| `setState(data)`         | Write the shared room state.                                                                                      |
 
 ### Reads & subscriptions
 
-| Method | Payload |
-|---|---|
-| `onPresence(cb)` | `{ player: PublicKey, data: TPresence, seq: number }` |
-| `onStateChange(cb)` | `{ state: TState, seq: number }` |
-| `onMessage(name, cb)` / `onMessage(cb)` | `{ player, name, data: TMessage, signature }` |
-| `getState()` | current `{ state, seq }` from the ER |
+| Method                                  | Payload                                               |
+| --------------------------------------- | ----------------------------------------------------- |
+| `onPresence(cb)`                        | `{ player: PublicKey, data: TPresence, seq: number }` |
+| `onStateChange(cb)`                     | `{ state: TState, seq: number }`                      |
+| `onMessage(name, cb)` / `onMessage(cb)` | `{ player, name, data: TMessage, signature }`         |
+| `getState()`                            | current `{ state, seq }` from the ER                  |
 
 All subscriptions return an unsubscribe function.
 
 ### Leaving
 
-| Method | Does |
-|---|---|
-| `leave()` | Commit + undelegate your presence slot (session-signed). |
-| `closeToBase()` | Creator only: commit + undelegate the room itself. |
+| Method          | Does                                                     |
+| --------------- | -------------------------------------------------------- |
+| `leave()`       | Commit + undelegate your presence slot (session-signed). |
+| `closeToBase()` | Creator only: commit + undelegate the room itself.       |
 
 Both retry through the ER's delegation-propagation window automatically.
 
@@ -135,7 +135,11 @@ interface Codec<T> {
 - `rawCodec` — pass-through for apps that manage their own bytes.
 
 ```ts
-const codec = structCodec<Avatar>([["x", "u16"], ["y", "u16"], ["name", "string"]]);
+const codec = structCodec<Avatar>([
+  ["x", "u16"],
+  ["y", "u16"],
+  ["name", "string"],
+]);
 ```
 
 ## Presence helpers
@@ -163,7 +167,7 @@ between samples, so 10Hz broadcasts look like 60fps movement.
 
 ```ts
 interface SmoothPresenceOptions {
-  hz?: number;      // render callback rate (default 60)
+  hz?: number; // render callback rate (default 60)
   delayMs?: number; // interpolation delay (default 120)
   staleMs?: number; // drop players silent this long (default 5000)
 }
@@ -171,10 +175,10 @@ interface SmoothPresenceOptions {
 
 ## Lower-level exports
 
-| Export | What |
-|---|---|
-| `PROGRAM_ID` | the `solsocket-engine` program id ([`CrLS…LeYh`](https://explorer.solana.com/address/CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh?cluster=devnet) on devnet) |
-| `roomPda(creator, id)` / `presencePda(room, wallet)` | PDA derivation |
-| `nameToRoomId(name)` | first 8 bytes of `sha256(name)` as a room id |
-| `loadOrCreateSession(storageKey?)` | the localStorage session keypair |
-| `resolveCluster(cluster, region?)`, `DEVNET`, `LOCAL` | endpoint resolution |
+| Export                                                | What                                                                                                                                                         |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PROGRAM_ID`                                          | the `solsocket-engine` program id ([`CrLS…LeYh`](https://explorer.solana.com/address/CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh?cluster=devnet) on devnet) |
+| `roomPda(creator, id)` / `presencePda(room, wallet)`  | PDA derivation                                                                                                                                               |
+| `nameToRoomId(name)`                                  | first 8 bytes of `sha256(name)` as a room id                                                                                                                 |
+| `loadOrCreateSession(storageKey?)`                    | the localStorage session keypair                                                                                                                             |
+| `resolveCluster(cluster, region?)`, `DEVNET`, `LOCAL` | endpoint resolution                                                                                                                                          |

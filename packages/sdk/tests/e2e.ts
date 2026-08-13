@@ -1,6 +1,13 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import assert from "node:assert/strict";
-import { DEVNET, LOCAL, SolSocket, resolveCluster, structCodec, trackPresence } from "../src";
+import {
+  DEVNET,
+  LOCAL,
+  SolSocket,
+  resolveCluster,
+  structCodec,
+  trackPresence,
+} from "../src";
 
 describe("resolveCluster regions", () => {
   it("maps each devnet region to its ER host and validator identity", () => {

@@ -135,9 +135,13 @@ export interface Level {
 function build(def: LevelDef, index: number): Level {
   if (def.layout.length !== ROWS) throw new Error(`${def.name}: needs ${ROWS} rows`);
   for (const row of def.layout)
-    if (row.length !== COLS) throw new Error(`${def.name}: row length ${row.length} !== ${COLS}`);
+    if (row.length !== COLS)
+      throw new Error(`${def.name}: row length ${row.length} !== ${COLS}`);
   const chars =
-    MECH_CHARS[def.mech.door1] + MECH_CHARS[def.mech.locks] + MECH_CHARS[def.mech.latch] + "AB";
+    MECH_CHARS[def.mech.door1] +
+    MECH_CHARS[def.mech.locks] +
+    MECH_CHARS[def.mech.latch] +
+    "AB";
   const pos: Record<string, { x: number; y: number }> = {};
   for (const ch of [...chars]) {
     let found = 0;
@@ -149,7 +153,8 @@ function build(def: LevelDef, index: number): Level {
         if (def.layout[r].indexOf(ch, c + 1) >= 0) found += 1;
       }
     }
-    if (found !== 1) throw new Error(`${def.name}: needs exactly one '${ch}' (found ${found})`);
+    if (found !== 1)
+      throw new Error(`${def.name}: needs exactly one '${ch}' (found ${found})`);
   }
   const tile = (c: number, r: number) =>
     c < 0 || c >= COLS || r < 0 || r >= ROWS ? "#" : def.layout[r][c];
@@ -246,7 +251,13 @@ export function walkable(
 export const deadlyTile = (t: string, ventSafe: boolean) =>
   t === "~" || t === "x" || t === "y" || (t === "v" && !ventSafe);
 
-export function near(ax: number, ay: number, bx: number, by: number, tiles: number): boolean {
+export function near(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  tiles: number,
+): boolean {
   const r = tiles * TILE;
   const dx = ax - bx;
   const dy = ay - by;
@@ -256,7 +267,10 @@ export function near(ax: number, ay: number, bx: number, by: number, tiles: numb
 /** The two 4-digit codes for a level, derived from the room address — same
  *  for every client, different per vault AND per level. Each player can only
  *  SEE the code their partner must type: the relay is the puzzle. */
-export function codesFor(room: PublicKey, level: number): { code1: number[]; code2: number[] } {
+export function codesFor(
+  room: PublicKey,
+  level: number,
+): { code1: number[]; code2: number[] } {
   const b = room.toBytes();
   const o = (level * 8) % 24;
   return {
@@ -402,8 +416,12 @@ export function drawVault(ctx: CanvasRenderingContext2D, lv: Level, o: DrawOpts)
           ctx.fillRect(x, y, TILE, TILE);
           if (!o.frozen) {
             const gl = ctx.createRadialGradient(
-              x + TILE / 2, y + TILE / 2, 2,
-              x + TILE / 2, y + TILE / 2, 15,
+              x + TILE / 2,
+              y + TILE / 2,
+              2,
+              x + TILE / 2,
+              y + TILE / 2,
+              15,
             );
             gl.addColorStop(0, "rgba(233, 200, 119, 0.5)");
             gl.addColorStop(1, "rgba(233, 200, 119, 0)");
@@ -451,8 +469,7 @@ export function drawVault(ctx: CanvasRenderingContext2D, lv: Level, o: DrawOpts)
           floor(x, y, v, c, r);
           // Cracked glass: x is A's crossing (only the JOINER sees it),
           // y is B's (only the CREATOR sees it). Spectators see both.
-          const visible =
-            o.role === -1 || (ch === "x" ? o.role === 1 : o.role === 0);
+          const visible = o.role === -1 || (ch === "x" ? o.role === 1 : o.role === 0);
           if (visible) {
             ctx.strokeStyle = "rgba(226,232,240,0.5)";
             ctx.lineWidth = 1;
@@ -702,14 +719,13 @@ export function drawVault(ctx: CanvasRenderingContext2D, lv: Level, o: DrawOpts)
 
 /** The puzzle chars the players should be working on right now. */
 export function activeChars(lv: Level, doors: number): string {
-  const stage =
-    !(doors & DOOR1)
-      ? 0
-      : !(doors & LOCK1) || !(doors & LOCK2)
-        ? 1
-        : !(doors & LATCH)
-          ? 2
-          : 3;
+  const stage = !(doors & DOOR1)
+    ? 0
+    : !(doors & LOCK1) || !(doors & LOCK2)
+      ? 1
+      : !(doors & LATCH)
+        ? 2
+        : 3;
   return [
     MECH_CHARS[lv.mech.door1],
     MECH_CHARS[lv.mech.locks],

@@ -13,16 +13,7 @@
         "Reclaim a presence slot's rent. Base layer only, after undelegation;",
         "only the wallet that joined may close it."
       ],
-      "discriminator": [
-        201,
-        222,
-        39,
-        160,
-        72,
-        191,
-        225,
-        7
-      ],
+      "discriminator": [201, 222, 39, 160, 72, 191, 225, 7],
       "accounts": [
         {
           "name": "presence",
@@ -41,16 +32,7 @@
       "docs": [
         "Reclaim the room's rent. Base layer only, after undelegation; creator only."
       ],
-      "discriminator": [
-        152,
-        197,
-        88,
-        192,
-        98,
-        197,
-        51,
-        211
-      ],
+      "discriminator": [152, 197, 88, 192, 98, 197, 51, 211],
       "accounts": [
         {
           "name": "room",
@@ -70,16 +52,7 @@
         "Checkpoint the room's ER state to the base layer (stays delegated).",
         "Any member may checkpoint; it only persists what the ER already holds."
       ],
-      "discriminator": [
-        138,
-        145,
-        121,
-        138,
-        83,
-        230,
-        52,
-        13
-      ],
+      "discriminator": [138, 145, 121, 138, 83, 230, 52, 13],
       "accounts": [
         {
           "name": "payer",
@@ -108,16 +81,7 @@
         "Create a room. The room PDA is keyed by (creator, room_id) so ids only",
         "need to be unique per creator, never globally."
       ],
-      "discriminator": [
-        130,
-        166,
-        32,
-        2,
-        247,
-        120,
-        178,
-        53
-      ],
+      "discriminator": [130, 166, 32, 2, 247, 120, 178, 53],
       "accounts": [
         {
           "name": "room",
@@ -126,12 +90,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  111,
-                  109
-                ]
+                "value": [114, 111, 111, 109]
               },
               {
                 "kind": "account",
@@ -171,19 +130,8 @@
     },
     {
       "name": "delegate_presence",
-      "docs": [
-        "Delegate a presence slot to the same ER as its room. Base layer."
-      ],
-      "discriminator": [
-        70,
-        68,
-        222,
-        55,
-        169,
-        250,
-        156,
-        155
-      ],
+      "docs": ["Delegate a presence slot to the same ER as its room. Base layer."],
+      "discriminator": [70, 68, 222, 55, 169, 250, 156, 155],
       "accounts": [
         {
           "name": "payer",
@@ -196,14 +144,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  98,
-                  117,
-                  102,
-                  102,
-                  101,
-                  114
-                ]
+                "value": [98, 117, 102, 102, 101, 114]
               },
               {
                 "kind": "account",
@@ -213,37 +154,8 @@
             "program": {
               "kind": "const",
               "value": [
-                176,
-                19,
-                252,
-                153,
-                174,
-                29,
-                63,
-                9,
-                201,
-                203,
-                137,
-                179,
-                81,
-                231,
-                32,
-                187,
-                243,
-                140,
-                183,
-                251,
-                61,
-                108,
-                118,
-                234,
-                137,
-                194,
-                199,
-                179,
-                144,
-                52,
-                237,
+                176, 19, 252, 153, 174, 29, 63, 9, 201, 203, 137, 179, 81, 231, 32, 187,
+                243, 140, 183, 251, 61, 108, 118, 234, 137, 194, 199, 179, 144, 52, 237,
                 138
               ]
             }
@@ -256,18 +168,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
+                "value": [100, 101, 108, 101, 103, 97, 116, 105, 111, 110]
               },
               {
                 "kind": "account",
@@ -288,25 +189,8 @@
               {
                 "kind": "const",
                 "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110,
-                  45,
-                  109,
-                  101,
-                  116,
-                  97,
-                  100,
-                  97,
-                  116,
-                  97
+                  100, 101, 108, 101, 103, 97, 116, 105, 111, 110, 45, 109, 101, 116, 97,
+                  100, 97, 116, 97
                 ]
               },
               {
@@ -355,16 +239,7 @@
         "validator identity may be passed as the first remaining account;",
         "omitted, the delegation program picks one."
       ],
-      "discriminator": [
-        39,
-        6,
-        122,
-        70,
-        65,
-        76,
-        166,
-        26
-      ],
+      "discriminator": [39, 6, 122, 70, 65, 76, 166, 26],
       "accounts": [
         {
           "name": "payer",
@@ -377,14 +252,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  98,
-                  117,
-                  102,
-                  102,
-                  101,
-                  114
-                ]
+                "value": [98, 117, 102, 102, 101, 114]
               },
               {
                 "kind": "account",
@@ -394,37 +262,8 @@
             "program": {
               "kind": "const",
               "value": [
-                176,
-                19,
-                252,
-                153,
-                174,
-                29,
-                63,
-                9,
-                201,
-                203,
-                137,
-                179,
-                81,
-                231,
-                32,
-                187,
-                243,
-                140,
-                183,
-                251,
-                61,
-                108,
-                118,
-                234,
-                137,
-                194,
-                199,
-                179,
-                144,
-                52,
-                237,
+                176, 19, 252, 153, 174, 29, 63, 9, 201, 203, 137, 179, 81, 231, 32, 187,
+                243, 140, 183, 251, 61, 108, 118, 234, 137, 194, 199, 179, 144, 52, 237,
                 138
               ]
             }
@@ -437,18 +276,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
+                "value": [100, 101, 108, 101, 103, 97, 116, 105, 111, 110]
               },
               {
                 "kind": "account",
@@ -469,25 +297,8 @@
               {
                 "kind": "const",
                 "value": [
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110,
-                  45,
-                  109,
-                  101,
-                  116,
-                  97,
-                  100,
-                  97,
-                  116,
-                  97
+                  100, 101, 108, 101, 103, 97, 116, 105, 111, 110, 45, 109, 101, 116, 97,
+                  100, 97, 116, 97
                 ]
               },
               {
@@ -538,16 +349,7 @@
         "on the room address. Membership is proven by the caller's presence",
         "slot; signed by the session key."
       ],
-      "discriminator": [
-        82,
-        133,
-        188,
-        136,
-        167,
-        139,
-        209,
-        52
-      ],
+      "discriminator": [82, 133, 188, 136, 167, 139, 209, 52],
       "accounts": [
         {
           "name": "room",
@@ -586,16 +388,7 @@
         "an ER (owner = delegation program), which would fail Anchor's owner",
         "check. Join only needs its address for the presence seeds."
       ],
-      "discriminator": [
-        95,
-        232,
-        188,
-        81,
-        124,
-        130,
-        78,
-        139
-      ],
+      "discriminator": [95, 232, 188, 81, 124, 130, 78, 139],
       "accounts": [
         {
           "name": "room"
@@ -607,16 +400,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  101,
-                  115,
-                  101,
-                  110,
-                  99,
-                  101
-                ]
+                "value": [112, 114, 101, 115, 101, 110, 99, 101]
               },
               {
                 "kind": "account",
@@ -652,16 +436,7 @@
         "Leave: commit and undelegate the caller's presence slot. Signed by",
         "either the session authority (popup-free) or the joining wallet."
       ],
-      "discriminator": [
-        249,
-        42,
-        239,
-        128,
-        192,
-        20,
-        114,
-        156
-      ],
+      "discriminator": [249, 42, 239, 128, 192, 20, 114, 156],
       "accounts": [
         {
           "name": "payer",
@@ -686,16 +461,7 @@
     },
     {
       "name": "process_undelegation",
-      "discriminator": [
-        196,
-        28,
-        41,
-        206,
-        48,
-        37,
-        51,
-        167
-      ],
+      "discriminator": [196, 28, 41, 206, 48, 37, 51, 167],
       "accounts": [
         {
           "name": "base_account",
@@ -708,23 +474,8 @@
               {
                 "kind": "const",
                 "value": [
-                  117,
-                  110,
-                  100,
-                  101,
-                  108,
-                  101,
-                  103,
-                  97,
-                  116,
-                  101,
-                  45,
-                  98,
-                  117,
-                  102,
-                  102,
-                  101,
-                  114
+                  117, 110, 100, 101, 108, 101, 103, 97, 116, 101, 45, 98, 117, 102, 102,
+                  101, 114
                 ]
               },
               {
@@ -735,38 +486,8 @@
             "program": {
               "kind": "const",
               "value": [
-                181,
-                183,
-                0,
-                225,
-                242,
-                87,
-                58,
-                192,
-                204,
-                6,
-                34,
-                1,
-                52,
-                74,
-                207,
-                151,
-                184,
-                53,
-                6,
-                235,
-                140,
-                229,
-                25,
-                152,
-                204,
-                98,
-                126,
-                24,
-                147,
-                128,
-                167,
-                62
+                181, 183, 0, 225, 242, 87, 58, 192, 204, 6, 34, 1, 52, 74, 207, 151, 184,
+                53, 6, 235, 140, 229, 25, 152, 204, 98, 126, 24, 147, 128, 167, 62
               ]
             }
           }
@@ -795,16 +516,7 @@
         "Write the caller's own presence blob (cursor position, status, …).",
         "Per-player slots mean concurrent players never contend on one account."
       ],
-      "discriminator": [
-        255,
-        5,
-        233,
-        192,
-        250,
-        158,
-        66,
-        90
-      ],
+      "discriminator": [255, 5, 233, 192, 250, 158, 66, 90],
       "accounts": [
         {
           "name": "presence",
@@ -828,16 +540,7 @@
         "Write the shared room state. Any joined player may write; membership is",
         "proven by their presence slot, writes are signed by the session key."
       ],
-      "discriminator": [
-        65,
-        69,
-        101,
-        248,
-        20,
-        15,
-        200,
-        53
-      ],
+      "discriminator": [65, 69, 101, 248, 20, 15, 200, 53],
       "accounts": [
         {
           "name": "room",
@@ -864,16 +567,7 @@
         "Commit and undelegate the room back to the base layer. Creator only —",
         "signed by the creator wallet (an occasional, popup-worthy action)."
       ],
-      "discriminator": [
-        151,
-        179,
-        196,
-        11,
-        39,
-        232,
-        174,
-        131
-      ],
+      "discriminator": [151, 179, 196, 11, 39, 232, 174, 131],
       "accounts": [
         {
           "name": "payer",
@@ -900,44 +594,17 @@
   "accounts": [
     {
       "name": "Presence",
-      "discriminator": [
-        255,
-        181,
-        116,
-        26,
-        172,
-        166,
-        141,
-        39
-      ]
+      "discriminator": [255, 181, 116, 26, 172, 166, 141, 39]
     },
     {
       "name": "Room",
-      "discriminator": [
-        156,
-        199,
-        67,
-        27,
-        222,
-        23,
-        185,
-        94
-      ]
+      "discriminator": [156, 199, 67, 27, 222, 23, 185, 94]
     }
   ],
   "events": [
     {
       "name": "RoomEvent",
-      "discriminator": [
-        112,
-        70,
-        119,
-        238,
-        104,
-        126,
-        153,
-        227
-      ]
+      "discriminator": [112, 70, 119, 238, 104, 126, 153, 227]
     }
   ],
   "errors": [
