@@ -160,7 +160,7 @@ export function Home({
                 .map(([r, ms]) => `${r} ${ms < 0 ? "✕" : `${ms}ms`}`)
                 .join(" · ")}
             </b>
-            <small>world pinned: asia</small>
+            <small>world pinned via router resolution</small>
           </div>
         )}
       </div>

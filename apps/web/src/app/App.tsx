@@ -76,8 +76,8 @@ export function App() {
       </header>
       {balance != null && balance < 0.01 && (
         <div className="banner">
-          Burner wallet needs devnet SOL to play (~0.02). Click the address above to
-          copy it, then fund it from{" "}
+          Burner wallet needs devnet SOL to play (~0.02). Click the address above to copy
+          it, then fund it from{" "}
           <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">
             faucet.solana.com
           </a>{" "}

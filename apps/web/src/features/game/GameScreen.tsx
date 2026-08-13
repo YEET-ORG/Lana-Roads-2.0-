@@ -90,6 +90,13 @@ export function GameScreen({
     (async () => {
       if (route.mode !== WorldMode.Casual) return;
       try {
+        setHud((h) => ({ ...h, state: "resolving ER…" }));
+        // Magic Router resolves which ER holds the delegated world; the
+        // client re-targets its ER connection + subscriptions to that FQDN.
+        if (boot.client.routerUrl) {
+          const status = await boot.client.resolveErForWorld(world).catch(() => null);
+          if (status?.fqdn) console.log("world ER (router-resolved):", status.fqdn);
+        }
         setHud((h) => ({ ...h, state: "joining…" }));
         const { attemptNonce } = await boot.client.joinCasual({
           day: route.day,

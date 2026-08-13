@@ -22,6 +22,9 @@ const BASE_WS = import.meta.env.VITE_WS ?? "ws://localhost:8900";
 const ER_RPC = import.meta.env.VITE_ER_RPC ?? BASE_RPC;
 const ER_WS = import.meta.env.VITE_ER_WS ?? BASE_WS;
 const CLUSTER = import.meta.env.VITE_CLUSTER ?? "local";
+const ROUTER =
+  import.meta.env.VITE_ROUTER ??
+  (CLUSTER === "devnet" ? "https://devnet-router.magicblock.app" : undefined);
 /** ER validator identity (pins delegation). Defaults to MagicBlock devnet-as. */
 const VALIDATOR = import.meta.env.VITE_VALIDATOR
   ? new PublicKey(import.meta.env.VITE_VALIDATOR)
@@ -43,7 +46,9 @@ export class KeypairWallet {
     else tx.sign([this.payer]);
     return tx;
   }
-  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(
+    txs: T[],
+  ): Promise<T[]> {
     for (const tx of txs) await this.signTransaction(tx);
     return txs;
   }
@@ -90,6 +95,7 @@ export async function bootstrap(): Promise<Bootstrapped> {
     connection,
     erConnection,
     validator: VALIDATOR,
+    routerUrl: ROUTER,
     wallet: new KeypairWallet(wallet),
   });
   return { client, wallet, session, cluster: CLUSTER };

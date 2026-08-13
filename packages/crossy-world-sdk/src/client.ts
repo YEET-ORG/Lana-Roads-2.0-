@@ -39,7 +39,24 @@ export interface CrossyClientOptions {
   erConnection?: Connection;
   /** ER validator identity — pins delegation to that rollup. */
   validator?: PublicKey;
+  /**
+   * Magic Router URL (e.g. https://devnet-router.magicblock.app). When set,
+   * `resolveErForWorld` resolves the ER that actually holds the delegated
+   * world via `getDelegationStatus` and re-targets the ER connection —
+   * subscriptions then go DIRECTLY to that ER's websocket (the router's own
+   * WS binds to an arbitrary ER, so it is only used for resolution).
+   */
+  routerUrl?: string;
   wallet: WalletSigner;
+}
+
+/** One entry of the router's live ER directory (`getRoutes`). */
+export interface ErRoute {
+  identity: string;
+  fqdn: string;
+  baseFee: number;
+  blockTimeMs: number;
+  countryCode: string;
 }
 
 /** Human-readable review returned before any financial signature. */
@@ -54,18 +71,21 @@ export interface TransactionReview {
 export class CrossyClient {
   readonly program: Program<CrossyWorld>;
   /** Program client bound to the ER connection for delegated gameplay. */
-  readonly erProgram: Program<CrossyWorld>;
+  erProgram: Program<CrossyWorld>;
   readonly connection: Connection;
-  readonly erConnection: Connection;
+  erConnection: Connection;
+  erProgramResolved: Program<CrossyWorld> | null = null;
   readonly wallet: WalletSigner;
   readonly validator?: PublicKey;
-  readonly subscriptions: SubscriptionHub;
+  readonly routerUrl?: string;
+  subscriptions: SubscriptionHub;
 
   constructor(opts: CrossyClientOptions) {
     this.connection = opts.connection;
     this.erConnection = opts.erConnection ?? opts.connection;
     this.wallet = opts.wallet;
     this.validator = opts.validator;
+    this.routerUrl = opts.routerUrl;
     const baseProvider = new anchor.AnchorProvider(
       this.connection,
       opts.wallet as anchor.Wallet,
@@ -79,6 +99,66 @@ export class CrossyClient {
     this.program = new Program(idl as CrossyWorld, baseProvider);
     this.erProgram = new Program(idl as CrossyWorld, erProvider);
     this.subscriptions = new SubscriptionHub(this.erConnection);
+  }
+
+  private async routerRpc<T>(method: string, params: unknown[]): Promise<T> {
+    if (!this.routerUrl) throw new Error("no routerUrl configured");
+    const res = await fetch(this.routerUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    const json = (await res.json()) as { result?: T; error?: { message?: string } };
+    if (json.error) throw new Error(`router ${method}: ${json.error.message}`);
+    return json.result as T;
+  }
+
+  /** The router's live ER directory. */
+  async getRoutes(): Promise<ErRoute[]> {
+    return this.routerRpc<ErRoute[]>("getRoutes", []);
+  }
+
+  /**
+   * Resolve which ER holds the delegated world via the Magic Router and
+   * re-target the ER connection/program/subscriptions to that FQDN.
+   * Falls back to the constructor-provided ER when not delegated.
+   * Returns the resolved status.
+   */
+  async resolveErForWorld(world: PublicKey): Promise<{
+    isDelegated: boolean;
+    fqdn?: string;
+    validator?: string;
+  }> {
+    const status = await this.routerRpc<{
+      isDelegated: boolean;
+      fqdn?: string;
+      delegationRecord?: { authority: string };
+    }>("getDelegationStatus", [world.toBase58()]);
+    if (status.isDelegated && status.fqdn) {
+      const rpc = status.fqdn.replace(/\/$/, "");
+      const current = (this.erConnection as { rpcEndpoint?: string }).rpcEndpoint ?? "";
+      if (!current.startsWith(rpc)) {
+        const ws = rpc.replace(/^http/, "ws");
+        await this.subscriptions.close().catch(() => {});
+        this.erConnection = new Connection(rpc, {
+          wsEndpoint: ws,
+          commitment: "processed",
+        });
+        const erProvider = new anchor.AnchorProvider(
+          this.erConnection,
+          this.wallet as anchor.Wallet,
+          { commitment: "processed", skipPreflight: true },
+        );
+        this.erProgram = new Program(idl as CrossyWorld, erProvider);
+        this.subscriptions = new SubscriptionHub(this.erConnection);
+        this.erBlockhashCache = null;
+      }
+    }
+    return {
+      isDelegated: status.isDelegated,
+      fqdn: status.fqdn,
+      validator: status.delegationRecord?.authority,
+    };
   }
 
   // ---- readers ----------------------------------------------------------
