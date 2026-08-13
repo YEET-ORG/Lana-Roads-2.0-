@@ -295,7 +295,70 @@ async function main() {
       : `FAIL  could not resume after ending the session`,
   );
 
-  process.exitCode = moved && staleIgnored && cleared && revoked && resumed ? 0 : 1;
+  // --- a second window takes the run over -------------------------------
+  // One run has one session authority, so a new window claiming it must
+  // stop the old one dead — and the old one must not grab it back, or the
+  // two trade the key forever.
+  const second = web3.Keypair.generate();
+  await web3.sendAndConfirmTransaction(
+    baseConn,
+    new web3.Transaction().add(
+      web3.SystemProgram.transfer({
+        fromPubkey: funder.publicKey,
+        toPubkey: second.publicKey,
+        lamports: 0.005 * web3.LAMPORTS_PER_SOL,
+      }),
+    ),
+    [funder],
+  );
+  const erAsSecond = new Program(
+    idl,
+    new anchor.AnchorProvider(erConn, new anchor.Wallet(second), {
+      commitment: "processed",
+    }),
+  ) as Program<any>;
+  const beforeTakeover: any = await erAsWallet.account.playerRun.fetch(runPda);
+  const rotationBefore = beforeTakeover.sessionRotation;
+
+  await erAsWallet.methods
+    .rotateSession(second.publicKey, new BN(Math.floor(Date.now() / 1000) + 3600))
+    .accountsPartial({ run: runPda, wallet: player.publicKey })
+    .rpc({ commitment: "processed" });
+
+  const seqAtTakeover = beforeTakeover.actionSeq.toNumber();
+  await move(erAsFresh, fresh).catch(() => {}); // the displaced window tries
+  await sleep(1_500);
+  const afterOld: any = await erAsWallet.account.playerRun.fetch(runPda);
+  const oldStopped = afterOld.actionSeq.toNumber() === seqAtTakeover;
+
+  await move(erAsSecond, second).catch(() => {});
+  await sleep(1_500);
+  const afterNew: any = await erAsWallet.account.playerRun.fetch(runPda);
+  const newPlays = afterNew.actionSeq.toNumber() > seqAtTakeover;
+  const counted = afterNew.sessionRotation > rotationBefore;
+
+  console.log(
+    oldStopped && newPlays
+      ? `PASS  a new window takes over — old key ignored, new key moved to (${afterNew.x}, ${afterNew.y})`
+      : `FAIL  oldStopped=${oldStopped} newPlays=${newPlays}`,
+  );
+  console.log(
+    counted
+      ? `PASS  the takeover is countable — session_rotation ${rotationBefore} -> ${afterNew.sessionRotation}, so a displaced window can tell it lost`
+      : `FAIL  rotation counter did not advance`,
+  );
+
+  process.exitCode =
+    moved &&
+    staleIgnored &&
+    cleared &&
+    revoked &&
+    resumed &&
+    oldStopped &&
+    newPlays &&
+    counted
+      ? 0
+      : 1;
 }
 
 main().catch((e) => {

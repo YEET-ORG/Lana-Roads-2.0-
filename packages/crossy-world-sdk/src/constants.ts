@@ -87,3 +87,15 @@ export const SESSION_SCOPE = {
 
 /** Mirrors `constants::MAX_SESSION_SECONDS`: how far ahead a session may run. */
 export const MAX_SESSION_SECONDS = 12 * 60 * 60;
+
+/** Outcome of claiming the gameplay session on a run. */
+export interface SessionClaim {
+  /** A rotation was sent: this client now holds the session. */
+  rotated: boolean;
+  /** Another window claimed it more recently; this client must stand down. */
+  displaced: boolean;
+  /** The run's rotation counter after this call. */
+  rotation: number;
+  /** Whether the session authority is this client's key. */
+  mine: boolean;
+}

@@ -95,6 +95,8 @@ export function GameScreen({
   );
   const deathCauseRef = useRef<DeathCause>("impact");
   const [respawning, setRespawning] = useState(false);
+  /** Another window took this run over; this one is a spectator. */
+  const [displaced, setDisplaced] = useState(false);
   const world = pda.world(route.mode, route.day);
 
   // Casual: solsocket-style join — ONE base tx (profile + starter + run +
@@ -186,6 +188,10 @@ export function GameScreen({
   const rejectedRunRef = useRef(0);
   /** True while gameplay authority is back with the wallet. */
   const sessionEndedRef = useRef(false);
+  /** Rotation counter this window last claimed; guards against a takeover war. */
+  const ownedRotationRef = useRef<number | undefined>(undefined);
+  /** Mirror of `displaced` for callbacks that must not close over stale state. */
+  const displacedRef = useRef(false);
   /** Last time the player actually did something. */
   const lastInputAtRef = useRef(performance.now());
   /** Last celebrated score decade (milestone bursts every 10 rows). */
@@ -486,16 +492,33 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
 
-  /** Re-authorise the session key on our own run (score is untouched). */
-  async function renewSession() {
+  /**
+   * Re-authorise the session key on our own run (score is untouched).
+   *
+   * `claim` forces the takeover — used when this window is deliberately
+   * starting play. Otherwise a window that has been displaced by a newer
+   * one stands down rather than grabbing the key back, which would just
+   * start the two of them trading it.
+   */
+  async function renewSession(claim = false) {
     try {
-      const rotated = await boot.client.ensureSession({
+      const result = await boot.client.ensureSession({
         day: route.day,
         mode: route.mode,
         sessionAuthority: boot.session.publicKey,
+        ownedRotation: claim ? undefined : ownedRotationRef.current,
       });
+      if (result.displaced) {
+        displacedRef.current = true;
+        setDisplaced(true);
+        sessionEndedRef.current = true;
+        return;
+      }
+      displacedRef.current = false;
+      setDisplaced(false);
       sessionEndedRef.current = false;
-      if (rotated) {
+      if (result.rotation) ownedRotationRef.current = result.rotation;
+      if (result.rotated) {
         setHud((h) => ({ ...h, lastRejection: null }));
         reconcileNowRef.current();
       }
@@ -513,7 +536,8 @@ export function GameScreen({
    * fresh one the moment the player acts again.
    */
   async function endSession(reason: string) {
-    if (sessionEndedRef.current) return;
+    // Never revoke a session another window is now holding.
+    if (sessionEndedRef.current || displacedRef.current) return;
     sessionEndedRef.current = true;
     try {
       await boot.client.endSession({ day: route.day, mode: route.mode });
@@ -527,7 +551,9 @@ export function GameScreen({
   // Sessions are time-limited and a run outlives them; top ours up long
   // before it lapses rather than discovering it on a refused move.
   useEffect(() => {
-    void renewSession();
+    // Opening the game claims the run: any session a previous window left
+    // behind stops working the moment this one takes over.
+    void renewSession(true);
     const t = setInterval(() => void renewSession(), 5 * 60 * 1000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -570,6 +596,13 @@ export function GameScreen({
         lastInputAtRef.current = performance.now();
         const mine = liveRun.current;
         if (!mine || mine.state !== "active") return;
+        if (displacedRef.current) {
+          setHud((h) => ({
+            ...h,
+            lastRejection: "this run is open in another window",
+          }));
+          return;
+        }
         // Coming back from an idle pause: take the key again first. The
         // action that woke us is spent on the handshake, and the next one
         // plays normally.
@@ -681,6 +714,8 @@ export function GameScreen({
             rejectedRunRef.current += 1;
             if (rejectedRunRef.current >= 3) {
               rejectedRunRef.current = 0;
+              // Not a forced claim: if another window has taken the run,
+              // this one learns that instead of wrestling for the key.
               void renewSession();
             }
           }, 1300);
@@ -828,6 +863,31 @@ export function GameScreen({
           ×
         </button>
       </div>
+
+      {displaced && (
+        <div className="modal-backdrop">
+          <div className="modal card death">
+            <h2>Playing elsewhere</h2>
+            <p>
+              This run was opened in another window or device, which now holds the
+              controls. Only one can play a run at a time.
+            </p>
+            <div className="row">
+              <button
+                disabled={respawning}
+                onClick={() => {
+                  void renewSession(true);
+                }}
+              >
+                Play here instead
+              </button>
+              <button className="ghost" onClick={onExit}>
+                Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {endedScore != null && !death && (
         <div className="modal-backdrop">

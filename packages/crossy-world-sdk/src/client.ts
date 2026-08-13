@@ -10,6 +10,7 @@ import { Connection, Keypair, PublicKey, TransactionInstruction } from "@solana/
 import type { CrossyWorld } from "./generated/crossy_world.js";
 import idl from "./generated/crossy_world.json" with { type: "json" };
 import {
+  type SessionClaim,
   MAX_SESSION_SECONDS,
   Direction,
   ENTRY_PRICE,
@@ -401,7 +402,7 @@ export class CrossyClient {
     day: bigint;
     sessionAuthority: PublicKey;
     sessionExpiry: number;
-  }): Promise<{ attemptNonce: number }> {
+  }): Promise<{ attemptNonce: number; sessionRotation?: number }> {
     const wallet = this.wallet.publicKey;
     const world = pda.world(WorldMode.Casual, params.day);
     const runAddr = pda.run(world, wallet);
@@ -478,14 +479,16 @@ export class CrossyClient {
       await provider.sendAndConfirm(tx);
     }
     await this.waitForEr(runAddr);
-    // A run created earlier today may still hold an expired session key;
-    // without this the player joins successfully and then cannot act.
-    await this.ensureSession({
+    // Joining claims the run outright: a session left behind by an earlier
+    // window (or an expired one from this morning) is replaced here, which
+    // is what stops the player joining successfully and then not being able
+    // to act. No `ownedRotation` — a fresh join always wins.
+    const claim = await this.ensureSession({
       day: params.day,
       mode: WorldMode.Casual,
       sessionAuthority: params.sessionAuthority,
-    }).catch(() => false);
-    return { attemptNonce };
+    }).catch(() => null);
+    return { attemptNonce, sessionRotation: claim?.rotation };
   }
 
   // ---- revival ----------------------------------------------------------
@@ -843,27 +846,49 @@ export class CrossyClient {
     sessionAuthority: PublicKey;
     /** Rotate when less than this much life is left. Default 30 minutes. */
     minRemainingSeconds?: number;
-  }): Promise<boolean> {
+    /**
+     * The rotation counter this client last owned.
+     *
+     * A run has exactly one session authority, so a second window signing
+     * in takes the key from the first. Without this the loser would see an
+     * authority that is not its own and simply take it back, and the two
+     * would trade it forever, a transaction apiece. Pass the counter from
+     * the last successful claim and a client that has been displaced backs
+     * off instead of fighting. Omit it to claim unconditionally.
+     */
+    ownedRotation?: number;
+  }): Promise<SessionClaim> {
     const wallet = this.wallet.publicKey;
     const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
     const runAddr = pda.run(world, wallet);
     const run = await this.erProgram.account.playerRun
       .fetchNullable(runAddr)
       .catch(() => null);
-    if (!run) return false;
+    if (!run) return { rotated: false, displaced: false, rotation: 0, mine: false };
+
     const now = Math.floor(Date.now() / 1000);
+    const rotation = run.sessionRotation as number;
+    const mine = run.sessionAuthority.equals(params.sessionAuthority);
     const margin = params.minRemainingSeconds ?? 30 * 60;
-    const authorityMatches = run.sessionAuthority.equals(params.sessionAuthority);
-    const healthy = authorityMatches && run.sessionExpiry.toNumber() > now + margin;
-    if (healthy) return false;
+    if (mine && run.sessionExpiry.toNumber() > now + margin) {
+      return { rotated: false, displaced: false, rotation, mine: true };
+    }
+    // Somebody else claimed it after we did: they are the live session.
+    if (!mine && params.ownedRotation !== undefined && rotation > params.ownedRotation) {
+      return { rotated: false, displaced: true, rotation, mine: false };
+    }
+
     // The program caps how far ahead a session may run; stay inside it.
     const expiry = now + MAX_SESSION_SECONDS - 60;
     await this.erProgram.methods
       .rotateSession(params.sessionAuthority, new BN(expiry))
       .accountsPartial({ run: runAddr, wallet })
       .rpc({ commitment: "processed" });
-    return true;
+    return { rotated: true, displaced: false, rotation: rotation + 1, mine: true };
   }
+
+  /** Outcome of claiming or checking the gameplay session on a run. */
+  // (declared here so the shape stays next to the only thing producing it)
 
   /**
    * Hand gameplay authority back to the wallet.
