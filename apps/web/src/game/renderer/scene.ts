@@ -55,6 +55,26 @@ export class WorldScene {
   /** Offset between authoritative world time and performance.now(). */
   worldTimeOffsetMs = 0;
 
+  /**
+   * Re-anchor the hazard clock to the world's own timeline. `elapsedMs` is
+   * how long the world has been running; the offset is corrected for how
+   * long *this scene* has been running, so repeated calls converge instead
+   * of pushing the animation further ahead each time.
+   */
+  setWorldElapsed(elapsedMs: number) {
+    this.worldTimeOffsetMs = elapsedMs - (performance.now() - this.startMs);
+  }
+
+  /** The lane installed at `row`, if it has been revealed and loaded. */
+  laneAt(row: number): Lane | undefined {
+    return this.lanes.get(row);
+  }
+
+  /** Authoritative world time (ms since world start) as the renderer sees it. */
+  worldTimeMs(): number {
+    return performance.now() - this.startMs + this.worldTimeOffsetMs;
+  }
+
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));

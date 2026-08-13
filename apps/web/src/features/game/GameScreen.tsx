@@ -11,6 +11,7 @@ import { Direction, pda, ReceiptKind, revivePrice, WorldMode } from "@crossy-wor
 import { Bootstrapped } from "../../lib/client";
 import { WorldScene } from "../../game/renderer/scene";
 import { attachInput } from "../../game/input/keys";
+import { blockedReason, isTraversable } from "../../game/simulation/hazards";
 import type { Route } from "../../app/App";
 
 /**
@@ -80,6 +81,9 @@ export function GameScreen({
   });
   const [death, setDeath] = useState<DeathInfo | null>(null);
   const [reviving, setReviving] = useState(false);
+  /** Casual runs end outright on death; the player just goes again. */
+  const [endedScore, setEndedScore] = useState<number | null>(null);
+  const [respawning, setRespawning] = useState(false);
   const world = pda.world(route.mode, route.day);
 
   // Casual: solsocket-style join — ONE base tx (profile + starter + run +
@@ -141,10 +145,15 @@ export function GameScreen({
     facing: number;
   } | null>(null);
   const lastKickAtRef = useRef(0);
+  /** Latest authoritative hazard schedule for the local run. */
+  const hazardRef = useRef<{ nonce: number; deadlineMs: number }>({
+    nonce: 0,
+    deadlineMs: 0,
+  });
   /** Remote occupancy mirror for prediction (never send a doomed move). */
-  const occupiedRef = useRef<Map<string, { x: number; y: number; state: string }>>(
-    new Map(),
-  );
+  const occupiedRef = useRef<
+    Map<string, { x: number; y: number; state: string; hazardNonce: number }>
+  >(new Map());
   /** Force an immediate authoritative refetch (silence reconciler). */
   const reconcileNowRef = useRef<() => void>(() => {});
   /** Timestamp of the last authoritative push for OUR run. */
@@ -159,7 +168,10 @@ export function GameScreen({
 
     let live = true;
     const me = boot.wallet.publicKey.toBase58();
-    const remotes = new Map<string, { x: number; y: number; state: string }>();
+    const remotes = new Map<
+      string,
+      { x: number; y: number; state: string; hazardNonce: number }
+    >();
     occupiedRef.current = remotes;
 
     const applyRun = (run: any, force = false) => {
@@ -167,6 +179,10 @@ export function GameScreen({
       const state = Object.keys(run.state)[0] ?? "?";
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
+        hazardRef.current = {
+          nonce: run.hazardNonce,
+          deadlineMs: Number(run.hazardDeadlineMs?.toString() ?? 0),
+        };
         const mine = liveRun.current;
         const authSeq = run.actionSeq.toNumber();
         // While optimistic moves are still in flight (our local sequence is
@@ -218,9 +234,18 @@ export function GameScreen({
           });
         } else if (state === "active") {
           setDeath(null);
+          setEndedScore(null);
+        } else if (state === "ended" && route.mode === WorldMode.Casual) {
+          setEndedScore(liveRun.current!.score);
         }
       } else {
-        if (state === "active") remotes.set(wallet, { x: run.x, y: run.y, state });
+        if (state === "active")
+          remotes.set(wallet, {
+            x: run.x,
+            y: run.y,
+            state,
+            hazardNonce: run.hazardNonce,
+          });
         else remotes.delete(wallet);
         scene.setRemotes(
           [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
@@ -274,11 +299,9 @@ export function GameScreen({
       ]);
       if (!live) return;
       if (worldAcc) {
-        scene.worldTimeOffsetMs =
-          Date.now() -
-          Number(worldAcc.startTs.toString()) * 1000 -
-          performance.now() +
-          performance.now();
+        // Anchor the hazard clock to the world's own timeline. Re-running
+        // this on every sweep must converge, not creep forward.
+        scene.setWorldElapsed(Date.now() - Number(worldAcc.startTs.toString()) * 1000);
         setHud((h) => ({ ...h, record: worldAcc.recordScore }));
         await loadChunks(worldAcc.revealedRows);
       }
@@ -287,6 +310,50 @@ export function GameScreen({
     void reconcile();
     reconcileNowRef.current = () => void reconcile();
     const sweep = setInterval(() => void reconcile(), 5000);
+
+    // Hazard cranking. Collisions are only resolved when someone asks the
+    // program to check, so this client cranks its own run and every run it
+    // can see standing on moving terrain. Cranks are ER session txs, and a
+    // stale nonce is rejected harmlessly, so over-asking is safe.
+    const hazardTimer = setInterval(() => {
+      if (!live) return;
+      const onMovingTerrain = (y: number) => {
+        const lane = scene.laneAt(y);
+        return lane != null && lane.kind !== 0;
+      };
+      const crank = (
+        wallet: PublicKey | undefined,
+        x: number,
+        y: number,
+        nonce: number,
+      ) =>
+        boot.client
+          .sendCheckHazard({
+            day: route.day,
+            mode: route.mode,
+            session: boot.session,
+            wallet,
+            x,
+            y,
+            hazardNonce: nonce,
+          })
+          .catch(() => {
+            /* stale nonce / already resolved */
+          });
+
+      const mine = liveRun.current;
+      if (mine && mine.state === "active" && onMovingTerrain(mine.y)) {
+        void crank(undefined, mine.x, mine.y, hazardRef.current.nonce);
+      }
+      // Watch a bounded number of neighbours per tick.
+      let budget = 4;
+      for (const [w, r] of occupiedRef.current) {
+        if (budget <= 0) break;
+        if (r.state !== "active" || !onMovingTerrain(r.y)) continue;
+        budget--;
+        void crank(new PublicKey(w), r.x, r.y, r.hazardNonce);
+      }
+    }, 300);
 
     // Hot-path prewarm: persistent HTTP connection + background blockhash.
     let stopPrewarm: (() => void) | null = null;
@@ -306,6 +373,7 @@ export function GameScreen({
       live = false;
       clearInterval(sweep);
       clearInterval(pingTimer);
+      clearInterval(hazardTimer);
       stopPrewarm?.();
       unsubscribe();
       window.removeEventListener("resize", onResize);
@@ -340,6 +408,18 @@ export function GameScreen({
               : 0;
         const [nx, ny] = [mine.x + dx, mine.y + dy];
         if (nx < 0 || nx > 63 || ny < 0) return;
+        // Terrain gate, evaluated with the same math the program uses: a
+        // move into a tree, a car, a train or open water is refused on
+        // chain, so predicting it locally turns a rubber-band into a bump.
+        const destLane = sceneRef.current?.laneAt(ny);
+        if (destLane) {
+          const tMs = sceneRef.current!.worldTimeMs();
+          if (!isTraversable(destLane, nx, tMs)) {
+            const why = blockedReason(destLane, nx, tMs);
+            setHud((h) => (h.lastRejection === why ? h : { ...h, lastRejection: why }));
+            return;
+          }
+        }
         // Prediction knows remote occupancy: don't send a doomed move.
         for (const r of occupiedRef.current.values()) {
           if (r.x === nx && r.y === ny) {
@@ -444,6 +524,31 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
 
+  /** Casual restart: a fresh attempt on the same delegated run account. */
+  async function playAgain() {
+    setRespawning(true);
+    try {
+      const { attemptNonce } = await boot.client.joinCasual({
+        day: route.day,
+        sessionAuthority: boot.session.publicKey,
+        sessionExpiry: Math.floor(Date.now() / 1000) + 8 * 3600,
+      });
+      await boot.client.spawn({
+        day: route.day,
+        attemptNonce,
+        receiptNonce: 0,
+        session: boot.session,
+        mode: WorldMode.Casual,
+      });
+      setEndedScore(null);
+      reconcileNowRef.current();
+    } catch (e) {
+      setHud((h) => ({ ...h, lastRejection: errorText(e) }));
+    } finally {
+      setRespawning(false);
+    }
+  }
+
   async function revive() {
     setReviving(true);
     try {
@@ -518,6 +623,25 @@ export function GameScreen({
         </button>
       </div>
       <div className="hud bottom-left">WASD / arrows to move · Space to kick</div>
+
+      {endedScore != null && !death && (
+        <div className="modal-backdrop">
+          <div className="modal card death">
+            <h2>You died</h2>
+            <p>
+              You reached <b>row {endedScore}</b>.
+            </p>
+            <div className="row">
+              <button disabled={respawning} onClick={playAgain}>
+                {respawning ? "Starting…" : "Play again"}
+              </button>
+              <button className="ghost" onClick={onExit}>
+                Exit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {death && (
         <div className="modal-backdrop">

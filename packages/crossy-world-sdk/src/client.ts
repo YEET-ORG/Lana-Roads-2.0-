@@ -803,6 +803,41 @@ export class CrossyClient {
   }
 
   /**
+   * Fire-and-forget hazard crank. Collision is only resolved when someone
+   * asks the program to check, so every client cranks its own run and the
+   * runs it can see: one honest watcher is enough to make traffic lethal for
+   * everybody. A stale nonce is rejected harmlessly on chain.
+   */
+  async sendCheckHazard(params: {
+    day: bigint;
+    mode?: WorldMode;
+    session: Keypair;
+    wallet?: PublicKey;
+    x: number;
+    y: number;
+    hazardNonce: number;
+  }): Promise<string> {
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const ix = await this.erProgram.methods
+      .checkHazard(params.hazardNonce)
+      .accountsPartial({
+        world,
+        run: pda.run(world, params.wallet ?? this.wallet.publicKey),
+        sector: sectorForTile(world, params.x, params.y),
+        chunk: pda.chunk(params.day, Math.floor(params.y / 16)),
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.erConnection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+      maxRetries: 0,
+    });
+  }
+
+  /**
    * Solsocket-style realtime feed: ONE processed-commitment programSubscribe
    * on the ER websocket, filtered by the world address at offset 8 — which
    * matches every PlayerRun, OccupancySector, and DailyBest of that world.

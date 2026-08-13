@@ -52,6 +52,10 @@ pub mod crossy_world {
         instructions::admin::accept_admin(ctx)
     }
 
+    pub fn set_vrf_authority(ctx: Context<AdminOnly>, new_authority: Pubkey) -> Result<()> {
+        instructions::admin::set_vrf_authority(ctx, new_authority)
+    }
+
     pub fn set_pause(ctx: Context<AdminOnly>, scope: u16, paused: bool) -> Result<()> {
         instructions::admin::set_pause(ctx, scope, paused)
     }
@@ -291,6 +295,19 @@ pub mod crossy_world {
         randomness: [u8; 32],
     ) -> Result<()> {
         instructions::chunks::reveal_chunk(ctx, generation, randomness)
+    }
+
+    pub fn publish_chunk(
+        ctx: Context<PublishChunk>,
+        day: u64,
+        chunk_index: u16,
+        randomness: [u8; 32],
+    ) -> Result<()> {
+        instructions::chunks::publish_chunk(ctx, day, chunk_index, randomness)
+    }
+
+    pub fn extend_frontier(ctx: Context<ExtendFrontier>) -> Result<()> {
+        instructions::chunks::extend_frontier(ctx)
     }
 
     pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u16) -> Result<()> {

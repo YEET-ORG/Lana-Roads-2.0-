@@ -56,3 +56,65 @@ export function logSubmerged(lane: Lane, tMs: number): boolean {
   const pos = (tMs + lane.phaseMt) % 8000;
   return pos >= 6000;
 }
+
+export type TileState = "safe" | "lethal" | "blocked" | "supported";
+
+/**
+ * Tile-level coverage, transcribed from `hazard::lane_object_covers`. This is
+ * the discrete test the program uses to accept a move, as opposed to
+ * `laneObjects` above which returns continuous positions for drawing. Both
+ * describe the same objects; keep them in step.
+ */
+export function laneObjectCovers(lane: Lane, x: number, tMs: number): boolean {
+  if (lane.gapTiles === 0) return false;
+  const cycleMt = lane.gapTiles * 1000;
+  const traveled = Math.floor((tMs * lane.speedMtps) / 1000) + lane.phaseMt;
+  const offset = traveled % cycleMt;
+  const xMt = x * 1000;
+  const patternPos =
+    lane.dirPositive === 1
+      ? (xMt + cycleMt - (offset % cycleMt)) % cycleMt
+      : (xMt + offset) % cycleMt;
+  const fpMt = lane.footprint * 1000;
+  return patternPos < fpMt || patternPos + 1000 > cycleMt;
+}
+
+/** Mirror of `hazard::evaluate_tile`. The contract stays the authority. */
+export function evaluateTile(lane: Lane, x: number, tMs: number): TileState {
+  switch (lane.kind) {
+    case LANE_GRASS:
+      return lane.blockerMask & (1n << BigInt(x % 64)) ? "blocked" : "safe";
+    case LANE_ROAD:
+      return laneObjectCovers(lane, x, tMs) ? "lethal" : "safe";
+    case LANE_RIVER:
+      return laneObjectCovers(lane, x, tMs) && !logSubmerged(lane, tMs)
+        ? "supported"
+        : "lethal";
+    case LANE_RAIL:
+      return railPhase(lane, tMs).phase === "train" ? "lethal" : "safe";
+    default:
+      return "blocked";
+  }
+}
+
+/** Can a move enter this tile right now? (Supported water counts.) */
+export function isTraversable(lane: Lane, x: number, tMs: number): boolean {
+  const state = evaluateTile(lane, x, tMs);
+  return state === "safe" || state === "supported";
+}
+
+/** Human-readable reason a tile refused entry, for the HUD. */
+export function blockedReason(lane: Lane, x: number, tMs: number): string | null {
+  switch (evaluateTile(lane, x, tMs)) {
+    case "blocked":
+      return "blocked";
+    case "lethal":
+      return lane.kind === LANE_RIVER
+        ? "water — wait for a log"
+        : lane.kind === LANE_RAIL
+          ? "train coming"
+          : "traffic";
+    default:
+      return null;
+  }
+}

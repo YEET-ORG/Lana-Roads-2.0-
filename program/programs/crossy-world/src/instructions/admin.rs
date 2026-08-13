@@ -158,6 +158,14 @@ pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     Ok(())
 }
 
+/// Rotate the authenticated randomness identity. Chunk and gacha callbacks
+/// are bound to whatever key is current at the moment they land; already
+/// revealed results are immutable, so a rotation can never rewrite history.
+pub fn set_vrf_authority(ctx: Context<AdminOnly>, new_authority: Pubkey) -> Result<()> {
+    ctx.accounts.config.vrf_authority = new_authority;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // pause controls
 // ---------------------------------------------------------------------------
