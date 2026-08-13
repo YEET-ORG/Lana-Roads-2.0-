@@ -6,7 +6,12 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { dayEnd, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
-import { agentModelIdFor, agentName, getAgentChoice, setAgentChoice } from "../../lib/agent";
+import {
+  agentModelIdFor,
+  agentName,
+  getAgentChoice,
+  setAgentChoice,
+} from "../../lib/agent";
 import { agentId, AGENT_COUNT } from "../../game/renderer/assets";
 import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
@@ -69,7 +74,9 @@ export function Home({
         const world = await boot.client.getWorld(WorldMode.Paid, day).catch(() => null);
         if (!live) return;
         if (!daily || !world) {
-          setWarn(`Today's competition (day ${day}) is not prepared on this cluster yet.`);
+          setWarn(
+            `Today's competition (day ${day}) is not prepared on this cluster yet.`,
+          );
           setInfo({
             day,
             pool: 0n,
@@ -91,7 +98,8 @@ export function Home({
           status: Object.keys(daily.status)[0] ?? "?",
         });
       } catch {
-        if (live) setWarn("Can't reach the cluster — the daily competition is unavailable.");
+        if (live)
+          setWarn("Can't reach the cluster — the daily competition is unavailable.");
       }
     })();
     return () => {
@@ -179,7 +187,12 @@ export function Home({
           <button
             className="play giant"
             onClick={() => {
-              if (!boot || !info || info.status === "offline" || info.status === "unprepared") {
+              if (
+                !boot ||
+                !info ||
+                info.status === "offline" ||
+                info.status === "unprepared"
+              ) {
                 onPlay({ name: "demo" });
                 return;
               }

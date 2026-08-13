@@ -926,13 +926,26 @@ export class WorldScene {
     sfx.fanfare();
   }
 
-  /** Local death: cause inferred from terrain (water vs impact). */
-  killLocal() {
+  /**
+   * Local death.
+   *
+   * Pass the cause when the chain has said what it was — the program picks
+   * it from the lane the run actually died on, which is not always the lane
+   * the local mesh is standing on after a rejected move or a kick. Falls
+   * back to reading the terrain under the mesh.
+   */
+  killLocal(cause?: DeathCause) {
     if (this.local.dead) return;
-    const y = Math.round(-this.local.root.position.z);
-    const lane = this.lanes.get(y);
-    const cause: DeathCause =
-      lane?.kind === LANE_RIVER ? "water" : lane?.kind === LANE_RAIL ? "train" : "impact";
+    if (cause === undefined) {
+      const y = Math.round(-this.local.root.position.z);
+      const lane = this.lanes.get(y);
+      cause =
+        lane?.kind === LANE_RIVER
+          ? "water"
+          : lane?.kind === LANE_RAIL
+            ? "train"
+            : "impact";
+    }
     this.lastDeathCause = cause;
     this.local.die(cause === "water" ? "water" : "impact");
     const at = this.local.root.position.clone().setY(0.25);
@@ -1134,7 +1147,11 @@ export class WorldScene {
           stripMat.color.set(blink ? COLORS.warning : COLORS.rail);
         }
         const prevPhase = meshes[0]?.userData.phase as string | undefined;
-        if (phase === "warning" && prevPhase !== "warning" && Math.abs(row - nearRow) < 8) {
+        if (
+          phase === "warning" &&
+          prevPhase !== "warning" &&
+          Math.abs(row - nearRow) < 8
+        ) {
           if (now - this.lastBellAt > 400) {
             sfx.bell();
             this.lastBellAt = now;

@@ -124,7 +124,10 @@ export const sfx = {
   },
   confirm() {
     blip({ type: "square", freq: 440, slide: 1.5, dur: 0.07, vol: 0.06 });
-    setTimeout(() => blip({ type: "square", freq: 660, slide: 1.05, dur: 0.08, vol: 0.05 }), 50);
+    setTimeout(
+      () => blip({ type: "square", freq: 660, slide: 1.05, dur: 0.08, vol: 0.05 }),
+      50,
+    );
   },
   death() {
     blip({ type: "sawtooth", freq: 220, slide: 0.35, dur: 0.3, vol: 0.12 });
@@ -145,7 +148,10 @@ export const sfx = {
   },
   bell() {
     blip({ type: "triangle", freq: 880, slide: 0.97, dur: 0.16, vol: 0.07 });
-    setTimeout(() => blip({ type: "triangle", freq: 660, slide: 0.97, dur: 0.14, vol: 0.055 }), 140);
+    setTimeout(
+      () => blip({ type: "triangle", freq: 660, slide: 0.97, dur: 0.14, vol: 0.055 }),
+      140,
+    );
   },
   /** Rising two-note chime for score milestones. */
   milestone() {
@@ -157,8 +163,14 @@ export const sfx = {
   },
   fanfare() {
     blip({ type: "square", freq: 523, slide: 1.02, dur: 0.1, vol: 0.07 });
-    setTimeout(() => blip({ type: "square", freq: 659, slide: 1.02, dur: 0.1, vol: 0.07 }), 80);
-    setTimeout(() => blip({ type: "square", freq: 784, slide: 1.2, dur: 0.18, vol: 0.08 }), 160);
+    setTimeout(
+      () => blip({ type: "square", freq: 659, slide: 1.02, dur: 0.1, vol: 0.07 }),
+      80,
+    );
+    setTimeout(
+      () => blip({ type: "square", freq: 784, slide: 1.2, dur: 0.18, vol: 0.08 }),
+      160,
+    );
   },
   /** Soft looping river bed. Safe to call every frame with a bool. */
   river(on: boolean) {
@@ -170,7 +182,10 @@ export const sfx = {
       const nodes = riverNodes;
       riverNodes = null;
       nodes.gain.gain.cancelScheduledValues(a.currentTime);
-      nodes.gain.gain.setValueAtTime(Math.max(0.0001, nodes.gain.gain.value), a.currentTime);
+      nodes.gain.gain.setValueAtTime(
+        Math.max(0.0001, nodes.gain.gain.value),
+        a.currentTime,
+      );
       nodes.gain.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 0.35);
       setTimeout(() => {
         try {

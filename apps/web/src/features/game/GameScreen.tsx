@@ -12,7 +12,12 @@ import { Bootstrapped } from "../../lib/client";
 import { deathHeadline, WorldScene, type DeathCause } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
 import { attachInput } from "../../game/input/keys";
-import { evaluateTile, LANE_RIVER, tickOf } from "../../game/simulation/hazards";
+import {
+  evaluateTile,
+  LANE_RAIL,
+  LANE_RIVER,
+  tickOf,
+} from "../../game/simulation/hazards";
 import { CountUp } from "../../ui/CountUp";
 import { Confetti } from "../../ui/Confetti";
 import { agentModelIdFor } from "../../lib/agent";
@@ -42,6 +47,19 @@ function errorText(e: unknown): string {
 
 /** Quiet spell after which the session is handed back to the wallet. */
 const IDLE_SESSION_MS = 3 * 60 * 1000;
+
+/**
+ * What killed a run, by the same rule the program uses: the kind of lane it
+ * died on. `execute_death` records exactly this, so the headline the player
+ * reads matches the reason the chain recorded.
+ */
+function causeOfDeath(scene: WorldScene | null, row: number): DeathCause | undefined {
+  const lane = scene?.laneAt(row);
+  if (!lane) return undefined; // lane not loaded: let the scene guess
+  if (lane.kind === LANE_RIVER) return "water";
+  if (lane.kind === LANE_RAIL) return "train";
+  return "impact";
+}
 
 type PlayRoute = Extract<Route, { name: "play" }>;
 
@@ -90,9 +108,10 @@ export function GameScreen({
   const [death, setDeath] = useState<DeathInfo | null>(null);
   const [reviving, setReviving] = useState(false);
   /** Casual runs end outright on death; the player just goes again. */
-  const [endedScore, setEndedScore] = useState<{ score: number; cause: DeathCause } | null>(
-    null,
-  );
+  const [endedScore, setEndedScore] = useState<{
+    score: number;
+    cause: DeathCause;
+  } | null>(null);
   const deathCauseRef = useRef<DeathCause>("impact");
   const [respawning, setRespawning] = useState(false);
   /** Another window took this run over; this one is a spectator. */
@@ -264,7 +283,10 @@ export function GameScreen({
         }
         // Death/revive presentation: the world reacts before the overlay.
         if (state === "deadAwaitingRevive" || state === "ended") {
-          scene?.killLocal();
+          // The program decides what killed you from the lane the run
+          // actually died on, so read the cause from the authoritative
+          // tile rather than from wherever the local mesh ended up.
+          scene?.killLocal(causeOfDeath(scene, run.y));
           if (scene) deathCauseRef.current = scene.lastDeathCause;
         } else if (state === "active") scene?.reviveLocal();
         // HUD updates only when something visible changed (uncontrolled
@@ -288,6 +310,8 @@ export function GameScreen({
         if (decade > scoreDecadeRef.current && state === "active") scene?.celebrate();
         scoreDecadeRef.current = decade;
         if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
+          // The run can take no further action; hand the key back too.
+          void endSession("death");
           // Let the death animation land before the card stamps in.
           const info = {
             deathNonce: run.deathNonce,
@@ -301,6 +325,7 @@ export function GameScreen({
           setDeath(null);
           setEndedScore(null);
         } else if (state === "ended" && route.mode === WorldMode.Casual) {
+          void endSession("death");
           const score = liveRun.current!.score;
           window.clearTimeout(deathTimerRef.current);
           deathTimerRef.current = window.setTimeout(
