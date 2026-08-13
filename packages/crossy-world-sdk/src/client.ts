@@ -10,6 +10,7 @@ import { Connection, Keypair, PublicKey, TransactionInstruction } from "@solana/
 import type { CrossyWorld } from "./generated/crossy_world.js";
 import idl from "./generated/crossy_world.json" with { type: "json" };
 import {
+  MAX_SESSION_SECONDS,
   Direction,
   ENTRY_PRICE,
   ReceiptKind,
@@ -477,6 +478,13 @@ export class CrossyClient {
       await provider.sendAndConfirm(tx);
     }
     await this.waitForEr(runAddr);
+    // A run created earlier today may still hold an expired session key;
+    // without this the player joins successfully and then cannot act.
+    await this.ensureSession({
+      day: params.day,
+      mode: WorldMode.Casual,
+      sessionAuthority: params.sessionAuthority,
+    }).catch(() => false);
     return { attemptNonce };
   }
 
@@ -814,6 +822,47 @@ export class CrossyClient {
       skipPreflight: true,
       maxRetries: 0,
     });
+  }
+
+  /**
+   * Keep the gameplay session usable.
+   *
+   * Sessions expire — the program refuses every action from a stale one —
+   * and a run outlives them: a player who joined this morning is still on
+   * the board this afternoon holding a key the program no longer accepts,
+   * looking for all the world like a game that stopped responding. The
+   * wallet may always rotate the authority on its own run, which changes
+   * nothing about score or ownership, so top it up before it lapses.
+   *
+   * The run lives in the ER once delegated, so the rotation goes there.
+   * Returns true when it actually rotated.
+   */
+  async ensureSession(params: {
+    day: bigint;
+    mode?: WorldMode;
+    sessionAuthority: PublicKey;
+    /** Rotate when less than this much life is left. Default 30 minutes. */
+    minRemainingSeconds?: number;
+  }): Promise<boolean> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const runAddr = pda.run(world, wallet);
+    const run = await this.erProgram.account.playerRun
+      .fetchNullable(runAddr)
+      .catch(() => null);
+    if (!run) return false;
+    const now = Math.floor(Date.now() / 1000);
+    const margin = params.minRemainingSeconds ?? 30 * 60;
+    const authorityMatches = run.sessionAuthority.equals(params.sessionAuthority);
+    const healthy = authorityMatches && run.sessionExpiry.toNumber() > now + margin;
+    if (healthy) return false;
+    // The program caps how far ahead a session may run; stay inside it.
+    const expiry = now + MAX_SESSION_SECONDS - 60;
+    await this.erProgram.methods
+      .rotateSession(params.sessionAuthority, new BN(expiry))
+      .accountsPartial({ run: runAddr, wallet })
+      .rpc({ commitment: "processed" });
+    return true;
   }
 
   /**

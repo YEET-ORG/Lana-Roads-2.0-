@@ -84,3 +84,6 @@ export const SESSION_SCOPE = {
   heartbeat: 1 << 3,
   allGameplay: 0b1111,
 } as const;
+
+/** Mirrors `constants::MAX_SESSION_SECONDS`: how far ahead a session may run. */
+export const MAX_SESSION_SECONDS = 12 * 60 * 60;

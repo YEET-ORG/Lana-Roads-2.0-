@@ -176,6 +176,8 @@ export function GameScreen({
    * that distinguishes an accepted move from a refused one.
    */
   const lastAuthSeqRef = useRef(-1);
+  /** Consecutive actions the chain never accepted. */
+  const rejectedRunRef = useRef(0);
   /** Last celebrated score decade (milestone bursts every 10 rows). */
   const scoreDecadeRef = useRef(0);
 
@@ -472,6 +474,32 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
 
+  /** Re-authorise the session key on our own run (score is untouched). */
+  async function renewSession() {
+    try {
+      const rotated = await boot.client.ensureSession({
+        day: route.day,
+        mode: route.mode,
+        sessionAuthority: boot.session.publicKey,
+      });
+      if (rotated) {
+        setHud((h) => ({ ...h, lastRejection: null }));
+        reconcileNowRef.current();
+      }
+    } catch (e) {
+      setHud((h) => ({ ...h, lastRejection: `session: ${errorText(e)}` }));
+    }
+  }
+
+  // Sessions are time-limited and a run outlives them; top ours up long
+  // before it lapses rather than discovering it on a refused move.
+  useEffect(() => {
+    void renewSession();
+    const t = setInterval(() => void renewSession(), 5 * 60 * 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.day, route.mode]);
+
   // Input: fire-and-forget with local prediction. The session key signs and
   // pays (zero-fee ER); authority corrections arrive on the subscription.
   useEffect(() => {
@@ -555,15 +583,36 @@ export function GameScreen({
               ...sent,
             })
             .catch((e) => {
-              setHud((h) => ({ ...h, lastRejection: errorText(e) }));
-            })
-            .finally(() => {});
+              const why = errorText(e);
+              setHud((h) => ({ ...h, lastRejection: why }));
+              // A lapsed session refuses every action, which reads as a game
+              // that simply stopped responding. Renew and let the player
+              // carry on with the same run and score.
+              if (why.includes("SessionExpired") || why.includes("BadSession")) {
+                void renewSession();
+              }
+            });
           // A REJECTED move changes nothing on chain, so the optimistic
           // mirror would sit a tile ahead of the truth forever. If the
           // sequence we spent has not been consumed by then, force a heal.
+          //
+          // Gameplay goes out fire-and-forget, so a refusal comes back
+          // looking exactly like an acceptance — an expired session simply
+          // stops the game with no error anywhere. Repeated refusals are
+          // the only symptom, so treat a run of them as a reason to check
+          // the session rather than leaving the player stuck.
           const spentSeq = sent.actionSeq;
           setTimeout(() => {
-            if (lastAuthSeqRef.current <= spentSeq) reconcileNowRef.current();
+            if (lastAuthSeqRef.current > spentSeq) {
+              rejectedRunRef.current = 0;
+              return;
+            }
+            reconcileNowRef.current();
+            rejectedRunRef.current += 1;
+            if (rejectedRunRef.current >= 3) {
+              rejectedRunRef.current = 0;
+              void renewSession();
+            }
           }, 1300);
         } else if (action.kind === "kick") {
           const now = performance.now();
