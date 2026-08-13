@@ -21,6 +21,12 @@ const VALIDATOR = new web3.PublicKey(
   process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
 );
 const TARGET_ROW = Number(process.env.TARGET_ROW ?? 20);
+/**
+ * With PARK_MS set, the walker stops on the first road lane it reaches and
+ * stands there while cranking. Traffic should kill it: that is the proof
+ * obstacles are lethal and not just scenery.
+ */
+const PARK_MS = Number(process.env.PARK_MS ?? 0);
 const KINDS = ["grass", "road", "river", "rail"];
 
 const le8 = (v: bigint | number) => {
@@ -251,7 +257,10 @@ async function main() {
   };
 
   const started = Date.now();
-  while (run.y < TARGET_ROW && Date.now() - started < 240_000) {
+  const parkRow = PARK_MS > 0 ? lanes.findIndex((l, i) => i > 16 && l.kind === 1) : -1;
+  const stopRow = parkRow > 0 ? parkRow : TARGET_ROW;
+  if (parkRow > 0) console.log(`walking to road row ${parkRow}`);
+  while (run.y < stopRow && Date.now() - started < 240_000) {
     const nextLane = lanes[run.y + 1];
     try {
       await move(0);
@@ -281,6 +290,22 @@ async function main() {
       break;
     }
     await sleep(120);
+  }
+
+  if (PARK_MS > 0) {
+    console.log(
+      `parking on ${KINDS[lanes[run.y]?.kind ?? 0]} row ${run.y} for ${PARK_MS}ms…`,
+    );
+    const until = Date.now() + PARK_MS;
+    while (Date.now() < until) {
+      await sleep(500);
+      run = await er.account.playerRun.fetch(runPda());
+      if (Object.keys(run.state)[0] !== "active") {
+        deaths++;
+        console.log(`killed by ${KINDS[lanes[run.y]?.kind ?? 0]} at row ${run.y}`);
+        break;
+      }
+    }
   }
 
   clearInterval(cranker);

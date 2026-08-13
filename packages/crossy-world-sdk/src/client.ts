@@ -803,6 +803,31 @@ export class CrossyClient {
   }
 
   /**
+   * Fire-and-forget record claim. Movement deliberately does not touch the
+   * world's record field (it would make every move contend on one hot
+   * account), so a client that beats the record publishes it separately.
+   */
+  async sendClaimRecord(params: {
+    day: bigint;
+    mode?: WorldMode;
+    session: Keypair;
+  }): Promise<string> {
+    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const ix = await this.erProgram.methods
+      .claimRecord()
+      .accountsPartial({ world, run: pda.run(world, this.wallet.publicKey) })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.erConnection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+      maxRetries: 0,
+    });
+  }
+
+  /**
    * Fire-and-forget hazard crank. Collision is only resolved when someone
    * asks the program to check, so every client cranks its own run and the
    * runs it can see: one honest watcher is enough to make traffic lethal for

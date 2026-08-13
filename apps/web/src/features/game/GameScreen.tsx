@@ -150,6 +150,9 @@ export function GameScreen({
     nonce: 0,
     deadlineMs: 0,
   });
+  const claimRecordRef = useRef<(score: number, published: number) => void>(() => {});
+  /** Last record published by the world, mirrored for the claim check. */
+  const hudRecordRef = useRef(0);
   /** Remote occupancy mirror for prediction (never send a doomed move). */
   const occupiedRef = useRef<
     Map<string, { x: number; y: number; state: string; hazardNonce: number }>
@@ -226,6 +229,7 @@ export function GameScreen({
                 state,
               },
         );
+        claimRecordRef.current(liveRun.current!.score, hudRecordRef.current);
         if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
           setDeath({
             deathNonce: run.deathNonce,
@@ -285,7 +289,8 @@ export function GameScreen({
       onRun: (run) => live && applyRun(run),
       onWorld: (w) => {
         if (!live) return;
-        setHud((h) => ({ ...h, record: w.recordScore }));
+        hudRecordRef.current = w.recordScore;
+        setHud((h) => (h.record === w.recordScore ? h : { ...h, record: w.recordScore }));
         void loadChunks(w.revealedRows);
       },
     });
@@ -302,7 +307,10 @@ export function GameScreen({
         // Anchor the hazard clock to the world's own timeline. Re-running
         // this on every sweep must converge, not creep forward.
         scene.setWorldElapsed(Date.now() - Number(worldAcc.startTs.toString()) * 1000);
-        setHud((h) => ({ ...h, record: worldAcc.recordScore }));
+        hudRecordRef.current = worldAcc.recordScore;
+        setHud((h) =>
+          h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },
+        );
         await loadChunks(worldAcc.revealedRows);
       }
       if (run) applyRun(run, true);
@@ -310,6 +318,19 @@ export function GameScreen({
     void reconcile();
     reconcileNowRef.current = () => void reconcile();
     const sweep = setInterval(() => void reconcile(), 5000);
+
+    // Publish the record when this run passes it. Movement keeps off the
+    // world's record field on purpose, so somebody has to say so.
+    let claimedThrough = 0;
+    claimRecordRef.current = (score: number, published: number) => {
+      if (score <= published || score <= claimedThrough) return;
+      claimedThrough = score;
+      boot.client
+        .sendClaimRecord({ day: route.day, mode: route.mode, session: boot.session })
+        .catch(() => {
+          claimedThrough = 0;
+        });
+    };
 
     // Hazard cranking. Collisions are only resolved when someone asks the
     // program to check, so this client cranks its own run and every run it

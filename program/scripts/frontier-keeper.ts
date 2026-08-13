@@ -91,6 +91,16 @@ async function withRetry<T>(what: string, fn: () => Promise<T>, tries = 6): Prom
   throw lastErr;
 }
 
+// A keeper that dies takes the frontier with it, and public RPC throws from
+// places the per-call retries cannot reach (websocket callbacks, library
+// internals). Log and keep going rather than letting node exit.
+process.on("unhandledRejection", (e: any) => {
+  log("unhandled rejection:", String(e?.message ?? e).slice(0, 120));
+});
+process.on("uncaughtException", (e: any) => {
+  log("uncaught exception:", String(e?.message ?? e).slice(0, 120));
+});
+
 function loadKeypair(path: string): web3.Keypair {
   return web3.Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))),
@@ -154,13 +164,16 @@ async function main() {
     } catch {
       return; // world not delegated / not created yet
     }
-    const target =
-      (Math.floor(live.recordScore / CHUNK_ROWS) + LOOKAHEAD_CHUNKS) * CHUNK_ROWS;
+    // `world.record_score` only moves when someone calls claim_record, which
+    // is deliberately decoupled from movement — so it is not a reliable
+    // picture of where players actually are. Ask the live runs directly.
+    const leader = await frontierLeader(world, live.recordScore);
+    const target = (Math.floor(leader / CHUNK_ROWS) + LOOKAHEAD_CHUNKS) * CHUNK_ROWS;
     if (live.revealedRows >= target) return;
 
     const index: number = live.nextChunkIndex;
     log(
-      `mode ${mode} day ${day}: record ${live.recordScore}, revealed ${live.revealedRows} ` +
+      `mode ${mode} day ${day}: leader row ${leader}, revealed ${live.revealedRows} ` +
         `-> extending with chunk ${index}`,
     );
 
@@ -168,6 +181,23 @@ async function main() {
     await ensureSectors(world, index);
     await extendFrontier(world, index);
     log(`mode ${mode}: frontier now ${(index + 1) * CHUNK_ROWS} rows`);
+  }
+
+  /** Furthest row any live run has reached, floored by the claimed record. */
+  async function frontierLeader(world: web3.PublicKey, recordScore: number) {
+    try {
+      const runs = await erProgram.account.playerRun.all([
+        { memcmp: { offset: 8, bytes: world.toBase58() } },
+      ]);
+      let best = recordScore;
+      for (const { account } of runs as any[]) {
+        if (Object.keys(account.state)[0] !== "active") continue;
+        best = Math.max(best, account.y, account.score);
+      }
+      return best;
+    } catch {
+      return recordScore;
+    }
   }
 
   async function publishChunk(day: bigint, world: web3.PublicKey, index: number) {
