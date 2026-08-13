@@ -27,6 +27,7 @@ export function Home({
   onPlay: (r: Route) => void;
 }) {
   const [info, setInfo] = useState<DayInfo | null>(null);
+  const [regionPings, setRegionPings] = useState<Record<string, number> | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
   const [countdown, setCountdown] = useState("");
   const [entering, setEntering] = useState(false);
@@ -72,6 +73,42 @@ export function Home({
     };
   }, [boot]);
 
+  // Warm-connection ping to every MagicBlock ER region, measured FROM THE
+  // BROWSER — a world lives on one region's validator, so pin it wherever
+  // the players actually are.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const regions = ["as", "eu", "us"];
+      const out: Record<string, number> = {};
+      await Promise.all(
+        regions.map(async (r) => {
+          const url = `https://devnet-${r}.magicblock.app`;
+          const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot" });
+          const ping = async () => {
+            const t0 = performance.now();
+            await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            });
+            return performance.now() - t0;
+          };
+          try {
+            await ping(); // warm the connection
+            out[r] = Math.round(await ping());
+          } catch {
+            out[r] = -1;
+          }
+        }),
+      );
+      if (live) setRegionPings(out);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (!info) return;
     const id = setInterval(() => {
@@ -115,6 +152,17 @@ export function Home({
           <label>Active players</label>
           <b>{info.activePlayers}</b>
         </div>
+        {regionPings && (
+          <div className="stat">
+            <label>ER regions (your ping)</label>
+            <b className="regions">
+              {Object.entries(regionPings)
+                .map(([r, ms]) => `${r} ${ms < 0 ? "✕" : `${ms}ms`}`)
+                .join(" · ")}
+            </b>
+            <small>world pinned: asia</small>
+          </div>
+        )}
       </div>
 
       <div className="modes">

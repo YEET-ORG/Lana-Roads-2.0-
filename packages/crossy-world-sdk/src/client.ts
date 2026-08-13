@@ -364,14 +364,18 @@ export class CrossyClient {
       instructions.push(
         await this.program.methods
           .lockStarter(attemptNonce)
-          .accountsPartial({ profile: pda.profile(wallet), world, lock: lockAddr, wallet })
+          .accountsPartial({
+            profile: pda.profile(wallet),
+            world,
+            lock: lockAddr,
+            wallet,
+          })
           .instruction(),
       );
     }
     // Delegate the player's run + best unless already delegated.
     const runInfo = await this.connection.getAccountInfo(runAddr);
-    const runDelegated =
-      runInfo != null && !runInfo.owner.equals(this.program.programId);
+    const runDelegated = runInfo != null && !runInfo.owner.equals(this.program.programId);
     if (!runDelegated) {
       instructions.push(
         await this.program.methods
@@ -683,7 +687,10 @@ export class CrossyClient {
         params.world,
         (info, ctx) => {
           try {
-            const w = this.program.coder.accounts.decode("worldHeader", Buffer.from(info.data));
+            const w = this.program.coder.accounts.decode(
+              "worldHeader",
+              Buffer.from(info.data),
+            );
             params.onWorld?.(w, ctx.slot);
           } catch {
             /* not yet initialized on this plane */
@@ -697,7 +704,8 @@ export class CrossyClient {
       if (disposed) return;
       disposed = true;
       void this.erConnection.removeProgramAccountChangeListener(subId);
-      if (worldSubId != null) void this.erConnection.removeAccountChangeListener(worldSubId);
+      if (worldSubId != null)
+        void this.erConnection.removeAccountChangeListener(worldSubId);
     };
   }
 

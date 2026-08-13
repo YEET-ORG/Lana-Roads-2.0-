@@ -19,14 +19,20 @@ import type { Route } from "../../app/App";
  * The real diagnostics survive in the error's fields — dig them out.
  */
 function errorText(e: unknown): string {
-  const any = e as { transactionMessage?: string; transactionLogs?: string[]; message?: string };
+  const any = e as {
+    transactionMessage?: string;
+    transactionLogs?: string[];
+    message?: string;
+  };
   const fromLogs = any.transactionLogs
     ?.map((l) => l.match(/Error Code: (\w+)/)?.[1])
     .find(Boolean);
   if (fromLogs) return fromLogs;
   if (any.transactionMessage) return any.transactionMessage.slice(0, 140);
   const msg = `${any.message ?? e}`;
-  return msg.includes("Unknown action") ? "transaction failed (see console)" : msg.slice(0, 140);
+  return msg.includes("Unknown action")
+    ? "transaction failed (see console)"
+    : msg.slice(0, 140);
 }
 
 type PlayRoute = Extract<Route, { name: "play" }>;
@@ -220,7 +226,10 @@ export function GameScreen({
       if (!live) return;
       if (worldAcc) {
         scene.worldTimeOffsetMs =
-          Date.now() - Number(worldAcc.startTs.toString()) * 1000 - performance.now() + performance.now();
+          Date.now() -
+          Number(worldAcc.startTs.toString()) * 1000 -
+          performance.now() +
+          performance.now();
         setHud((h) => ({ ...h, record: worldAcc.recordScore }));
         await loadChunks(worldAcc.revealedRows);
       }
@@ -259,8 +268,18 @@ export function GameScreen({
         const now = performance.now();
         if (now - lastMoveAt < 60) return; // debounce bursts
         lastMoveAt = now;
-        const dx = action.direction === Direction.Left ? -1 : action.direction === Direction.Right ? 1 : 0;
-        const dy = action.direction === Direction.Forward ? 1 : action.direction === Direction.Backward ? -1 : 0;
+        const dx =
+          action.direction === Direction.Left
+            ? -1
+            : action.direction === Direction.Right
+              ? 1
+              : 0;
+        const dy =
+          action.direction === Direction.Forward
+            ? 1
+            : action.direction === Direction.Backward
+              ? -1
+              : 0;
         const [nx, ny] = [mine.x + dx, mine.y + dy];
         if (nx < 0 || nx > 63 || ny < 0) return;
         const sent = {
