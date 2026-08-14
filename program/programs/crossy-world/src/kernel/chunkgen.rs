@@ -375,11 +375,22 @@ mod tests {
         // Nothing in the spawn chunk may be lethal: players materialise and
         // revive here.
         for lane in layout.lanes.iter() {
-            assert_eq!(lane.kind, LaneKind::Grass as u8, "no traffic in the safe zone");
+            assert_eq!(
+                lane.kind,
+                LaneKind::Grass as u8,
+                "no traffic in the safe zone"
+            );
         }
         // But it must not be an empty field — that was the original bug.
-        let blockers: u32 = layout.lanes.iter().map(|l| l.blocker_mask.count_ones()).sum();
-        assert!(blockers > 0, "spawn chunk past the apron must have obstacles");
+        let blockers: u32 = layout
+            .lanes
+            .iter()
+            .map(|l| l.blocker_mask.count_ones())
+            .sum();
+        assert!(
+            blockers > 0,
+            "spawn chunk past the apron must have obstacles"
+        );
     }
 
     #[test]
@@ -428,7 +439,10 @@ mod tests {
         };
         let early: usize = (0..2).map(hazards_at).sum();
         let late: usize = (30..32).map(hazards_at).sum();
-        assert!(late > early, "deep chunks must be busier ({early} -> {late})");
+        assert!(
+            late > early,
+            "deep chunks must be busier ({early} -> {late})"
+        );
 
         // Stage parameters themselves must be monotonic.
         let mut prev = stage_params(1);

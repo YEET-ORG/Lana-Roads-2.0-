@@ -258,12 +258,17 @@ describe("shared golden vectors", () => {
     }
   });
 
-  it("world time is quantised to the authoritative second", () => {
-    // The program derives time from Clock::unix_timestamp, so a client that
-    // predicts on a finer grid disagrees with it.
-    assert.equal(worldTimeMs(1_000, 1_000), 0);
-    assert.equal(worldTimeMs(1_000, 1_000.9), 0);
-    assert.equal(worldTimeMs(1_000, 1_001), 1_000);
-    assert.equal(worldTimeMs(1_000, 900), 0);
+  it("world time comes from the rollup slot", () => {
+    // The program derives time from Clock::slot, so a client predicting on
+    // any other grid disagrees with it.
+    // Slot-derived, so the grid is 50ms rather than a whole second: this
+    // is the number that lets traffic move a tile at a time.
+    assert.equal(worldTimeMs(0), 0);
+    assert.equal(worldTimeMs(1), 50);
+    assert.equal(worldTimeMs(20), 1_000);
+    assert.equal(worldTimeMs(534_438_269), 26_721_913_450);
+    // Big enough to matter, small enough that the tile maths stays exact
+    // in a double.
+    assert.ok(worldTimeMs(534_438_269) * 4_000 < Number.MAX_SAFE_INTEGER);
   });
 });

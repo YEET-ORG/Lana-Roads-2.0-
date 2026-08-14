@@ -35,16 +35,23 @@ export interface Lane {
 }
 
 /**
+ * Milliseconds of world time per rollup slot. Mirrors `MS_PER_SLOT`.
+ */
+export const MS_PER_SLOT = 50;
+
+/**
  * Authoritative world time.
  *
- * The program derives this from `Clock::unix_timestamp`, so it advances in
- * whole seconds — hazards do not move continuously, and anything predicting
- * collisions must ask on the same grid the program evaluates on. Pass
- * `Date.now() / 1000` for the current tick.
+ * The program derives this from `Clock::slot` on the rollup, NOT from a
+ * wall clock: `unix_timestamp` only advances in whole seconds, which made
+ * hazards jump several tiles at once and left every client guessing in
+ * between. A slot is ~50ms, and it is the same counter for everyone, so
+ * two players watching the same road see the same cars in the same places.
+ *
+ * Pass the rollup's current slot.
  */
-export function worldTimeMs(startTs: number | bigint, nowSeconds: number): number {
-  const start = Number(startTs);
-  return Math.max(0, Math.floor(nowSeconds) - start) * 1000;
+export function worldTimeMs(slot: number | bigint): number {
+  return Number(slot) * MS_PER_SLOT;
 }
 
 /** Whole tiles the lane's conveyor has advanced. Objects never sit between tiles. */

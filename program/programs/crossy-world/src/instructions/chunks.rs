@@ -293,13 +293,10 @@ pub fn publish_chunk(
 
     // Validate the (possibly delegated) world against its self-describing
     // mode/day PDA, then take the immutable day window from it.
-    let world = crate::cross_plane::read_committed_world_any(&ctx.accounts.world.to_account_info())?;
+    let world =
+        crate::cross_plane::read_committed_world_any(&ctx.accounts.world.to_account_info())?;
     let expected = Pubkey::find_program_address(
-        &[
-            seeds::WORLD,
-            &[world.mode as u8],
-            &world.day.to_le_bytes(),
-        ],
+        &[seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
         &crate::ID,
     )
     .0;
@@ -310,7 +307,10 @@ pub fn publish_chunk(
     );
     require!(world.day == day, CrossyError::BadChunkState);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
-    require!(ctx.accounts.prev_chunk.day == day, CrossyError::BadChunkState);
+    require!(
+        ctx.accounts.prev_chunk.day == day,
+        CrossyError::BadChunkState
+    );
 
     let chunk = &mut ctx.accounts.chunk;
     // A revealed chunk is permanent (shared across paid/casual modes).

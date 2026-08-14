@@ -51,10 +51,12 @@ async function main() {
     new anchor.AnchorProvider(new web3.Connection(ER_RPC, "processed"), wallet, {}),
   ) as Program<any>;
 
-  const header = await er.account.worldHeader.fetch(world);
-  const startTs = Number(header.startTs.toString());
-  const tMs = worldTimeMs(startTs, Math.floor(Date.now() / 1000));
-  console.log(`day ${day}, world time ${tMs}ms (tick ${tMs / 1000})\n`);
+  await er.account.worldHeader.fetch(world);
+  // World time is the rollup's slot, not a wall clock — ask the plane the
+  // program runs on.
+  const slot = await er.provider.connection.getSlot("processed");
+  const tMs = worldTimeMs(slot);
+  console.log(`day ${day}, slot ${slot}, world time ${tMs}ms\n`);
 
   const chunkIndex = Number(process.env.CHUNK ?? 1);
   const chunk = await base.account.chunkDefinition.fetch(

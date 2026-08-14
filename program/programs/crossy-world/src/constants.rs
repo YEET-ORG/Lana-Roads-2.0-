@@ -28,6 +28,16 @@ pub mod seeds {
 /// Seconds in one UTC day; the day id is `floor(unix_ts / DAY_SECONDS)`.
 pub const DAY_SECONDS: i64 = 86_400;
 
+/// Milliseconds of world time per rollup slot.
+///
+/// Hazards advance on this grid rather than on whole seconds, which is what
+/// makes traffic move a tile at a time instead of jumping several at once.
+/// MagicBlock ephemeral rollups produce a block every ~50ms (measured 50.9ms
+/// on devnet-as); the base layer's 400ms never applies, because every
+/// instruction that reads this clock requires the delegated world and can
+/// only execute on the rollup.
+pub const MS_PER_SLOT: u64 = 50;
+
 /// USDC uses 6 decimals; amounts below are integer base units.
 pub const USDC_DECIMALS: u8 = 6;
 /// Fresh paid attempt: exactly 1 USDC.

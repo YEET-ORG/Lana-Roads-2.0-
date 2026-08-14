@@ -5,7 +5,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{seeds, CHUNK_ROWS, WORLD_WIDTH};
+use crate::constants::{seeds, CHUNK_ROWS, MS_PER_SLOT, WORLD_WIDTH};
 use crate::errors::CrossyError;
 use crate::events::*;
 use crate::kernel::grid::{self, Direction};
@@ -17,13 +17,29 @@ use crate::state::*;
 // ---------------------------------------------------------------------------
 
 /// Milliseconds of authoritative time since world start.
-pub fn world_time_ms(world: &WorldHeader, now: i64) -> Result<u64> {
-    let delta = now
-        .checked_sub(world.start_ts)
-        .ok_or(CrossyError::Overflow)?;
-    require!(delta >= 0, CrossyError::DayNotStarted);
-    (delta as u64)
-        .checked_mul(1_000)
+pub fn world_time_ms(world: &WorldHeader, clock: &Clock) -> Result<u64> {
+    // The day must have started; hazards are meaningless before it.
+    require!(
+        clock.unix_timestamp >= world.start_ts,
+        CrossyError::DayNotStarted
+    );
+    // Time comes from the SLOT, not from `unix_timestamp`.
+    //
+    // `unix_timestamp` advances in whole seconds, so hazards used to
+    // teleport up to four tiles at once and no renderer could do anything
+    // but guess in between. Every instruction that reads this clock takes
+    // the delegated world and therefore runs on the ephemeral rollup,
+    // where a block is ~50ms — twenty times finer, and the same counter
+    // every client can read, instead of each one trusting its own wall
+    // clock.
+    //
+    // The origin is deliberately absolute rather than measured from
+    // `start_ts`: lane phases are arbitrary already, so where t=0 sits
+    // changes nothing about the pattern, and anchoring to a base-layer
+    // timestamp would mean mixing two unrelated slot spaces.
+    clock
+        .slot
+        .checked_mul(MS_PER_SLOT)
         .ok_or(error!(CrossyError::Overflow))
 }
 
@@ -146,9 +162,8 @@ pub fn init_run(
     // the account key must match one of the two mode-PDAs whose committed
     // data it deserializes to.
     let world = {
-        let committed = crate::cross_plane::read_committed_world_any(
-            &ctx.accounts.world.to_account_info(),
-        )?;
+        let committed =
+            crate::cross_plane::read_committed_world_any(&ctx.accounts.world.to_account_info())?;
         let expected = Pubkey::find_program_address(
             &[
                 seeds::WORLD,
@@ -158,7 +173,11 @@ pub fn init_run(
             &crate::ID,
         )
         .0;
-        require_keys_eq!(ctx.accounts.world.key(), expected, CrossyError::NotReconcilable);
+        require_keys_eq!(
+            ctx.accounts.world.key(),
+            expected,
+            CrossyError::NotReconcilable
+        );
         committed
     };
     require!(now < world.end_ts, CrossyError::CutoffPassed);
@@ -570,7 +589,7 @@ pub fn move_action(
     }
 
     // Terrain: destination must be traversable at the authoritative instant.
-    let t_ms = world_time_ms(world, now)?;
+    let t_ms = world_time_ms(world, &clock)?;
     let lane = lane_for_row(&ctx.accounts.chunk, ny)?;
     require!(
         ctx.accounts.chunk.day == world.day,

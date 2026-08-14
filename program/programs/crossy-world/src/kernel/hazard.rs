@@ -484,7 +484,11 @@ mod tests {
         };
         assert_eq!(evaluate_tile(&lane, 0, 0), TileState::Supported);
         assert_eq!(evaluate_tile(&lane, 0, 3_000), TileState::Lethal);
-        assert_eq!(carry_target(&lane, 0, 3_000, 1), None, "the naive lookahead drowns them");
+        assert_eq!(
+            carry_target(&lane, 0, 3_000, 1),
+            None,
+            "the naive lookahead drowns them"
+        );
 
         let advanced = conveyor_advance(&lane, 0, 3_000);
         assert_eq!(advanced, 3);

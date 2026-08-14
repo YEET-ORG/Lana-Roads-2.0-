@@ -23,16 +23,18 @@ import { Program, web3 } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  MS_PER_SLOT,
   laneObjectCovers,
   laneVehicles,
   tickOf,
+  worldTimeMs,
 } from "../../packages/crossy-world-sdk/src/hazards.js";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
 const MODE = Number(process.env.MODE ?? 1);
-/** Samples inside one authoritative second. */
+/** Samples inside one authoritative step. */
 const STEPS = 20;
 
 const le8 = (v: bigint | number) => {
@@ -66,20 +68,14 @@ async function main() {
   ) as Program<any>;
 
   // ---- 2. the clock -----------------------------------------------------
+  // World time is the rollup's slot. Nothing here reads a wall clock, so
+  // there is no skew to measure any more — only the grid it advances on.
   const slot = await erConn.getSlot("processed");
-  const chainNow = await erConn.getBlockTime(slot);
   const localNow = Math.floor(Date.now() / 1000);
-  const skew = chainNow == null ? null : localNow - chainNow;
   console.log(
-    `clock: rollup says ${chainNow}, this machine says ${localNow}` +
-      (skew == null ? "" : ` — skew ${skew}s`),
+    `clock: slot ${slot} -> world time ${worldTimeMs(slot)}ms ` +
+      `(grid ${MS_PER_SLOT}ms, ${1000 / MS_PER_SLOT} steps per second)`,
   );
-  if (skew != null && skew !== 0) {
-    console.log(
-      `  a ${Math.abs(skew)}s skew is ${Math.abs(skew)} whole hazard tick(s); ` +
-        `traffic is drawn that far from where the program has it`,
-    );
-  }
 
   // ---- 1. the smoothing -------------------------------------------------
   const header: any = await er.account.worldHeader.fetch(world);
@@ -96,8 +92,8 @@ async function main() {
     }
   }
 
-  const startTs = Number(header.startTs.toString());
-  const nowMs = (localNow - startTs) * 1000;
+  void localNow;
+  const nowMs = worldTimeMs(slot);
   let worstLead = 0; // drawn PAST the authoritative tile: the unfair direction
   let worstLag = 0; // drawn behind it: cautious, and covered by the marks
   let worstRow = -1;
@@ -123,7 +119,7 @@ async function main() {
       sinking: lane.sinking,
     };
     for (let s = 0; s < STEPS; s++) {
-      const t = nowMs + (s * 1000) / STEPS;
+      const t = nowMs + (s * MS_PER_SLOT) / STEPS;
       const tick = tickOf(t);
       const drawn = laneVehicles(asLane, row, randomness[row], t);
       for (const v of drawn) {

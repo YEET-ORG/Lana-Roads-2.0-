@@ -46,7 +46,8 @@ pub struct CheckHazard<'info> {
 /// authoritative ER time. A Guardian shield absorbs exactly one lethal
 /// environmental collision.
 pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
     let world_key = ctx.accounts.world.key();
     let world = &mut ctx.accounts.world;
     let run = &mut ctx.accounts.run;
@@ -64,7 +65,7 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
         CrossyError::BadChunkState
     );
 
-    let t_ms = world_time_ms(world, now)?;
+    let t_ms = world_time_ms(world, &clock)?;
     let lane = lane_for_row(&ctx.accounts.chunk, run.y)?;
     let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
 

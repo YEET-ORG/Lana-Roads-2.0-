@@ -74,10 +74,11 @@ pub struct Kick<'info> {
 /// destination must be in bounds, not statically blocked, and unoccupied,
 /// but it MAY be a hazard window: the environment kills, never the kick.
 pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
     let revealed_rows = ctx.accounts.world.revealed_rows;
     let world_day = ctx.accounts.world.day;
-    let t_ms = world_time_ms(&ctx.accounts.world, now)?;
+    let t_ms = world_time_ms(&ctx.accounts.world, &clock)?;
 
     {
         let world = &ctx.accounts.world;
@@ -263,10 +264,11 @@ pub fn use_ability(
     args: AbilityArgs,
     _uniq: u64,
 ) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
     let world = &ctx.accounts.world;
     let class = (*ctx.accounts.class_config).clone().into_inner();
-    let t_ms = world_time_ms(world, now)?;
+    let t_ms = world_time_ms(world, &clock)?;
 
     {
         let caster = &ctx.accounts.caster;

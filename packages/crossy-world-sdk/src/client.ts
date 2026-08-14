@@ -405,6 +405,24 @@ export class CrossyClient {
   }
 
   /**
+   * Follow the rollup's slot, which IS world time.
+   *
+   * Hazards advance on `Clock::slot`, so this is the only clock that
+   * agrees with the program. A subscription rather than a poll: the
+   * validator publishes every slot (~50ms), and between notifications the
+   * caller can carry the value forward with a monotonic timer.
+   */
+  subscribeSlot(onSlot: (slot: number) => void): () => void {
+    const id = this.erConnection.onSlotChange((info) => onSlot(info.slot));
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      void this.erConnection.removeSlotChangeListener(id);
+    };
+  }
+
+  /**
    * The rollup's own wall clock, in milliseconds.
    *
    * Hazards are evaluated against `Clock::unix_timestamp` on the validator,

@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import {
   isTraversable,
   laneObjectCovers,
+  worldTimeMs,
 } from "../../packages/crossy-world-sdk/src/hazards.js";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
@@ -150,7 +151,22 @@ async function main() {
   ) as Program<any>;
 
   const worldAcc = await erRead.account.worldHeader.fetch(world);
-  const startMs = Number(worldAcc.startTs.toString()) * 1000;
+
+  /**
+   * World time, from the rollup slot the program itself reads.
+   *
+   * Hazards advance on `Clock::slot` (~50ms), not on a wall clock, so a
+   * harness that predicts from `Date.now()` is aiming at a world that does
+   * not exist. Between samples the estimate carries forward in real ms,
+   * which is the same rate a slot advances.
+   */
+  let slotAnchor = { slot: await erConn.getSlot("processed"), at: Date.now() };
+  const nowMs = async () => {
+    if (Date.now() - slotAnchor.at > 2_000) {
+      slotAnchor = { slot: await erConn.getSlot("processed"), at: Date.now() };
+    }
+    return worldTimeMs(slotAnchor.slot) + (Date.now() - slotAnchor.at);
+  };
   const lanes: any[] = [];
   for (let c = 0; c < Math.ceil(worldAcc.revealedRows / 16); c++) {
     const chunk = await readOnly.account.chunkDefinition.fetch(chunkPda(c));
@@ -311,7 +327,7 @@ async function main() {
       if (Object.keys(run.state)[0] !== "active") return run;
       if (run.y >= row) return run;
       const ahead = lanes[run.y + 1];
-      const now = Date.now() - startMs;
+      const now = await nowMs();
       // The gap has to survive the transaction's flight, not just exist when
       // the client looks. Hazards advance on whole authoritative seconds and
       // the round trip is a good fraction of one, so a gap checked at send
@@ -361,7 +377,7 @@ async function main() {
           continue;
         }
         if (run.y !== roadRow - 1) break;
-        const now = Date.now() - startMs;
+        const now = await nowMs();
         // Deliberately step under a car that covers the tile on the
         // authoritative tick this move is most likely to execute on.
         if (stableOver((t) => covers(lane, run.x, t), now + 200, now + 900)) {
@@ -408,7 +424,7 @@ async function main() {
           run = await p.er.account.playerRun.fetch(p.runPda());
           if (Object.keys(run.state)[0] !== "active") break;
           if (run.y !== riverRow - 1) break;
-          const now = Date.now() - startMs;
+          const now = await nowMs();
           // Board a log that will still be under the tile on arrival.
           if (stableOver((t) => safeToEnter(lane, run.x, t), now, now + 1_000)) {
             windows++;
@@ -480,7 +496,7 @@ async function main() {
       for (let i = 0; i < 200; i++) {
         run = await p.er.account.playerRun.fetch(p.runPda());
         if (Object.keys(run.state)[0] !== "active") break;
-        const now = Date.now() - startMs;
+        const now = await nowMs();
         // Step in when there is definitely no log under the tile — water is
         // lethal for seconds at a time, so this needs no fine timing.
         if (stableOver((t) => !safeToEnter(lane, run.x, t), now, now + 1_500)) {

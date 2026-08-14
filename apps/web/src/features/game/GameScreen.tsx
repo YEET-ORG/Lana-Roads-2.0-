@@ -7,7 +7,14 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { Direction, pda, ReceiptKind, revivePrice, WorldMode } from "@crossy-world/sdk";
+import {
+  Direction,
+  pda,
+  ReceiptKind,
+  revivePrice,
+  worldTimeMs as slotTimeMs,
+  WorldMode,
+} from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
 import { deathHeadline, WorldScene, type DeathCause } from "../../game/renderer/scene";
 import { preloadAssets } from "../../game/renderer/assets";
@@ -471,15 +478,6 @@ export function GameScreen({
         syncPresence();
       }
       if (worldAcc) {
-        // Anchor the hazard clock to the world's own timeline, measured by
-        // the ROLLUP rather than this browser. The program evaluates
-        // hazards against the validator's clock, so a second of local skew
-        // draws every car a whole tick from where it really is. Falls back
-        // to the local clock only if the chain will not say.
-        const chainNow = await boot.client.chainTimeMs().catch(() => null);
-        scene?.setWorldElapsed(
-          (chainNow ?? Date.now()) - Number(worldAcc.startTs.toString()) * 1000,
-        );
         hudRecordRef.current = worldAcc.recordScore;
         setHud((h) =>
           h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },
@@ -558,6 +556,23 @@ export function GameScreen({
       }
     }, 300);
 
+    // World time IS the rollup's slot — the program reads `Clock::slot`,
+    // so this is the only clock that agrees with it. Between notifications
+    // the scene carries the value forward on its own monotonic timer;
+    // re-anchor only when it has drifted more than a couple of slots, or
+    // every notification would jitter the animation.
+    const stopSlots = boot.client.subscribeSlot((slot) => {
+      const target = slotTimeMs(slot);
+      const scene = sceneRef.current;
+      if (!scene) return;
+      if (Math.abs(scene.worldTimeMs() - target) > 120) scene.setWorldElapsed(target);
+    });
+    // The subscription only speaks on the NEXT slot, so seed it once.
+    void boot.client.erConnection
+      .getSlot("processed")
+      .then((slot) => sceneRef.current?.setWorldElapsed(slotTimeMs(slot)))
+      .catch(() => {});
+
     // Hot-path prewarm: persistent HTTP connection + background blockhash.
     let stopPrewarm: (() => void) | null = null;
     boot.client.prewarmEr().then((stop) => {
@@ -585,6 +600,7 @@ export function GameScreen({
       clearInterval(hazardTimer);
       window.clearTimeout(deathTimerRef.current);
       stopPrewarm?.();
+      stopSlots();
       unsubscribe();
       window.removeEventListener("resize", onResize);
       scene?.destroy();

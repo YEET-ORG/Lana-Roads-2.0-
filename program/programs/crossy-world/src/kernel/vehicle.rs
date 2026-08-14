@@ -84,12 +84,7 @@ pub fn lane_vehicle_class(lane: &LaneDescriptor) -> Option<VehicleClass> {
 /// `hazard::object_index`, and `randomness` is the chunk's committed
 /// `randomness_hash`, so the answer is fixed the moment the chunk is
 /// revealed and identical for everyone who asks.
-pub fn vehicle_variant(
-    randomness: &[u8; 32],
-    row: u16,
-    index: i64,
-    class: VehicleClass,
-) -> u8 {
+pub fn vehicle_variant(randomness: &[u8; 32], row: u16, index: i64, class: VehicleClass) -> u8 {
     let count = class.variant_count() as u64;
     if count <= 1 {
         return 0;
@@ -186,7 +181,10 @@ mod tests {
         ] {
             for index in -50..50i64 {
                 let v = vehicle_variant(&seed, 3, index, class);
-                assert!(v < class.variant_count(), "{class:?} variant {v} out of range");
+                assert!(
+                    v < class.variant_count(),
+                    "{class:?} variant {v} out of range"
+                );
                 assert_eq!(v, vehicle_variant(&seed, 3, index, class), "deterministic");
             }
         }
