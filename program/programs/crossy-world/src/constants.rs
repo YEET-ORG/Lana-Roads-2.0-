@@ -9,6 +9,7 @@ pub mod seeds {
     pub const VARIANT: &[u8] = b"variant";
     pub const CLASS: &[u8] = b"class";
     pub const PLAYER: &[u8] = b"player";
+    pub const IDENTITY: &[u8] = b"identity";
     pub const PULL: &[u8] = b"pull";
     pub const DAILY: &[u8] = b"daily";
     pub const DAILY_VAULT: &[u8] = b"daily_vault";
@@ -27,6 +28,13 @@ pub mod seeds {
 
 /// Seconds in one UTC day; the day id is `floor(unix_ts / DAY_SECONDS)`.
 pub const DAY_SECONDS: i64 = 86_400;
+
+/// Upper bound on the cosmetic agent index a player may choose.
+///
+/// The program has no opinion about the art roster — that is the client's —
+/// but an unbounded value is a value that renders as nothing, so keep it
+/// inside a range any sane roster fits in.
+pub const MAX_AGENT_INDEX: u16 = 256;
 
 /// Milliseconds of world time per rollup slot.
 ///

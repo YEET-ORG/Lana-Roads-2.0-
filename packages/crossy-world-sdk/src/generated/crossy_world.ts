@@ -5391,6 +5391,65 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "setIdentity",
+      "discriminator": [
+        31,
+        31,
+        141,
+        65,
+        178,
+        99,
+        106,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "agent",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "setPause",
       "discriminator": [
         63,
@@ -6074,6 +6133,19 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "playerIdentity",
+      "discriminator": [
+        85,
+        172,
+        40,
+        166,
+        220,
+        193,
+        194,
+        235
+      ]
+    },
+    {
       "name": "playerProfile",
       "discriminator": [
         82,
@@ -6398,6 +6470,19 @@ export type CrossyWorld = {
         252,
         136,
         107
+      ]
+    },
+    {
+      "name": "identitySet",
+      "discriminator": [
+        207,
+        143,
+        155,
+        168,
+        233,
+        175,
+        52,
+        179
       ]
     },
     {
@@ -6911,61 +6996,66 @@ export type CrossyWorld = {
     },
     {
       "code": 6052,
+      "name": "invalidName",
+      "msg": "Display name is empty, too long, or contains characters that cannot be shown"
+    },
+    {
+      "code": 6053,
       "name": "staleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "lethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "effectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "badAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "frontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "frontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "wrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "badGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "badChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "notReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "badVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "capacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -8365,6 +8455,25 @@ export type CrossyWorld = {
       }
     },
     {
+      "name": "identitySet",
+      "docs": [
+        "A player set or changed their display identity."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "agent",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "lane",
       "docs": [
         "Borsh-friendly lane mirror of the kernel `LaneDescriptor`."
@@ -8813,6 +8922,60 @@ export type CrossyWorld = {
           {
             "name": "reviveDeadline",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "playerIdentity",
+      "docs": [
+        "A player's chosen display identity.",
+        "",
+        "Separate from `PlayerProfile` on purpose: profiles already exist on",
+        "chain, and widening a live account would strand every one of them. This",
+        "is additive — a wallet without one is simply anonymous, drawn from its",
+        "address like before.",
+        "",
+        "PDA: [\"identity\", wallet]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Sanitised ASCII, `name_len` bytes significant. Never unique: the",
+              "wallet identifies a player, this only labels them."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "nameLen",
+            "type": "u8"
+          },
+          {
+            "name": "agent",
+            "docs": [
+              "Cosmetic agent the player picked, so everyone draws them the same."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

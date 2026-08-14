@@ -64,6 +64,7 @@ export function LeaderboardSheet({
   const [record, setRecord] = useState<{ score: number; holder: string } | null>(null);
   const [result, setResult] = useState<DayResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
   const me = boot.wallet.publicKey.toBase58();
 
   const load = useCallback(async () => {
@@ -75,6 +76,12 @@ export function LeaderboardSheet({
         boot.client.getDaily(day).catch(() => null),
       ]);
       setRows(board);
+      // Names, in one request for the whole board. A player who never set
+      // one keeps the species-and-address label.
+      const ids = await boot.client
+        .getIdentities(board.slice(0, TOP_N).map((r) => r.wallet))
+        .catch(() => null);
+      if (ids) setNames(new Map([...ids].map(([w, id]) => [w, id.name])));
       setError(null);
       setRecord(
         header
@@ -173,7 +180,8 @@ export function LeaderboardSheet({
               <div className="lb-result__label">Winner</div>
               <div className="lb-result__winner">
                 <Icon name="trophy" size={18} />
-                {result.winner === me ? "You" : nameFor(result.winner)}
+                {names.get(result.winner) ??
+                  (result.winner === me ? "You" : nameFor(result.winner))}
                 <span className="lb-result__wallet">{shortWallet(result.winner)}</span>
               </div>
               <div className="lb-result__prize">{usdc(result.winnerAmount)}</div>
@@ -200,7 +208,8 @@ export function LeaderboardSheet({
           {record && record.score > 0 ? (
             <Pill tone="info" icon="flag">
               record row {record.score} ·{" "}
-              {record.holder === me ? "you" : nameFor(record.holder)}
+              {names.get(record.holder) ??
+                (record.holder === me ? "you" : nameFor(record.holder))}
             </Pill>
           ) : (
             <Pill tone="neutral" icon="flag">
@@ -234,7 +243,10 @@ export function LeaderboardSheet({
               <li key={wallet} className={`lb-row${mine ? " is-me" : ""}`}>
                 <span className={`lb-rank lb-rank--${i < 3 ? i + 1 : "n"}`}>{i + 1}</span>
                 <span className="lb-who">
-                  <span className="lb-name">{mine ? "You" : nameFor(wallet)}</span>
+                  <span className="lb-name">
+                    {names.get(wallet) ?? (mine ? "You" : nameFor(wallet))}
+                    {mine && names.has(wallet) && <span className="lb-you">you</span>}
+                  </span>
                   <span className="lb-wallet">{shortWallet(wallet)}</span>
                 </span>
                 {r.live && isToday && !settled && (

@@ -37,3 +37,25 @@ pub struct PlayerProfile {
     pub version: u16,
     pub bump: u8,
 }
+
+/// A player's chosen display identity.
+///
+/// Separate from `PlayerProfile` on purpose: profiles already exist on
+/// chain, and widening a live account would strand every one of them. This
+/// is additive — a wallet without one is simply anonymous, drawn from its
+/// address like before.
+///
+/// PDA: ["identity", wallet]
+#[account]
+#[derive(InitSpace)]
+pub struct PlayerIdentity {
+    pub wallet: Pubkey,
+    /// Sanitised ASCII, `name_len` bytes significant. Never unique: the
+    /// wallet identifies a player, this only labels them.
+    pub name: [u8; crate::kernel::name::NAME_MAX],
+    pub name_len: u8,
+    /// Cosmetic agent the player picked, so everyone draws them the same.
+    pub agent: u16,
+    pub version: u16,
+    pub bump: u8,
+}

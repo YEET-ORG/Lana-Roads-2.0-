@@ -40,6 +40,7 @@ export const SEEDS = {
   variant: Buffer.from("variant"),
   class: Buffer.from("class"),
   player: Buffer.from("player"),
+  identity: Buffer.from("identity"),
   pull: Buffer.from("pull"),
   daily: Buffer.from("daily"),
   dailyVault: Buffer.from("daily_vault"),

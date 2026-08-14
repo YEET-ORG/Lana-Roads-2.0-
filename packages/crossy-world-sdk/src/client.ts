@@ -107,6 +107,15 @@ export interface TxActivity {
   durationMs?: number;
 }
 
+/** A player's chosen, on-chain display identity. */
+export interface PlayerIdentity {
+  wallet: PublicKey;
+  /** Sanitised by the program; safe to render as-is. */
+  name: string;
+  /** Cosmetic agent index — what every other client should draw them as. */
+  agent: number;
+}
+
 /** One row of a day's standings. */
 export interface LeaderboardEntry {
   wallet: PublicKey;
@@ -443,6 +452,66 @@ export class CrossyClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Publish this wallet's display name and chosen agent.
+   *
+   * Wallet-signed and on the base layer: it is who you are, not what your
+   * run is doing, so a session key has no business changing it.
+   */
+  async setIdentity(params: { name: string; agent: number }): Promise<string> {
+    return this.track("Saving your name", "base", () =>
+      this.program.methods
+        .setIdentity(params.name, params.agent)
+        .accountsPartial({
+          identity: pda.identity(this.wallet.publicKey),
+          wallet: this.wallet.publicKey,
+        })
+        .rpc(),
+    );
+  }
+
+  /**
+   * Display identities for a set of wallets, in one request.
+   *
+   * The leaderboard needs twenty of these and the world needs one per
+   * visible player, so they are fetched together rather than one at a
+   * time. A wallet without an identity is simply absent from the map — it
+   * has not chosen a name, and the caller falls back to its address.
+   */
+  async getIdentities(wallets: PublicKey[]): Promise<Map<string, PlayerIdentity>> {
+    const out = new Map<string, PlayerIdentity>();
+    if (!wallets.length) return out;
+    const addresses = wallets.map((w) => pda.identity(w));
+    // getMultipleAccounts caps at 100 per request.
+    for (let i = 0; i < addresses.length; i += 100) {
+      const slice = addresses.slice(i, i + 100);
+      const infos = await this.connection.getMultipleAccountsInfo(slice).catch(() => []);
+      infos.forEach((info, j) => {
+        if (!info) return;
+        try {
+          const acc: any = this.program.coder.accounts.decode(
+            "playerIdentity",
+            Buffer.from(info.data),
+          );
+          const len = acc.nameLen as number;
+          const name = Buffer.from(acc.name.slice(0, len)).toString("utf8");
+          out.set(wallets[i + j].toBase58(), {
+            wallet: acc.wallet as PublicKey,
+            name,
+            agent: acc.agent as number,
+          });
+        } catch {
+          /* not an identity account */
+        }
+      });
+    }
+    return out;
+  }
+
+  async getIdentity(wallet = this.wallet.publicKey): Promise<PlayerIdentity | null> {
+    return (await this.getIdentities([wallet])).get(wallet.toBase58()) ?? null;
   }
 
   async getProfile(wallet = this.wallet.publicKey) {

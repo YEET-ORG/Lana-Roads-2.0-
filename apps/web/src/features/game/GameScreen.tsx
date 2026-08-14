@@ -12,6 +12,7 @@ import {
   pda,
   ReceiptKind,
   revivePrice,
+  MS_PER_SLOT,
   worldTimeMs as slotTimeMs,
   WorldMode,
 } from "@crossy-world/sdk";
@@ -27,6 +28,7 @@ import {
 } from "../../game/simulation/hazards";
 import { Button, Confetti, CountUp, Icon, IconButton, Modal } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
+import { agentId } from "../../game/renderer/assets";
 import { haptic, useSettings } from "../../lib/settings";
 import { SettingsSheet } from "../settings/SettingsSheet";
 import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
@@ -269,6 +271,24 @@ export function GameScreen({
     occupiedRef.current = remotes;
 
     /**
+     * Who everyone is: name and chosen agent, from their on-chain identity.
+     *
+     * Cached across the run because it almost never changes and every
+     * remote push would otherwise want it. Refreshed with the roster.
+     */
+    const identities = new Map<string, { name: string; agent: number }>();
+    const drawRemotes = () =>
+      scene?.setRemotes(
+        [...remotes.entries()].map(([w, r]) => ({
+          wallet: w,
+          x: r.x,
+          y: r.y,
+          agent: identities.get(w)?.agent,
+          name: identities.get(w)?.name,
+        })),
+      );
+
+    /**
      * Headcount for the HUD. `remotes` only ever holds active runs, so the
      * live population is those plus us when we are still standing.
      */
@@ -386,9 +406,7 @@ export function GameScreen({
             hazardNonce: run.hazardNonce,
           });
         else remotes.delete(wallet);
-        scene?.setRemotes(
-          [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
-        );
+        drawRemotes();
       }
       syncPresence();
     };
@@ -472,9 +490,15 @@ export function GameScreen({
             hazardNonce: r.hazardNonce,
           });
         }
-        scene?.setRemotes(
-          [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
-        );
+        // Names and agents for anyone new, then draw.
+        const unknown = [...remotes.keys()].filter((w) => !identities.has(w));
+        if (unknown.length) {
+          const found = await boot.client
+            .getIdentities(unknown.map((w) => new PublicKey(w)))
+            .catch(() => null);
+          if (found) for (const [w, id] of found) identities.set(w, id);
+        }
+        drawRemotes();
         syncPresence();
       }
       if (worldAcc) {
@@ -556,21 +580,54 @@ export function GameScreen({
       }
     }, 300);
 
-    // World time IS the rollup's slot — the program reads `Clock::slot`,
-    // so this is the only clock that agrees with it. Between notifications
-    // the scene carries the value forward on its own monotonic timer;
-    // re-anchor only when it has drifted more than a couple of slots, or
-    // every notification would jitter the animation.
+    // Your own name and agent, so the world agrees with the menu.
+    void boot.client
+      .getIdentity()
+      .then((id) => {
+        if (!id) return;
+        sceneRef.current?.setLocalName(id.name);
+        sceneRef.current?.setLocalModel(agentId(id.agent));
+      })
+      .catch(() => {});
+
+    // World time IS the rollup's slot — the program reads `Clock::slot`, so
+    // this is the only clock that agrees with it. Following it is a servo,
+    // not a fetch:
+    //
+    //   - world time advances 50ms per SLOT, and slots arrive every ~53ms,
+    //     so the local rate has to be measured rather than assumed, or the
+    //     animation runs ~7% fast and lurches backwards on every correction;
+    //   - the correction itself is eased in, so being slightly out costs a
+    //     few milliseconds a frame instead of a visible jump.
+    let lastSlot = 0;
+    let lastSlotAt = 0;
+    let msPerSlot = 53; // measured on devnet; converges to the truth
     const stopSlots = boot.client.subscribeSlot((slot) => {
-      const target = slotTimeMs(slot);
+      const at = performance.now();
+      if (lastSlot && slot > lastSlot) {
+        const observed = (at - lastSlotAt) / (slot - lastSlot);
+        // Ignore obvious outliers (a delayed batch of notifications).
+        if (observed > 20 && observed < 200) msPerSlot += (observed - msPerSlot) * 0.1;
+      }
+      lastSlot = slot;
+      lastSlotAt = at;
+
       const scene = sceneRef.current;
       if (!scene) return;
-      if (Math.abs(scene.worldTimeMs() - target) > 120) scene.setWorldElapsed(target);
+      const rate = MS_PER_SLOT / msPerSlot;
+      const target = slotTimeMs(slot);
+      const error = target - scene.worldTimeMs();
+      // A big gap means we just connected, or the tab was asleep: take the
+      // chain's word for it. Otherwise close the gap gently.
+      scene.setWorldClock(
+        Math.abs(error) > 400 ? target : scene.worldTimeMs() + error * 0.15,
+        rate,
+      );
     });
     // The subscription only speaks on the NEXT slot, so seed it once.
     void boot.client.erConnection
       .getSlot("processed")
-      .then((slot) => sceneRef.current?.setWorldElapsed(slotTimeMs(slot)))
+      .then((slot) => sceneRef.current?.setWorldClock(slotTimeMs(slot)))
       .catch(() => {});
 
     // Hot-path prewarm: persistent HTTP connection + background blockhash.

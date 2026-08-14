@@ -1189,3 +1189,53 @@
   opacity: 0.3;
   cursor: default;
 }
+
+/* "you" tag when a row already carries the player's chosen name. */
+.lb-you {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--grass-600);
+  color: var(--paper);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+/* Name entry — one field, sized like the display type it will become. */
+.name-input {
+  width: 100%;
+  padding: 12px 14px;
+  margin: 10px 0;
+  border-radius: var(--ds-radius-m);
+  border: 1px solid var(--ds-line-strong);
+  background: var(--ds-surface-deep);
+  color: var(--ds-text);
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 0.5px;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--grass-400);
+  box-shadow: 0 0 0 3px rgba(75, 224, 143, 0.18);
+}
+
+.agent-sub--button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* The nameplate is pointer-transparent so swipes on the hero pass through
+   it — but the name button inside it has to be clickable, or the only way
+   to set a name is unreachable. */
+.agent-sub--button {
+  pointer-events: auto;
+}

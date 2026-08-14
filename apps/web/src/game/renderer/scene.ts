@@ -29,6 +29,17 @@ export interface RemotePlayer {
   wallet: string;
   x: number;
   y: number;
+  /**
+   * The agent this player CHOSE, read from their on-chain identity.
+   *
+   * Without it every client guessed from the wallet hash, so a player who
+   * picked a penguin appeared to everyone else as whatever their address
+   * hashed to. Absent for a wallet that has never set an identity, which
+   * falls back to that hash.
+   */
+  agent?: number;
+  /** Display name from the same account; absent when they have not set one. */
+  name?: string;
 }
 
 export type DeathCause = "water" | "impact" | "train";
@@ -80,6 +91,46 @@ const WIDTH = 64;
 /** Chunks always carry randomness; this only covers a row seen before its
  * chunk finished loading. */
 const EMPTY_SEED = new Uint8Array(32);
+
+/**
+ * Draw a name onto a sprite.
+ *
+ * Chunky and high-contrast because it is read at a glance over a moving
+ * world: heavy weight, dark outline, no background plate to fight with the
+ * scene. The canvas is oversampled so it stays crisp when the camera is
+ * close.
+ */
+function makeNameplate(name: string): THREE.Sprite {
+  const scale = 4;
+  const font = 34 * scale;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `800 ${font}px Nunito, system-ui, sans-serif`;
+  const width = Math.ceil(ctx.measureText(name).width) + 24 * scale;
+  canvas.width = width;
+  canvas.height = Math.ceil(font * 1.6);
+  const c = canvas.getContext("2d")!;
+  c.font = `800 ${font}px Nunito, system-ui, sans-serif`;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.lineJoin = "round";
+  c.lineWidth = 8 * scale;
+  c.strokeStyle = "rgba(8, 17, 31, 0.92)";
+  c.strokeText(name, canvas.width / 2, canvas.height / 2);
+  c.fillStyle = "#fffdf5";
+  c.fillText(name, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+  );
+  // Height fixed in world units; width follows the text so nothing squashes.
+  const height = 0.34;
+  sprite.scale.set((height * canvas.width) / canvas.height, height, 1);
+  return sprite;
+}
 
 /** yaw per Direction (Forward = -z in scene space; the VoxelAnimals models
  * natively face -z, so Forward is yaw 0). */
@@ -143,6 +194,37 @@ class PlayerRig {
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.y = 0.02;
     this.root.add(this.shadow);
+  }
+
+  /**
+   * A name floating over the player.
+   *
+   * A sprite rather than DOM: it has to sit in the world, behind the
+   * things in front of it and above the player as the camera moves, and
+   * following a 3D position with an HTML overlay costs a reprojection
+   * every frame for every player.
+   */
+  private plate: THREE.Sprite | null = null;
+  private plateName = "";
+
+  currentName(): string {
+    return this.plateName;
+  }
+
+  setName(name: string | undefined, height: number) {
+    if ((name ?? "") === this.plateName) return;
+    this.plateName = name ?? "";
+    if (this.plate) {
+      this.root.remove(this.plate);
+      this.plate.material.map?.dispose();
+      this.plate.material.dispose();
+      this.plate = null;
+    }
+    if (!name) return;
+    const sprite = makeNameplate(name);
+    sprite.position.y = height + 0.42;
+    this.root.add(sprite);
+    this.plate = sprite;
   }
 
   /** Swap the visual model in place (agent picker preview). */
@@ -325,6 +407,7 @@ export class WorldScene {
   private laneSeeds = new Map<number, Uint8Array>();
   /** Conveyor index and model currently held by each mover slot. */
   private moverSlots = new Map<number, Array<{ index: number; assetId: string }>>();
+  private remoteModels = new Map<string, string>();
   private movers = new Map<number, THREE.Object3D[]>();
   /**
    * One flat mark per traffic slot, drawn on the AUTHORITATIVE tiles.
@@ -407,8 +490,25 @@ export class WorldScene {
     emissiveIntensity: 1.1,
   });
 
+  /**
+   * World time is not wall time.
+   *
+   * The program defines it as `slot * 50ms`, but slots do not arrive every
+   * 50ms — measured 53.4ms on devnet-as. Advancing this clock one
+   * millisecond per real millisecond therefore runs ~7% fast, and a client
+   * that only corrects on a threshold spends its life snapping backwards.
+   * The rate is part of the clock.
+   */
+  private worldRate = 1;
+
+  setWorldClock(nowMs: number, rate = this.worldRate) {
+    this.worldRate = rate;
+    this.worldTimeOffsetMs = nowMs - (performance.now() - this.startMs) * rate;
+  }
+
+  /** Practice mode: no chain, so world time simply runs at wall rate. */
   setWorldElapsed(elapsedMs: number) {
-    this.worldTimeOffsetMs = elapsedMs - (performance.now() - this.startMs);
+    this.setWorldClock(elapsedMs, 1);
   }
 
   laneAt(row: number): Lane | undefined {
@@ -416,7 +516,32 @@ export class WorldScene {
   }
 
   worldTimeMs(): number {
-    return performance.now() - this.startMs + this.worldTimeOffsetMs;
+    return (performance.now() - this.startMs) * this.worldRate + this.worldTimeOffsetMs;
+  }
+
+  /**
+   * Development hook: read the world clock from outside the bundle.
+   *
+   * Whether the screen agrees with the chain is a question about a running
+   * client, and it cannot be answered from the outside without this. Dev
+   * builds only — stripped from production.
+   */
+  private exposeClock() {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as {
+      __crossyClock?: () => number;
+      __crossyRemotes?: () => unknown[];
+    };
+    w.__crossyClock = () => this.worldTimeMs();
+    // Who the world thinks the other players are. Whether a remote is drawn
+    // as the agent they CHOSE is not visible from a screenshot when they
+    // are off camera, and it is exactly the thing that used to be wrong.
+    w.__crossyRemotes = () =>
+      [...this.players.entries()].map(([wallet, rig]) => ({
+        wallet,
+        model: this.remoteModels.get(wallet) ?? "(hashed)",
+        name: rig.currentName(),
+      }));
   }
 
   constructor(
@@ -462,6 +587,7 @@ export class WorldScene {
     this.scene.add(this.local.root);
 
     this.resize();
+    this.exposeClock();
     this.clock.start();
     this.loop();
   }
@@ -903,6 +1029,11 @@ export class WorldScene {
     this.local.flourish();
   }
 
+  /** Your own name, over your own head — proof the identity is live. */
+  setLocalName(name: string | undefined) {
+    this.local.setName(name, PLAYER_HEIGHT);
+  }
+
   flourishLocal() {
     this.local.flourish();
     sfx.hop();
@@ -1018,9 +1149,11 @@ export class WorldScene {
       seen.add(p.wallet);
       let rig = this.players.get(p.wallet);
       const target = new THREE.Vector3(p.x + 0.5, 0, -p.y);
+      // The agent they chose, or their address if they never chose one.
+      const modelId = agentId(p.agent ?? hashWallet(p.wallet));
       if (!rig) {
         rig = new PlayerRig(
-          agentId(hashWallet(p.wallet)),
+          modelId,
           PLAYER_HEIGHT * 0.92,
           this.shadowMat,
           this.shadowGeo,
@@ -1029,6 +1162,12 @@ export class WorldScene {
         this.players.set(p.wallet, rig);
         this.scene.add(rig.root);
       }
+      // A player can change agent mid-session; follow it.
+      if (this.remoteModels.get(p.wallet) !== modelId) {
+        this.remoteModels.set(p.wallet, modelId);
+        rig.setModel(modelId);
+      }
+      rig.setName(p.name, PLAYER_HEIGHT * 0.92);
       const prev = this.remoteTargets.get(p.wallet);
       if (!prev || !prev.equals(target)) {
         this.remoteTargets.set(p.wallet, target);
@@ -1042,6 +1181,7 @@ export class WorldScene {
         this.scene.remove(rig.root);
         this.players.delete(wallet);
         this.remoteTargets.delete(wallet);
+        this.remoteModels.delete(wallet);
       }
     }
   }

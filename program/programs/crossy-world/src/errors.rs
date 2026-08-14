@@ -124,6 +124,8 @@ pub enum CrossyError {
     Immobilized,
     #[msg("movement cadence exceeded for this slot")]
     TooFast,
+    #[msg("Display name is empty, too long, or contains characters that cannot be shown")]
+    InvalidName,
     #[msg("hazard nonce is stale")]
     StaleHazardNonce,
     #[msg("tile is lethal at the authoritative time")]

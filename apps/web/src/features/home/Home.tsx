@@ -18,7 +18,15 @@ import { WorldScene } from "../../game/renderer/scene";
 import { EntryFlow } from "../entry/EntryFlow";
 import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
 import { MenuBackdrop } from "./MenuBackdrop";
-import { Button, Icon, IconButton, Notice, Sheet, StatGrid } from "../../design-system";
+import {
+  Button,
+  Icon,
+  IconButton,
+  Modal,
+  Notice,
+  Sheet,
+  StatGrid,
+} from "../../design-system";
 import type { Route } from "../../app/App";
 
 interface DayInfo {
@@ -67,8 +75,15 @@ export function Home({
   const [agentIdx, setAgentIdx] = useState(
     () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
   );
+  /** This wallet's on-chain identity: what everyone else sees. */
+  const [myName, setMyName] = useState<string | null>(null);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const menuSceneRef = useRef<WorldScene | null>(null);
   const swipeRef = useRef<{ x: number; t: number } | null>(null);
+  const agentSaveRef = useRef(0);
 
   useEffect(() => {
     if (!boot) {
@@ -188,6 +203,25 @@ export function Home({
     };
   }, [boot, info]);
 
+  // Load the identity once; it is what other players draw and label us by.
+  useEffect(() => {
+    if (!boot) return;
+    let live = true;
+    boot.client
+      .getIdentity()
+      .then((id) => {
+        if (!live || !id) return;
+        setMyName(id.name);
+        setAgentIdx(id.agent);
+        setAgentChoice(id.agent);
+        menuSceneRef.current?.setLocalModel(agentId(id.agent));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [boot]);
+
   useEffect(() => {
     if (!info) return;
     const id = setInterval(() => {
@@ -207,6 +241,35 @@ export function Home({
     setAgentChoice(next);
     menuSceneRef.current?.setLocalModel(agentId(next));
     sfx.hop();
+    // A choice kept in this browser is a choice nobody else can see. Publish
+    // it — debounced, because the picker is a thing you flick through.
+    if (!boot || myName == null) return;
+    window.clearTimeout(agentSaveRef.current);
+    agentSaveRef.current = window.setTimeout(() => {
+      void boot.client.setIdentity({ name: myName, agent: next }).catch(() => {});
+    }, 1200);
+  }
+
+  async function saveIdentity() {
+    if (!boot) return;
+    setSaving(true);
+    setNameError(null);
+    try {
+      await boot.client.setIdentity({ name: nameDraft.trim(), agent: agentIdx });
+      setMyName(nameDraft.trim());
+      setNameOpen(false);
+      sfx.confirm();
+    } catch (e) {
+      // The program is the authority on what a name may be; show what it said.
+      const why = `${(e as { message?: string }).message ?? e}`;
+      setNameError(
+        /InvalidName/.test(why)
+          ? "2-20 characters: letters, numbers, space, . _ - '"
+          : why.slice(0, 120),
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function onSwipeStart(e: PointerEvent) {
@@ -273,10 +336,24 @@ export function Home({
             <span className="agent-name" key={agentIdx}>
               {agentName(agentIdx)}
             </span>
-            <span className="agent-sub">
-              <Icon name="paw" size={11} style={{ verticalAlign: "-1px" }} /> swipe or tap
-              to switch
-            </span>
+            {boot ? (
+              <button
+                className="agent-sub agent-sub--button"
+                onClick={() => {
+                  sfx.click();
+                  setNameDraft(myName ?? "");
+                  setNameOpen(true);
+                }}
+              >
+                <Icon name="user" size={11} style={{ verticalAlign: "-1px" }} />{" "}
+                {myName ? myName : "set your name"}
+              </button>
+            ) : (
+              <span className="agent-sub">
+                <Icon name="paw" size={11} style={{ verticalAlign: "-1px" }} /> swipe or
+                tap to switch
+              </span>
+            )}
           </div>
           <IconButton
             icon="chevron-right"
@@ -416,6 +493,45 @@ export function Home({
             </Button>
           </div>
         </Sheet>
+      )}
+
+      {nameOpen && boot && (
+        <Modal
+          title="Your name"
+          ariaLabel="Set your name"
+          onClose={() => setNameOpen(false)}
+        >
+          <p className="ds-dim">
+            Shown on the leaderboard and over your head in the world. Everyone sees it, so
+            the program checks it: 2-20 characters, letters, numbers, space and{" "}
+            <code>. _ - '</code>
+          </p>
+          <input
+            className="name-input"
+            value={nameDraft}
+            maxLength={20}
+            autoFocus
+            placeholder="e.g. Lana"
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && nameDraft.trim().length >= 2) void saveIdentity();
+            }}
+          />
+          {nameError && <Notice tone="error">{nameError}</Notice>}
+          <div className="row">
+            <Button
+              variant="primary"
+              busy={saving}
+              disabled={nameDraft.trim().length < 2}
+              onClick={saveIdentity}
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="ghost" onClick={() => setNameOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {boardOpen != null && boot && info && (

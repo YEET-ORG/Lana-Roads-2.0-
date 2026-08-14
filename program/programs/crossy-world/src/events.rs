@@ -302,3 +302,10 @@ pub struct PayoutLegCompleted {
     pub amount: u64,
     pub destination: Pubkey,
 }
+
+/// A player set or changed their display identity.
+#[event]
+pub struct IdentitySet {
+    pub wallet: Pubkey,
+    pub agent: u16,
+}

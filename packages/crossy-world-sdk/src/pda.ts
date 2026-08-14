@@ -40,6 +40,7 @@ export const pda = {
   classConfig: (classId: number, version: number) =>
     find([SEEDS.class, le16(classId), le16(version)]),
   profile: (wallet: PublicKey) => find([SEEDS.player, wallet.toBuffer()]),
+  identity: (wallet: PublicKey) => find([SEEDS.identity, wallet.toBuffer()]),
   pull: (wallet: PublicKey, pullNonce: number) =>
     find([SEEDS.pull, wallet.toBuffer(), le32(pullNonce)]),
   daily: (day: bigint | number) => find([SEEDS.daily, le64(day)]),

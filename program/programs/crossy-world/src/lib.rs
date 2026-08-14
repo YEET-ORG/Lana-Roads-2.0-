@@ -146,6 +146,10 @@ pub mod crossy_world {
         instructions::profile::ensure_profile(ctx)
     }
 
+    pub fn set_identity(ctx: Context<SetIdentity>, name: String, agent: u16) -> Result<()> {
+        instructions::profile::set_identity(ctx, name, agent)
+    }
+
     pub fn claim_starter(ctx: Context<ClaimStarter>) -> Result<()> {
         instructions::profile::claim_starter(ctx)
     }

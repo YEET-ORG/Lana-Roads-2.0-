@@ -5385,6 +5385,65 @@
       ]
     },
     {
+      "name": "set_identity",
+      "discriminator": [
+        31,
+        31,
+        141,
+        65,
+        178,
+        99,
+        106,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "agent",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "set_pause",
       "discriminator": [
         63,
@@ -6068,6 +6127,19 @@
       ]
     },
     {
+      "name": "PlayerIdentity",
+      "discriminator": [
+        85,
+        172,
+        40,
+        166,
+        220,
+        193,
+        194,
+        235
+      ]
+    },
+    {
       "name": "PlayerProfile",
       "discriminator": [
         82,
@@ -6392,6 +6464,19 @@
         252,
         136,
         107
+      ]
+    },
+    {
+      "name": "IdentitySet",
+      "discriminator": [
+        207,
+        143,
+        155,
+        168,
+        233,
+        175,
+        52,
+        179
       ]
     },
     {
@@ -6905,61 +6990,66 @@
     },
     {
       "code": 6052,
+      "name": "InvalidName",
+      "msg": "Display name is empty, too long, or contains characters that cannot be shown"
+    },
+    {
+      "code": 6053,
       "name": "StaleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "LethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "EffectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "BadAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "FrontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "FrontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "WrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "BadGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "BadChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "NotReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "BadVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "CapacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -8359,6 +8449,25 @@
       }
     },
     {
+      "name": "IdentitySet",
+      "docs": [
+        "A player set or changed their display identity."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "agent",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "Lane",
       "docs": [
         "Borsh-friendly lane mirror of the kernel `LaneDescriptor`."
@@ -8807,6 +8916,60 @@
           {
             "name": "revive_deadline",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerIdentity",
+      "docs": [
+        "A player's chosen display identity.",
+        "",
+        "Separate from `PlayerProfile` on purpose: profiles already exist on",
+        "chain, and widening a live account would strand every one of them. This",
+        "is additive — a wallet without one is simply anonymous, drawn from its",
+        "address like before.",
+        "",
+        "PDA: [\"identity\", wallet]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Sanitised ASCII, `name_len` bytes significant. Never unique: the",
+              "wallet identifies a player, this only labels them."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "name_len",
+            "type": "u8"
+          },
+          {
+            "name": "agent",
+            "docs": [
+              "Cosmetic agent the player picked, so everyone draws them the same."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
