@@ -364,29 +364,45 @@ async function main() {
     let run: any = await walkTo(p, roadRow - 1);
     let died = false;
     if (Object.keys(run.state)[0] === "active" && run.y === roadRow - 1) {
-      // Wait for a car to cover the tile straight ahead, then step into it.
+      // Stand on the road and let traffic arrive.
+      //
+      // Timing a step INTO a moving car stopped being possible when hazards
+      // moved to the rollup's 50ms grid: a car now crosses a tile in about
+      // 400ms, which is the flight time of the transaction trying to hit
+      // it. Parking tests the same rule the same way a player meets it —
+      // you are on the road, a car comes, you die — and it does not race.
       const lane = lanes[roadRow];
-      for (let i = 0; i < 300; i++) {
+      for (let attempt = 0; attempt < 40 && !died; attempt++) {
         run = await p.er.account.playerRun.fetch(p.runPda());
         if (Object.keys(run.state)[0] !== "active") break;
-        if (run.y === roadRow) {
-          // Survived the crossing (the car had moved on by the time the
-          // transaction executed). Step back and try to time it again.
-          await move(p, 1).catch(() => {});
-          await sleep(150);
+        if (run.y === roadRow - 1) {
+          // Step up when the tile ahead is clear enough to survive arrival.
+          const now = await nowMs();
+          if (!stableOver((t) => !covers(lane, run.x, t), now, now + 400)) {
+            await sleep(120);
+            continue;
+          }
+          await move(p, 0).catch(() => {});
+          await sleep(200);
           continue;
         }
-        if (run.y !== roadRow - 1) break;
-        const now = await nowMs();
-        // Deliberately step under a car that covers the tile on the
-        // authoritative tick this move is most likely to execute on.
-        if (stableOver((t) => covers(lane, run.x, t), now + 200, now + 900)) {
-          await move(p, 0).catch(() => {});
-          run = await p.er.account.playerRun.fetch(p.runPda());
-          died = Object.keys(run.state)[0] !== "active";
-          if (died) break;
-        }
-        await sleep(120);
+        if (run.y !== roadRow) break;
+        // On the road: collisions only resolve when someone asks, so ask.
+        const here = sectorPda(Math.floor(run.x / 8), Math.floor(run.y / 8));
+        await p.er.methods
+          .checkHazard(run.hazardNonce)
+          .accountsPartial({
+            world,
+            run: p.runPda(),
+            sector: here,
+            driftSector: null,
+            chunk: chunkPda(Math.floor(run.y / 16)),
+          })
+          .rpc({ skipPreflight: true, commitment: "processed" })
+          .catch(() => {});
+        await sleep(250);
+        run = await p.er.account.playerRun.fetch(p.runPda());
+        died = Object.keys(run.state)[0] !== "active";
       }
     }
     record(

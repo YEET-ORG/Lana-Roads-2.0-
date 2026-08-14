@@ -618,9 +618,14 @@ export function GameScreen({
       const target = slotTimeMs(slot);
       const error = target - scene.worldTimeMs();
       // A big gap means we just connected, or the tab was asleep: take the
-      // chain's word for it. Otherwise close the gap gently.
+      // chain's word for it. Otherwise correct by a couple of milliseconds
+      // at a time. A step is 50ms now, so a correction of even a tenth of
+      // a step moves every car a visible fraction of a tile — and this
+      // fires twenty times a second. Bound the correction, not the
+      // fraction; the rate tracking is what actually keeps us aligned.
+      const nudge = Math.sign(error) * Math.min(Math.abs(error), 2);
       scene.setWorldClock(
-        Math.abs(error) > 400 ? target : scene.worldTimeMs() + error * 0.15,
+        Math.abs(error) > 300 ? target : scene.worldTimeMs() + nudge,
         rate,
       );
     });

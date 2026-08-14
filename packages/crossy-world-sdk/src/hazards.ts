@@ -93,9 +93,16 @@ export function objectTileX(lane: Lane, index: number, tMs: number): number {
     : index * lane.gapTiles - traveled;
 }
 
-/** The authoritative tick containing `tMs`. Hazards only move on these. */
+/**
+ * The authoritative tick containing `tMs`. Hazards only move on these.
+ *
+ * This MUST be the program's own step, which is one rollup slot. Quantising
+ * to anything coarser throws away motion the chain actually has: the
+ * renderer glides toward a position the program left twenty steps ago, then
+ * lurches when the coarse tick finally rolls.
+ */
 export function tickOf(tMs: number): number {
-  return Math.floor(tMs / 1000) * 1000;
+  return Math.floor(tMs / MS_PER_SLOT) * MS_PER_SLOT;
 }
 
 /** Every object of this lane with any part inside the world, at `tMs`. */
@@ -321,8 +328,11 @@ export function laneVehicles(
   // the car is shown arriving at the tile the program already considers
   // occupied.
   const tick = tickOf(tMs);
-  const frac = Math.min(1, Math.max(0, (tMs - tick) / 1000));
-  const prevTick = Math.max(0, tick - 1000);
+  // Fraction of the way through the current STEP, which is one slot — the
+  // same grid `tickOf` uses. Dividing by anything else would leave the car
+  // stalled near its previous tile and then snap.
+  const frac = Math.min(1, Math.max(0, (tMs - tick) / MS_PER_SLOT));
+  const prevTick = Math.max(0, tick - MS_PER_SLOT);
   return laneObjects(lane, tick).map(({ index, x }) => {
     const variant = vehicleVariant(randomness, row, index, cls);
     // Conveyor indices are stable and positions are linear in `traveled`,

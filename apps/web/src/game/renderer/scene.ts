@@ -536,6 +536,16 @@ export class WorldScene {
     // Who the world thinks the other players are. Whether a remote is drawn
     // as the agent they CHOSE is not visible from a screenshot when they
     // are off camera, and it is exactly the thing that used to be wrong.
+    // What the GPU is being asked to do each frame. "Laggy" has two very
+    // different causes — too much work, or a slow renderer — and draw
+    // calls are what separates them.
+    (window as unknown as { __crossyStats?: () => unknown }).__crossyStats = () => ({
+      calls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      geometries: this.renderer.info.memory.geometries,
+      textures: this.renderer.info.memory.textures,
+      programs: this.renderer.info.programs?.length ?? 0,
+    });
     w.__crossyRemotes = () =>
       [...this.players.entries()].map(([wallet, rig]) => ({
         wallet,
@@ -1002,6 +1012,12 @@ export class WorldScene {
   setLocal(x: number, y: number, facing?: number) {
     const target = new THREE.Vector3(x + 0.5, 0, -y);
     const dist = this.local.root.position.distanceTo(target);
+    // Whether the TILE changed, not whether the mesh has caught up to it.
+    // Authority repeats the same position several times a second (the
+    // hazard crank rewrites the run), and mid-hop the rig is by definition
+    // not at its target — restarting the hop on every one of those made
+    // the player stutter in place and chirp on each repeat.
+    const sameTile = this.localTarget.distanceToSquared(target) < 1e-9;
     this.localTarget.copy(target);
     if (dist > 2.5) {
       // Large correction / spawn: ground snap with a network pulse.
@@ -1013,7 +1029,7 @@ export class WorldScene {
         up: 1.4,
         size: 0.06,
       });
-    } else if (dist > 1e-6) {
+    } else if (!sameTile) {
       this.local.hopTo(target, facing);
       sfx.hop();
     }

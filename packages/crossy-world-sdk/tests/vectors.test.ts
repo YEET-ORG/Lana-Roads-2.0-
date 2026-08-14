@@ -20,11 +20,13 @@ import {
   VEHICLE_ASSET_IDS,
   VEHICLE_VARIANT_COUNT,
   VehicleClass,
+  MS_PER_SLOT,
   laneObjectCovers,
   laneObjects,
   laneVehicleClass,
   laneVehicles,
   objectIndex,
+  tickOf,
   vehicleVariant,
   worldTimeMs,
 } from "../src/hazards.js";
@@ -218,6 +220,24 @@ describe("shared golden vectors", () => {
     }
   });
 
+  it("the render grid is the program's own step", () => {
+    // A renderer quantising to anything coarser than the program's step
+    // throws away motion the chain has: it glides toward a stale position
+    // and lurches when its own coarse tick rolls. This is the assertion
+    // that was missing when the clock moved to slots and the grid did not.
+    assert.equal(tickOf(0), 0);
+    assert.equal(tickOf(MS_PER_SLOT - 1), 0);
+    assert.equal(tickOf(MS_PER_SLOT), MS_PER_SLOT);
+    assert.equal(tickOf(MS_PER_SLOT * 3 + 7), MS_PER_SLOT * 3);
+    // And the interpolation spans exactly one step: at the far end of a
+    // step the drawn position has reached the authoritative tile.
+    const seed = new Uint8Array(32).fill(5);
+    const t = MS_PER_SLOT * 400;
+    for (const v of laneVehicles(roadLane, 4, seed, t + MS_PER_SLOT - 0.001)) {
+      assert.ok(Math.abs(v.renderX - v.x) < 0.02, `car ${v.index} never arrived`);
+    }
+  });
+
   it("smooth car positions never draw ahead of the program", () => {
     // Smoothing may glide a car between tiles for the eye, but the drawn
     // position must never LEAD the authoritative one. A car drawn past its
@@ -226,12 +246,13 @@ describe("shared golden vectors", () => {
     // explain it. Lagging is the safe direction: the car is shown arriving
     // at a tile the program already considers occupied.
     const seed = new Uint8Array(32).fill(3);
-    for (let tick = 1; tick < 12; tick++) {
-      const t = tick * 1000;
+    // Steps, not seconds: the grid is one rollup slot.
+    for (let step = 1; step < 40; step++) {
+      const t = step * MS_PER_SLOT;
       const here = laneVehicles(roadLane, 4, seed, t);
-      const prev = laneVehicles(roadLane, 4, seed, t - 1000);
+      const prev = laneVehicles(roadLane, 4, seed, t - MS_PER_SLOT);
       for (let f = 0; f <= 10; f++) {
-        for (const v of laneVehicles(roadLane, 4, seed, t + f * 100)) {
+        for (const v of laneVehicles(roadLane, 4, seed, t + (f * MS_PER_SLOT) / 10)) {
           const before = prev.find((p) => p.index === v.index);
           if (!before) continue;
           const lo = Math.min(before.x, v.x);
@@ -251,7 +272,7 @@ describe("shared golden vectors", () => {
       }
       // And it does arrive: at the end of the tick the drawn position is
       // the authoritative one.
-      for (const v of laneVehicles(roadLane, 4, seed, t + 999.999)) {
+      for (const v of laneVehicles(roadLane, 4, seed, t + MS_PER_SLOT - 0.001)) {
         const target = here.find((h) => h.index === v.index);
         if (target) assert.ok(Math.abs(v.renderX - target.x) < 0.01);
       }
