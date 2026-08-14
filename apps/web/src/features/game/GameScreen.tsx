@@ -22,6 +22,7 @@ import { Button, Confetti, CountUp, Icon, IconButton, Modal } from "../../design
 import { agentModelIdFor } from "../../lib/agent";
 import { haptic, useSettings } from "../../lib/settings";
 import { SettingsSheet } from "../settings/SettingsSheet";
+import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
 import type { Route } from "../../app/App";
 
 /**
@@ -127,6 +128,9 @@ export function GameScreen({
   /** Another window took this run over; this one is a spectator. */
   const [displaced, setDisplaced] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
+  /** Where this run left the player on today's board, once it is over. */
+  const [rank, setRank] = useState<{ place: number; of: number } | null>(null);
   const settings = useSettings();
   const world = pda.world(route.mode, route.day);
 
@@ -1015,6 +1019,31 @@ export function GameScreen({
     }
   }
 
+  // Where the run placed. Asked only once the run is over: mid-run it would
+  // be a distraction, and the standings are one gPA over the whole world.
+  useEffect(() => {
+    if (endedScore == null && death == null) {
+      setRank(null);
+      return;
+    }
+    let live = true;
+    boot.client
+      .leaderboard(world)
+      .then((board) => {
+        if (!live) return;
+        const me = boot.wallet.publicKey.toBase58();
+        const place = board.findIndex((r) => r.wallet.toBase58() === me);
+        if (place >= 0) setRank({ place: place + 1, of: board.length });
+      })
+      .catch(() => {
+        /* the card is worth showing without a rank on it */
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endedScore, death]);
+
   // The revival deadline is authoritative and untouched; only the countdown
   // the player watches is presentation, so tick it once a second while the
   // death card is up instead of freezing at the moment the card opened.
@@ -1104,6 +1133,15 @@ export function GameScreen({
                 New personal course record
               </div>
             )}
+            {rank && (
+              <button className="final-rank" onClick={() => setBoardOpen(true)}>
+                <Icon name="trophy" size={14} />
+                {rank.place === 1
+                  ? "1st in today's world"
+                  : `#${rank.place} of ${rank.of} today`}
+                <span className="final-rank__more">see standings</span>
+              </button>
+            )}
             <div className="row">
               <Button variant="play" disabled={respawning} onClick={playAgain}>
                 {respawning ? "Starting…" : "TAP TO RETRY"}
@@ -1118,6 +1156,15 @@ export function GameScreen({
 
       {settingsOpen && (
         <SettingsSheet boot={boot} onClose={() => setSettingsOpen(false)} />
+      )}
+
+      {boardOpen && (
+        <LeaderboardSheet
+          boot={boot}
+          day={route.day}
+          initialMode={route.mode}
+          onClose={() => setBoardOpen(false)}
+        />
       )}
 
       {death && (

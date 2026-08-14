@@ -16,15 +16,9 @@ import { agentId, AGENT_COUNT } from "../../game/renderer/assets";
 import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
 import { EntryFlow } from "../entry/EntryFlow";
+import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
 import { MenuBackdrop } from "./MenuBackdrop";
-import {
-  Button,
-  Icon,
-  IconButton,
-  Notice,
-  Sheet,
-  StatGrid,
-} from "../../design-system";
+import { Button, Icon, IconButton, Notice, Sheet, StatGrid } from "../../design-system";
 import type { Route } from "../../app/App";
 
 interface DayInfo {
@@ -68,6 +62,7 @@ export function Home({
   const [countdown, setCountdown] = useState("");
   const [entering, setEntering] = useState(false);
   const [paidOpen, setPaidOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState<WorldMode | null>(null);
   const wallet = boot?.wallet.publicKey.toBase58() ?? "offline";
   const [agentIdx, setAgentIdx] = useState(
     () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
@@ -336,9 +331,23 @@ export function Home({
             </span>
             <b className="home-ticket__price">1 USDC</b>
           </button>
-          <Button variant="link" icon="target" onClick={() => onPlay({ name: "demo" })}>
-            Practice offline
-          </Button>
+          <div className="home-links">
+            <Button variant="link" icon="target" onClick={() => onPlay({ name: "demo" })}>
+              Practice offline
+            </Button>
+            {boot && info && info.day !== 0n && (
+              <Button
+                variant="link"
+                icon="trophy"
+                onClick={() => {
+                  sfx.click();
+                  setBoardOpen(WorldMode.Casual);
+                }}
+              >
+                Standings
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -365,8 +374,7 @@ export function Home({
             />
           ) : (
             <Notice tone="info">
-              Today's competition isn't reachable right now — practice mode is still
-              open.
+              Today's competition isn't reachable right now — practice mode is still open.
             </Notice>
           )}
           <div className="paid-sheet-copy">
@@ -393,11 +401,30 @@ export function Home({
                 ? "Enter for 1 USDC"
                 : `Unavailable${info ? ` — day is ${info.status}` : ""}`}
             </Button>
+            <Button
+              variant="ghost"
+              icon="trophy"
+              onClick={() => {
+                setPaidOpen(false);
+                setBoardOpen(WorldMode.Paid);
+              }}
+            >
+              Standings
+            </Button>
             <Button variant="ghost" onClick={() => setPaidOpen(false)}>
               Back
             </Button>
           </div>
         </Sheet>
+      )}
+
+      {boardOpen != null && boot && info && (
+        <LeaderboardSheet
+          boot={boot}
+          day={info.day}
+          initialMode={boardOpen}
+          onClose={() => setBoardOpen(null)}
+        />
       )}
 
       {entering && info && boot && (

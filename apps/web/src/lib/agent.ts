@@ -66,6 +66,21 @@ export function setAgentChoice(n: number) {
   localStorage.setItem(KEY, String(((n % AGENT_COUNT) + AGENT_COUNT) % AGENT_COUNT));
 }
 
+/**
+ * The agent a wallet is drawn as, derived from the wallet alone.
+ *
+ * Deliberately ignores the local player's own pick: this is how OTHER
+ * people are identified, and reading our own choice here would name every
+ * player on the leaderboard after us. Matches the renderer's own hash so a
+ * name on the board belongs to the shape on the road.
+ */
+export function agentIndexForWallet(wallet: string): number {
+  let h = 5381;
+  for (let i = 0; i < wallet.length; i++)
+    h = (Math.imul(h, 33) ^ wallet.charCodeAt(i)) >>> 0;
+  return h % AGENT_COUNT;
+}
+
 export function agentModelIdFor(wallet: string): string {
   const choice = getAgentChoice();
   if (choice != null) return agentId(choice);

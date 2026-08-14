@@ -107,6 +107,22 @@ export interface TxActivity {
   durationMs?: number;
 }
 
+/** One row of a day's standings. */
+export interface LeaderboardEntry {
+  wallet: PublicKey;
+  /** Best row reached today, across every attempt. */
+  bestScore: number;
+  attemptNonce: number;
+  /** Slot the best was reached — the program's own tiebreak. */
+  reachedSlot: bigint;
+  classId: number;
+  /** Still out there right now. */
+  live: boolean;
+  state: string;
+  /** Score of the attempt in progress (0 when not playing). */
+  currentScore: number;
+}
+
 /** One player's run as seen from outside: enough to draw and to count. */
 export interface RunSummary {
   wallet: PublicKey;
@@ -372,6 +388,22 @@ export class CrossyClient {
     return this.erProgram.account.worldHeader.fetch(pda.world(mode, day));
   }
 
+  /**
+   * A world header from whichever plane still has it.
+   *
+   * While a day is live the header is delegated and only the rollup is
+   * current; once it has been closed and undelegated, only base has it at
+   * all. A screen that shows past days has to ask both.
+   */
+  async getWorldAnywhere(mode: WorldMode, day: bigint) {
+    const address = pda.world(mode, day);
+    const live = await this.erProgram.account.worldHeader
+      .fetchNullable(address)
+      .catch(() => null);
+    if (live) return live;
+    return this.program.account.worldHeader.fetchNullable(address).catch(() => null);
+  }
+
   async getProfile(wallet = this.wallet.publicKey) {
     return this.program.account.playerProfile.fetchNullable(pda.profile(wallet));
   }
@@ -401,6 +433,70 @@ export class CrossyClient {
       state: (Object.keys(account.state)[0] ?? "?") as string,
       hazardNonce: account.hazardNonce as number,
     }));
+  }
+
+  /**
+   * The day's standings for a world.
+   *
+   * `DailyBest` is the authoritative per-player high water mark: the run
+   * account only holds the CURRENT attempt, so a player who died at row 40
+   * and respawned would otherwise appear to be worth 3. Live run state is
+   * merged in so the board can say who is still out there.
+   *
+   * Reads the rollup first and falls back to base. Both are right at
+   * different times: while the day is live the bests are delegated and only
+   * the rollup has the current numbers; once the day is settled and the
+   * accounts have come home, only base still has them.
+   */
+  async leaderboard(world: PublicKey): Promise<LeaderboardEntry[]> {
+    const decode = (rows: any[]): LeaderboardEntry[] =>
+      rows.map(({ account }: any) => ({
+        wallet: account.wallet as PublicKey,
+        bestScore: account.bestScore as number,
+        attemptNonce: account.attemptNonce as number,
+        reachedSlot: BigInt(account.reachedSlot.toString()),
+        classId: account.classId as number,
+        live: false,
+        state: "idle",
+        currentScore: 0,
+      }));
+    const filter = [{ memcmp: { offset: 8, bytes: world.toBase58() } }];
+
+    let bests: LeaderboardEntry[] = [];
+    try {
+      bests = decode(await this.erProgram.account.dailyBest.all(filter));
+    } catch {
+      bests = [];
+    }
+    if (!bests.length) {
+      try {
+        bests = decode(await this.program.account.dailyBest.all(filter));
+      } catch {
+        bests = [];
+      }
+    }
+
+    const runs = await this.listRuns(world).catch(() => [] as RunSummary[]);
+    const byWallet = new Map(runs.map((r) => [r.wallet.toBase58(), r]));
+    for (const e of bests) {
+      const run = byWallet.get(e.wallet.toBase58());
+      if (!run) continue;
+      e.state = run.state;
+      e.live = run.state === "active";
+      e.currentScore = run.score;
+      // A run in progress can already be past the recorded best: the best
+      // is written as it is beaten, and a client reading mid-hop would see
+      // a board that disagrees with the score on the player's own screen.
+      if (run.score > e.bestScore) e.bestScore = run.score;
+    }
+    // Same score: whoever got there first ranks higher. `reached_slot` is
+    // the program's own record of when, so the order is not this client's
+    // opinion.
+    return bests.sort(
+      (a, b) =>
+        b.bestScore - a.bestScore ||
+        (a.reachedSlot < b.reachedSlot ? -1 : a.reachedSlot > b.reachedSlot ? 1 : 0),
+    );
   }
 
   async getChunk(day: bigint, chunkIndex: number) {

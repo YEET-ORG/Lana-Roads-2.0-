@@ -929,3 +929,263 @@
   color: var(--navy-950);
   box-shadow: 0 2px 0 var(--grass-600);
 }
+
+/* ---------- leaderboard ----------
+   A ranked list is a table of one column that matters, so the score is the
+   only thing set large; everything else supports it. */
+.lb-modes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--ds-surface-deep);
+  border: 1px solid var(--ds-line);
+  margin-bottom: 10px;
+}
+
+.lb-day {
+  margin-left: auto;
+  padding-right: 10px;
+  font-size: 11px;
+  color: var(--ds-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Settled day: the payout, stamped. */
+.lb-result {
+  text-align: center;
+  padding: 12px 10px 14px;
+  margin-bottom: 12px;
+  border-radius: var(--ds-radius-l);
+  background: var(--ds-surface-deep);
+  border: 1px solid var(--ds-line);
+  animation: ds-pop-in var(--t-screen) var(--ease-pop) both;
+}
+
+.lb-result__label {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ds-text-dim);
+}
+
+.lb-result__winner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--sun-400);
+}
+
+.lb-result__wallet {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--ds-text-dim);
+}
+
+.lb-result__prize {
+  font-family: var(--font-display);
+  font-size: 30px;
+  color: var(--paper);
+  text-shadow: 0 3px 0 var(--navy-950);
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 4px;
+}
+
+.lb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--ds-radius-s);
+  background: var(--ds-surface-deep);
+  border: 1px solid transparent;
+}
+
+.lb-row.is-me {
+  border-color: var(--grass-600);
+  background: rgba(75, 224, 143, 0.08);
+}
+
+.lb-rank {
+  flex: 0 0 auto;
+  width: 24px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--ds-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Podium: gold, silver, bronze — the only decoration on the list. */
+.lb-rank--1 {
+  color: var(--sun-400);
+}
+.lb-rank--2 {
+  color: var(--slate-300);
+}
+.lb-rank--3 {
+  color: var(--sun-700);
+}
+
+.lb-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.lb-name {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ds-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-wallet {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--ds-text-dim);
+}
+
+.lb-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--grass-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-live__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--grass-400);
+  animation: lb-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes lb-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+.lb-score {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--paper);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 0 var(--navy-950);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-live__dot {
+    animation: none;
+  }
+}
+
+/* Secondary links under the giant CTA sit on one row. */
+.home-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The rank line on a finished run — a button, because the standings behind
+   it are the natural next thing to look at. */
+.final-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px auto 2px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ds-line);
+  background: var(--ds-surface-deep);
+  color: var(--ds-text);
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    border-color var(--t-instant) var(--ease-out),
+    transform var(--t-instant) var(--ease-pop);
+}
+
+.final-rank:hover {
+  border-color: var(--ds-line-strong);
+  transform: translateY(-1px);
+}
+
+.final-rank__more {
+  color: var(--sky-400);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+/* Day stepper inside the standings header. */
+.lb-days {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.lb-day-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ds-text-dim);
+  cursor: pointer;
+}
+
+.lb-day-step:hover:not(:disabled) {
+  color: var(--ds-text);
+  background: var(--ds-surface);
+}
+
+.lb-day-step:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
