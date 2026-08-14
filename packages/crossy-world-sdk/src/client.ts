@@ -62,6 +62,41 @@ export interface ErRoute {
   countryCode: string;
 }
 
+/**
+ * Where a transaction is in its life.
+ *
+ * `sent` is a real terminal state here, not a way-station: gameplay goes to
+ * the rollup with `skipPreflight` at `processed`, which returns a signature
+ * for a transaction the program may still refuse. Anything that reports
+ * `confirmed` genuinely waited for it.
+ */
+export type TxStatus = "pending" | "sent" | "confirmed" | "failed";
+
+/** One transaction's progress, for anything that wants to show the player. */
+export interface TxActivity {
+  id: number;
+  /** Human label — "Joining world", not an instruction name. */
+  label: string;
+  plane: "base" | "er";
+  status: TxStatus;
+  signature?: string;
+  error?: string;
+  /**
+   * High-frequency gameplay (moves, kicks, hazard cranks). A player hops
+   * several times a second, so these must never each claim a slot on
+   * screen; the UI collapses them and shows failures.
+   */
+  quiet?: boolean;
+  /**
+   * Automated upkeep the player never asked for — the hazard crank fires
+   * several times a second and its refusals are routine (a stale nonce
+   * means somebody else already resolved that tile). Never worth a toast,
+   * least of all a red one.
+   */
+  background?: boolean;
+  at: number;
+}
+
 /** One player's run as seen from outside: enough to draw and to count. */
 export interface RunSummary {
   wallet: PublicKey;
@@ -112,6 +147,81 @@ export class CrossyClient {
     this.program = new Program(idl as CrossyWorld, baseProvider);
     this.erProgram = new Program(idl as CrossyWorld, erProvider);
     this.subscriptions = new SubscriptionHub(this.erConnection);
+  }
+
+  // ---- transaction activity ---------------------------------------------
+
+  private txListeners = new Set<(a: TxActivity) => void>();
+  private txSeq = 0;
+
+  /**
+   * Watch every transaction this client sends. Returns an unsubscribe.
+   *
+   * The client is the only place that knows a send happened, when its
+   * signature came back, and whether it settled — so it reports, and the UI
+   * decides what deserves the player's attention.
+   */
+  onTx(listener: (a: TxActivity) => void): () => void {
+    this.txListeners.add(listener);
+    return () => this.txListeners.delete(listener);
+  }
+
+  private emitTx(a: TxActivity) {
+    for (const l of this.txListeners) {
+      try {
+        l(a);
+      } catch {
+        // A listener that throws must not take a transaction down with it.
+      }
+    }
+  }
+
+  /**
+   * Run a send and report its progress.
+   *
+   * `settles` says what resolution means for this call: base transactions go
+   * through `sendAndConfirm` and are genuinely confirmed, while rollup sends
+   * return as soon as the validator accepts the bytes.
+   */
+  private async track<T>(
+    label: string,
+    plane: "base" | "er",
+    fn: () => Promise<T>,
+    opts: { quiet?: boolean; background?: boolean; settles?: TxStatus } = {},
+  ): Promise<T> {
+    const id = ++this.txSeq;
+    const stamp = (rest: Partial<TxActivity>): TxActivity => ({
+      id,
+      label,
+      plane,
+      quiet: opts.quiet,
+      background: opts.background,
+      at: Date.now(),
+      status: "pending",
+      ...rest,
+    });
+    this.emitTx(stamp({ status: "pending" }));
+    try {
+      const out = await fn();
+      const signature = typeof out === "string" ? out : undefined;
+      this.emitTx(
+        stamp({
+          status: opts.settles ?? (plane === "base" ? "confirmed" : "sent"),
+          signature,
+        }),
+      );
+      return out;
+    } catch (e: any) {
+      // anchor@0.32 + web3.js@1.98 disagree on SendTransactionError's shape,
+      // so `message` is often "Unknown action 'undefined'". The useful text
+      // is in the transaction fields.
+      const code = (e?.transactionLogs as string[] | undefined)
+        ?.map((l) => l.match(/Error Code: (\w+)/)?.[1])
+        .find(Boolean);
+      const error = code ?? `${e?.transactionMessage ?? e?.message ?? e}`.slice(0, 140);
+      this.emitTx(stamp({ status: "failed", error }));
+      throw e;
+    }
   }
 
   private async routerRpc<T>(method: string, params: unknown[]): Promise<T> {
@@ -354,7 +464,7 @@ export class CrossyClient {
   async submitReviewed(review: TransactionReview): Promise<string> {
     const tx = new anchor.web3.Transaction().add(...review.instructions);
     const provider = this.program.provider as anchor.AnchorProvider;
-    return provider.sendAndConfirm(tx);
+    return this.track(review.action, "base", () => provider.sendAndConfirm(tx));
   }
 
   /** ER spawn for a paid attempt (session- or wallet-signed). */
@@ -389,7 +499,7 @@ export class CrossyClient {
         })),
       );
     if (params.session) builder.signers([params.session]);
-    return builder.rpc();
+    return this.track("Entering the world", "er", () => builder.rpc());
   }
 
   /** Permissionless entry/revival receipt reconciliation on base. */
@@ -400,7 +510,8 @@ export class CrossyClient {
     receiptNonce: number;
   }): Promise<string> {
     const world = pda.world(WorldMode.Paid, params.day);
-    return this.program.methods
+    return this.track("Reconciling receipt", "base", () =>
+      this.program.methods
       .reconcileReceipt()
       .accountsPartial({
         daily: pda.daily(params.day),
@@ -408,7 +519,8 @@ export class CrossyClient {
         run: pda.run(world, params.wallet),
         contribution: pda.contribution(params.day, params.wallet),
       })
-      .rpc();
+        .rpc(),
+    );
   }
 
   /** Poll the ER until the delegated account is cloned there. */
@@ -509,7 +621,7 @@ export class CrossyClient {
     if (instructions.length > 0) {
       const tx = new anchor.web3.Transaction().add(...instructions);
       const provider = this.program.provider as anchor.AnchorProvider;
-      await provider.sendAndConfirm(tx);
+      await this.track("Joining the world", "base", () => provider.sendAndConfirm(tx));
     }
     await this.waitForEr(runAddr);
     // Joining claims the run outright: a session left behind by an earlier
@@ -607,7 +719,7 @@ export class CrossyClient {
       signer: params.session?.publicKey ?? wallet,
     });
     if (params.session) builder.signers([params.session]);
-    return builder.rpc();
+    return this.track("Reviving", "er", () => builder.rpc());
   }
 
   // ---- gameplay actions (session-signed, ER) ----------------------------
@@ -792,10 +904,16 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.erConnection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    });
+    return this.track(
+      "Move",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true },
+    );
   }
 
   /**
@@ -854,10 +972,16 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.erConnection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    });
+    return this.track(
+      "Kick",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true },
+    );
   }
 
   /**
@@ -913,10 +1037,12 @@ export class CrossyClient {
 
     // The program caps how far ahead a session may run; stay inside it.
     const expiry = now + MAX_SESSION_SECONDS - 60;
-    await this.erProgram.methods
-      .rotateSession(params.sessionAuthority, new BN(expiry))
-      .accountsPartial({ run: runAddr, wallet })
-      .rpc({ commitment: "processed" });
+    await this.track("Authorising this device", "er", () =>
+      this.erProgram.methods
+        .rotateSession(params.sessionAuthority, new BN(expiry))
+        .accountsPartial({ run: runAddr, wallet })
+        .rpc({ commitment: "processed" }),
+    );
     return { rotated: true, displaced: false, rotation: rotation + 1, mine: true };
   }
 
@@ -941,10 +1067,12 @@ export class CrossyClient {
       .catch(() => null);
     // Nothing to revoke if the run never existed or is already handed back.
     if (!run || run.sessionAuthority.equals(PublicKey.default)) return false;
-    await this.erProgram.methods
-      .endSession()
-      .accountsPartial({ run: runAddr, wallet })
-      .rpc({ commitment: "processed" });
+    await this.track("Handing back the session", "er", () =>
+      this.erProgram.methods
+        .endSession()
+        .accountsPartial({ run: runAddr, wallet })
+        .rpc({ commitment: "processed" }),
+    );
     return true;
   }
 
@@ -967,10 +1095,15 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.erConnection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    });
+    return this.track(
+      "Claiming the record",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+    );
   }
 
   /**
@@ -1013,10 +1146,16 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.erConnection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    });
+    return this.track(
+      "Hazard check",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true, background: true },
+    );
   }
 
   /**

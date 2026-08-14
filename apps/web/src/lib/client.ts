@@ -19,9 +19,9 @@ import {
 
 export const BASE_RPC = import.meta.env.VITE_RPC ?? "http://localhost:8899";
 const BASE_WS = import.meta.env.VITE_WS ?? "ws://localhost:8900";
-const ER_RPC = import.meta.env.VITE_ER_RPC ?? BASE_RPC;
+export const ER_RPC = import.meta.env.VITE_ER_RPC ?? BASE_RPC;
 const ER_WS = import.meta.env.VITE_ER_WS ?? BASE_WS;
-const CLUSTER = import.meta.env.VITE_CLUSTER ?? "local";
+export const CLUSTER = import.meta.env.VITE_CLUSTER ?? "local";
 const ROUTER =
   import.meta.env.VITE_ROUTER ??
   (CLUSTER === "devnet" ? "https://devnet-router.magicblock.app" : undefined);

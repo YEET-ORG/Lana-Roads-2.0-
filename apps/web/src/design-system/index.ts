@@ -10,3 +10,4 @@ export { Loader } from "./Loader";
 export { Confetti } from "./Confetti";
 export { CountUp } from "./CountUp";
 export { Icon, type IconName } from "./icons";
+export { TxToasts } from "./TxToasts";

@@ -35,7 +35,8 @@ export type IconName =
   | "drop"
   | "calendar"
   | "coin"
-  | "target";
+  | "target"
+  | "external";
 
 const PATHS: Record<IconName, JSX.Element> = {
   play: <path d="M7 4.5v15c0 .9 1 1.5 1.8 1L20 13a1.2 1.2 0 0 0 0-2L8.8 3.5c-.8-.5-1.8.1-1.8 1Z" />,
@@ -79,6 +80,9 @@ const PATHS: Record<IconName, JSX.Element> = {
   ),
   switch: (
     <path d="M7 4 3 8l4 4V9.5h9v-3H7V4Zm10 8 4 4-4 4v-2.5H8v-3h9V12Z" />
+  ),
+  external: (
+    <path d="M13 3h8v8h-2.6V7.4l-7 7-1.8-1.8 7-7H13V3ZM4 6h6v2.4H6.4v9.2h9.2V14H18v6H4V6Z" />
   ),
   copy: (
     <path d="M8 8h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm-3 8H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1h-2V5H5v9Z" />

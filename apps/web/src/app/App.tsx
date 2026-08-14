@@ -10,7 +10,7 @@ import { GameScreen } from "../features/game/GameScreen";
 import { IdentityGate } from "../features/identity/IdentityGate";
 import { DemoScreen } from "../features/demo/DemoScreen";
 import { AgentGallery } from "../features/demo/AgentGallery";
-import { Button, Icon, Loader, Notice } from "../design-system";
+import { Button, Icon, Loader, Notice, TxToasts } from "../design-system";
 import { sfx } from "../game/audio";
 
 export type Route =
@@ -168,6 +168,9 @@ function AppInner() {
       {route.name === "play" && boot && (
         <GameScreen boot={boot} route={route} onExit={() => setRoute({ name: "home" })} />
       )}
+      {/* Mounted at the shell so a transaction started on one screen still
+          reports after the player has navigated to another. */}
+      <TxToasts client={boot?.client ?? null} />
     </div>
   );
 }
