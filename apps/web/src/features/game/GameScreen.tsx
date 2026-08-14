@@ -219,6 +219,8 @@ export function GameScreen({
   const rejectedRunRef = useRef(0);
   /** Attempt the sequence counter belongs to; a new attempt resets it. */
   const attemptRef = useRef<number | null>(null);
+  /** Latest measured rollup round trip, for pacing the action queue. */
+  const pingRef = useRef<number | null>(null);
   /** True while gameplay authority is back with the wallet. */
   const sessionEndedRef = useRef(false);
   /** Rotation counter this window last claimed; guards against a takeover war. */
@@ -560,6 +562,7 @@ export function GameScreen({
       const slot = await boot.client.erConnection.getSlot("processed").catch(() => null);
       if (!live) return;
       const ms = slot == null ? null : Math.round(performance.now() - t0);
+      pingRef.current = ms;
       setHud((h) => (h.pingMs === ms ? h : { ...h, pingMs: ms }));
     };
     void measurePing();
@@ -620,9 +623,20 @@ export function GameScreen({
         sig?: string;
       };
 
-  /** Long enough for acceptance to come back on the subscription. */
-  const ACTION_ACK_MS = 420;
+  /**
+   * How long to wait for acceptance before resending.
+   *
+   * Acceptance travels the send round trip PLUS a block and a push back
+   * down the subscription, so a fixed window that suits a 40ms link retries
+   * every single move on a 400ms one. Scale it to the latency we are
+   * actually measuring, with a floor for a link so fast the measurement is
+   * noise and a ceiling so a truly refused action still gives up promptly.
+   */
   const ACTION_TRIES = 3;
+  function ackWindowMs() {
+    const ping = pingRef.current ?? 250;
+    return Math.min(1100, Math.max(450, Math.round(ping * 2.2)));
+  }
 
   const outboxRef = useRef<Outbound[]>([]);
   const ackTimerRef = useRef(0);
@@ -665,7 +679,7 @@ export function GameScreen({
       }
     }
     window.clearTimeout(ackTimerRef.current);
-    ackTimerRef.current = window.setTimeout(checkOutboxHead, ACTION_ACK_MS);
+    ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
   }
 
   function checkOutboxHead() {

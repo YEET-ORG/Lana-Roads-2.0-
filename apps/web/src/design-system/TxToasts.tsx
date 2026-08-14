@@ -42,6 +42,11 @@ function explorerUrl(t: Toast): string | null {
   return `${base}?cluster=custom&customUrl=${encodeURIComponent(ER_RPC)}`;
 }
 
+/** Milliseconds under a second, seconds above it — never five digits. */
+function formatMs(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 function shortSig(sig: string): string {
   return `${sig.slice(0, 4)}…${sig.slice(-4)}`;
 }
@@ -142,6 +147,14 @@ export function TxToasts({ client }: { client: CrossyClient | null }) {
         // Older entries sit further back — a touch smaller and dimmer — so
         // the newest receipt is always the one the eye lands on.
         const depth = toasts.length - 1 - i;
+        const life =
+          t.status === "pending"
+            ? 0
+            : t.status === "failed"
+              ? LINGER_MS.failed
+              : t.quiet
+                ? LINGER_MS.quiet
+                : LINGER_MS.normal;
         return (
           <div
             // Keyed by SLOT, not id: the quiet lane is one element that
@@ -149,33 +162,43 @@ export function TxToasts({ client }: { client: CrossyClient | null }) {
             // entrance animation on every hop.
             key={t.slot}
             className={`tx-toast tx-toast--${t.status}`}
-            style={{ "--depth": depth } as CSSProperties}
+            style={{ "--depth": depth, "--life": `${life}ms` } as CSSProperties}
           >
             {/* Keyed by beat so the badge re-pops whenever the state moves. */}
             <span className="tx-toast__icon" key={t.beat}>
               {t.status === "pending" ? (
                 <span className="tx-spinner" />
               ) : t.status === "failed" ? (
-                <Icon name="alert" size={14} />
+                <Icon name="alert" size={13} />
               ) : (
-                <Icon name="check" size={14} />
+                <Icon name="check" size={13} />
               )}
             </span>
             <span className="tx-toast__body">
-              <span className="tx-toast__label">
-                {t.label}
+              <span className="tx-toast__top">
+                <span className="tx-toast__label">{t.label}</span>
                 <span className="tx-toast__plane">{t.plane === "er" ? "ER" : "L1"}</span>
+                {/* Round trip, top-right. The one number that separates
+                    "the game is slow" from "my input was wrong". */}
+                {t.durationMs != null && (
+                  <span className="tx-toast__ms">{formatMs(t.durationMs)}</span>
+                )}
               </span>
               <span className="tx-toast__detail">
-                {t.status === "pending"
-                  ? "processing…"
-                  : t.status === "failed"
-                    ? friendlyError(t.error ?? "failed")
-                    : t.signature
-                      ? // `sent` is honest: the rollup took the bytes. Only base
-                        // transactions here have actually been confirmed.
-                        `${t.status === "confirmed" ? "confirmed" : "sent"} · ${shortSig(t.signature)}`
-                      : t.status}
+                {t.status === "pending" ? (
+                  "processing…"
+                ) : t.status === "failed" ? (
+                  friendlyError(t.error ?? "failed")
+                ) : t.signature ? (
+                  <>
+                    {/* `sent` is honest: the rollup took the bytes. Only base
+                        transactions here have actually been confirmed. */}
+                    {t.status === "confirmed" ? "confirmed" : "sent"}
+                    <span className="tx-toast__sig">{shortSig(t.signature)}</span>
+                  </>
+                ) : (
+                  t.status
+                )}
               </span>
             </span>
             {url && (
@@ -186,9 +209,12 @@ export function TxToasts({ client }: { client: CrossyClient | null }) {
                 rel="noreferrer"
                 title="open in explorer"
               >
-                <Icon name="external" size={13} />
+                <Icon name="external" size={12} />
               </a>
             )}
+            {/* Drains over the toast's own lifetime, so it is visibly on
+                its way out rather than vanishing without warning. */}
+            {life > 0 && <span className="tx-toast__life" key={`life-${t.beat}`} />}
           </div>
         );
       })}

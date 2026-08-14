@@ -558,10 +558,11 @@
 }
 
 /* ---------- transaction toasts ----------
-   Bottom-right, above everything, and deliberately narrow: this is a
-   receipt, not a dialog. Pointer events only on the explorer link so a
-   toast can never eat a tap meant for the world. Motion is fast and
-   springy — a receipt that lingers in animation reads as lag. */
+   A receipt, not a dialog: narrow, quiet, and gone on its own. The card is
+   built from three cheap signals so status reads before any word does — a
+   coloured rail down the left, a tinted status badge, and a lifetime bar
+   that drains as the toast ages. Pointer events only on the explorer link,
+   so a toast can never eat a tap meant for the world. */
 .tx-toasts {
   position: fixed;
   right: max(12px, env(safe-area-inset-right));
@@ -569,131 +570,176 @@
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   align-items: flex-end;
   pointer-events: none;
-  max-width: min(340px, calc(100vw - 24px));
-  perspective: 600px;
+  width: min(316px, calc(100vw - 24px));
 }
 
 .tx-toast {
+  --accent: var(--slate-300);
+  --accent-soft: rgba(184, 197, 217, 0.16);
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 11px;
+  padding: 10px 12px 11px 14px;
   border-radius: var(--ds-radius-m);
-  background: var(--ds-surface);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 60%),
+    var(--ds-surface);
   border: 1px solid var(--ds-line);
   box-shadow:
     0 var(--ds-edge-s) 0 var(--navy-950),
-    0 10px 24px rgba(8, 17, 31, 0.45);
-  /* Depth: entries behind the newest shrink and fade, so the stack reads
-     as one object with a front rather than five competing cards. */
-  transform-origin: 100% 100%;
-  scale: calc(1 - var(--depth, 0) * 0.035);
-  opacity: calc(1 - var(--depth, 0) * 0.16);
-  animation: tx-toast-in 260ms var(--ease-pop) both;
+    0 12px 26px rgba(8, 17, 31, 0.5);
+  /* Depth: entries behind the newest recede slightly, so the stack reads as
+     one object with a front. Gently — five deep at 0.15 a step leaves the
+     back card a ghost, which looks broken rather than layered. */
+  scale: calc(1 - min(var(--depth, 0), 4) * 0.014);
+  opacity: calc(1 - min(var(--depth, 0), 4) * 0.07);
+  animation: tx-toast-in 240ms var(--ease-pop) both;
   transition:
     scale 180ms var(--ease-out),
     opacity 180ms var(--ease-out);
 }
 
+/* The rail: the fastest possible read of what happened. */
+.tx-toast::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.tx-toast--pending {
+  --accent: var(--sun-400);
+  --accent-soft: rgba(255, 210, 63, 0.16);
+}
+
+.tx-toast--sent,
+.tx-toast--confirmed {
+  --accent: var(--grass-400);
+  --accent-soft: rgba(75, 224, 143, 0.16);
+}
+
+.tx-toast--failed {
+  --accent: var(--coral-500);
+  --accent-soft: rgba(244, 81, 105, 0.18);
+}
+
 @keyframes tx-toast-in {
   0% {
     opacity: 0;
-    transform: translate3d(28px, 6px, 0) rotate(2.5deg);
+    transform: translate3d(26px, 4px, 0) scale(0.96);
   }
-  60% {
-    transform: translate3d(-3px, 0, 0) rotate(-0.6deg);
+  62% {
+    transform: translate3d(-3px, 0, 0) scale(1.01);
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) rotate(0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 .tx-toast__icon {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
-  border-radius: 7px;
-  background: var(--navy-900);
-  color: var(--slate-300);
-  animation: tx-badge-pop 320ms var(--ease-pop) both;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: tx-badge-pop 300ms var(--ease-pop) both;
 }
 
 @keyframes tx-badge-pop {
   0% {
-    transform: scale(0.4) rotate(-25deg);
+    transform: scale(0.5) rotate(-18deg);
   }
-  55% {
-    transform: scale(1.22) rotate(6deg);
+  58% {
+    transform: scale(1.18) rotate(5deg);
   }
   100% {
     transform: scale(1) rotate(0);
   }
 }
 
-.tx-toast--confirmed .tx-toast__icon,
-.tx-toast--sent .tx-toast__icon {
-  color: var(--grass-400);
-  box-shadow: 0 0 0 2px rgba(75, 224, 143, 0.18);
-}
-
-.tx-toast--failed .tx-toast__icon {
-  color: var(--coral-500);
-  box-shadow: 0 0 0 2px rgba(244, 81, 105, 0.2);
-}
-
-/* A failure earns exactly one shake — enough to catch the eye, not enough
-   to become the thing the player is watching. */
-.tx-toast--failed {
-  animation:
-    tx-toast-in 260ms var(--ease-pop) both,
-    ds-shake-x 320ms var(--ease-out) 240ms;
-}
-
 .tx-toast__body {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
   min-width: 0;
   flex: 1 1 auto;
 }
 
-.tx-toast__label {
+/* Label, plane, elapsed — one line, the number pinned to the right. */
+.tx-toast__top {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
+  min-width: 0;
+}
+
+.tx-toast__label {
   font-family: var(--font-display);
-  font-size: 12px;
-  letter-spacing: 0.3px;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
   color: var(--ds-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tx-toast__plane {
   flex: 0 0 auto;
   padding: 1px 5px;
   border-radius: 5px;
-  background: var(--navy-700);
-  color: var(--slate-300);
+  border: 1px solid var(--accent-soft);
+  color: var(--accent);
+  background: transparent;
   font-size: 9px;
-  letter-spacing: 0.6px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  opacity: 0.9;
+}
+
+.tx-toast__ms {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-dim);
+  opacity: 0.75;
 }
 
 .tx-toast__detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--ds-text-dim);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The signature is data, not prose: monospace so it stops looking like a
+   word and starts looking like something you could paste. */
+.tx-toast__sig {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--ds-surface-deep);
+  color: var(--slate-300);
 }
 
 /* A failure is the one message worth reading in full — give it two lines. */
@@ -713,23 +759,56 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--slate-300);
-  background: var(--navy-900);
+  background: var(--ds-surface-deep);
+  border: 1px solid var(--ds-line);
   transition:
     color var(--t-instant) var(--ease-out),
+    border-color var(--t-instant) var(--ease-out),
     transform var(--t-instant) var(--ease-pop);
 }
 
 .tx-toast__link:hover {
   color: var(--sky-400);
-  transform: translateY(-1px) scale(1.08);
+  border-color: var(--ds-line-strong);
+  transform: translateY(-1px);
+}
+
+/* Lifetime bar: drains along the bottom edge over the toast's own linger. */
+.tx-toast__life {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: 0 50%;
+  background: var(--accent);
+  opacity: 0.5;
+  animation: tx-life var(--life, 4500ms) linear both;
+}
+
+@keyframes tx-life {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* A failure earns exactly one shake — enough to catch the eye, not enough
+   to become the thing the player is watching. */
+.tx-toast--failed {
+  animation:
+    tx-toast-in 240ms var(--ease-pop) both,
+    ds-shake-x 300ms var(--ease-out) 220ms;
 }
 
 /* Square spinner — the voxel motif, not a circle. */
 .tx-spinner {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   border-radius: 3px;
   background: var(--sun-400);
   animation: tx-spin 900ms var(--ease-out) infinite;
@@ -740,16 +819,18 @@
     transform: rotate(0deg) scale(1);
   }
   50% {
-    transform: rotate(180deg) scale(0.7);
+    transform: rotate(180deg) scale(0.68);
   }
   100% {
     transform: rotate(360deg) scale(1);
   }
 }
 
-/* Reduced motion (setting or OS): state still changes, nothing dances. */
+/* Reduced motion (setting or OS): state still changes, nothing dances. The
+   lifetime bar simply holds full width rather than draining. */
 .tx-toasts--still .tx-toast,
 .tx-toasts--still .tx-toast__icon,
+.tx-toasts--still .tx-toast__life,
 .tx-toasts--still .tx-spinner {
   animation: none;
 }
@@ -757,6 +838,7 @@
 @media (prefers-reduced-motion: reduce) {
   .tx-toast,
   .tx-toast__icon,
+  .tx-toast__life,
   .tx-spinner {
     animation: none;
   }

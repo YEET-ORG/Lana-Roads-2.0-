@@ -95,6 +95,16 @@ export interface TxActivity {
    */
   background?: boolean;
   at: number;
+  /** When the send started — the anchor every later update measures from. */
+  startedAt: number;
+  /**
+   * Round trip in milliseconds, once the transaction has a verdict.
+   *
+   * This is the number that tells a player whether the game is slow or
+   * their input was wrong, so it is measured from the moment the send
+   * began, not from the moment a signature came back.
+   */
+  durationMs?: number;
 }
 
 /** One player's run as seen from outside: enough to draw and to count. */
@@ -196,6 +206,7 @@ export class CrossyClient {
     opts: { quiet?: boolean; background?: boolean; settles?: TxStatus } = {},
   ): Promise<T> {
     const id = ++this.txSeq;
+    const startedAt = Date.now();
     const stamp = (rest: Partial<TxActivity>): TxActivity => ({
       id,
       label,
@@ -203,6 +214,7 @@ export class CrossyClient {
       quiet: opts.quiet,
       background: opts.background,
       at: Date.now(),
+      startedAt,
       status: "pending",
       ...rest,
     });
@@ -213,6 +225,7 @@ export class CrossyClient {
       const settled = stamp({
         status: opts.settles ?? (plane === "base" ? "confirmed" : "sent"),
         signature,
+        durationMs: Date.now() - startedAt,
       });
       if (signature) {
         if (this.txBySignature.size > 64) this.txBySignature.clear();
@@ -228,7 +241,19 @@ export class CrossyClient {
         ?.map((l) => l.match(/Error Code: (\w+)/)?.[1])
         .find(Boolean);
       const error = code ?? `${e?.transactionMessage ?? e?.message ?? e}`.slice(0, 140);
-      this.emitTx(stamp({ status: "failed", error }));
+      // "Already processed" is the cluster saying THIS EXACT transaction is
+      // on chain — the work happened. Reporting it as a failure would be a
+      // lie the player has no way to check.
+      if (/already been processed/i.test(error)) {
+        this.emitTx(
+          stamp({
+            status: plane === "base" ? "confirmed" : "sent",
+            durationMs: Date.now() - startedAt,
+          }),
+        );
+        throw e;
+      }
+      this.emitTx(stamp({ status: "failed", error, durationMs: Date.now() - startedAt }));
       throw e;
     }
   }
@@ -245,6 +270,7 @@ export class CrossyClient {
    */
   markTx(signature: string, status: TxStatus, error?: string, label?: string) {
     const seen = this.txBySignature.get(signature);
+    const startedAt = seen?.startedAt ?? Date.now();
     this.emitTx({
       id: seen?.id ?? ++this.txSeq,
       label: label ?? seen?.label ?? "Action",
@@ -255,6 +281,10 @@ export class CrossyClient {
       signature,
       error,
       at: Date.now(),
+      startedAt,
+      // Measured from the original send: a verdict that arrives late is
+      // exactly the case where the elapsed time is worth knowing.
+      durationMs: Date.now() - startedAt,
     });
   }
 
@@ -544,7 +574,7 @@ export class CrossyClient {
     receiptNonce: number;
   }): Promise<string> {
     const world = pda.world(WorldMode.Paid, params.day);
-    return this.track("Reconciling receipt", "base", () =>
+    return this.track("Receipt", "base", () =>
       this.program.methods
         .reconcileReceipt()
         .accountsPartial({
@@ -1093,7 +1123,7 @@ export class CrossyClient {
 
     // The program caps how far ahead a session may run; stay inside it.
     const expiry = now + MAX_SESSION_SECONDS - 60;
-    await this.track("Authorising this device", "er", () =>
+    await this.track("Session key", "er", () =>
       this.erProgram.methods
         .rotateSession(params.sessionAuthority, new BN(expiry))
         .accountsPartial({ run: runAddr, wallet })
@@ -1123,7 +1153,7 @@ export class CrossyClient {
       .catch(() => null);
     // Nothing to revoke if the run never existed or is already handed back.
     if (!run || run.sessionAuthority.equals(PublicKey.default)) return false;
-    await this.track("Handing back the session", "er", () =>
+    await this.track("Session ended", "er", () =>
       this.erProgram.methods
         .endSession()
         .accountsPartial({ run: runAddr, wallet })
@@ -1151,7 +1181,7 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.track("Claiming the record", "er", () =>
+    return this.track("New record", "er", () =>
       this.erConnection.sendRawTransaction(tx.serialize(), {
         skipPreflight: true,
         maxRetries: 0,
