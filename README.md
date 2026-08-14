@@ -24,7 +24,17 @@ npx tsx scripts/open-day.ts              # today, casual world
 MODES=0,1 npx tsx scripts/open-day.ts    # paid world as well
 ./scripts/run-keeper.sh                  # frontier + hazard crank, supervised
 npx tsx scripts/presence-check.ts        # who is online, and ER round-trip
+DRY_RUN=1 npx tsx scripts/settle-day.ts  # what settling yesterday would do
+npx tsx scripts/settle-day.ts            # actually settle it
 ```
+
+Settlement is the other half of the day: `close_world` on both planes,
+`close_day`, reconciling every pending payment, `record_final_commit`,
+`finalize_day` (90% winner / 10% team, or the whole pool rolled forward when
+nobody scored), and handing a rollover to the next day. Every stage is
+idempotent, so a half-finished settlement resumes where it stopped. The
+keeper runs it for yesterday every five minutes; `SETTLE=0` leaves the
+payout to an operator.
 
 `open-day.ts` is idempotent — it only does what is still missing — and the
 keeper calls the same routine itself when it finds no world on the rollup, so

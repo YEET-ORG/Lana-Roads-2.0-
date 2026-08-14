@@ -31,6 +31,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDayReady } from "./open-day";
+import { ensureDaySettled } from "./settle-day";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
@@ -52,6 +53,10 @@ const SECTOR_EDGE = 8;
 const MAX_CARRY_TILES = 8;
 /** Set CRANK_HAZARDS=0 to leave collision resolution entirely to clients. */
 const CRANK_HAZARDS = (process.env.CRANK_HAZARDS ?? "1") !== "0";
+/** Set SETTLE=0 to leave day settlement (and the payout) to an operator. */
+const SETTLE = (process.env.SETTLE ?? "1") !== "0";
+/** Settlement is idempotent and slow-moving; once every few minutes is plenty. */
+const SETTLE_EVERY_MS = Number(process.env.SETTLE_EVERY_MS ?? 5 * 60_000);
 
 const S = {
   config: Buffer.from("config"),
@@ -170,6 +175,8 @@ async function main() {
   const laneCache = new Map<string, any[]>();
   /** Last day-setup attempt per (mode, day), to rate-limit the roll. */
   const dayRollAt = new Map<string, number>();
+  /** Last settlement sweep; settlement is a pipeline, not a fast path. */
+  let settleAt = 0;
 
   for (;;) {
     for (const mode of modes) {
@@ -179,6 +186,7 @@ async function main() {
         log(`mode ${mode} error:`, e?.message ?? e);
       }
     }
+    await settleYesterday();
     await sleep(POLL_MS);
   }
 
@@ -335,6 +343,44 @@ async function main() {
       );
     } catch (e: any) {
       log(`mode ${mode} day ${day}: day setup failed:`, e?.message ?? e);
+    }
+  }
+
+  /**
+   * Walk yesterday towards Settled.
+   *
+   * A finished day is not finished on its own: the vault keeps the entry
+   * money, the worlds stay delegated, and nobody is paid until someone
+   * cranks the pipeline. It is a sequence of confirmed base transactions,
+   * so it runs on its own slow clock rather than in the frontier's hot
+   * path, and it is deliberately quiet when there is nothing to do.
+   */
+  async function settleYesterday() {
+    if (!SETTLE) return;
+    if (Date.now() - settleAt < SETTLE_EVERY_MS) return;
+    settleAt = Date.now();
+    const day = BigInt(Math.floor(Date.now() / 1000 / 86400)) - 1n;
+    try {
+      const out = await ensureDaySettled({
+        baseProgram,
+        erProgram,
+        admin: keeper,
+        day,
+        log: (...a: any[]) => log(" ", ...a),
+      });
+      if (out.did.length) {
+        log(`settlement day ${day}: ${out.did.join("; ")} -> ${out.status}`);
+        if (out.winner)
+          log(
+            `  winner ${out.winner} paid ${out.winnerAmount}, team ${out.teamAmount}`,
+          );
+      }
+      // Blockages are only worth saying when work was possible at all; a
+      // day that is simply already settled says nothing.
+      if (out.blocked.length && out.status !== "settled" && out.status !== "voided")
+        log(`settlement day ${day} blocked: ${out.blocked.join("; ")}`);
+    } catch (e: any) {
+      log(`settlement day ${day} failed:`, e?.message ?? e);
     }
   }
 
