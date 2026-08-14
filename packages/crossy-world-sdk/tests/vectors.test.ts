@@ -21,6 +21,7 @@ import {
   VEHICLE_VARIANT_COUNT,
   VehicleClass,
   laneObjectCovers,
+  laneObjects,
   laneVehicleClass,
   laneVehicles,
   objectIndex,
@@ -174,26 +175,85 @@ describe("shared golden vectors", () => {
     for (const v of a) assert.ok(v.assetId.startsWith("vehicle."));
   });
 
-  it("smooth car positions still land on the authoritative tile each tick", () => {
-    // Smoothing may glide a car between tiles for the eye, but it must pass
-    // through exactly the position the program has at every tick, or what
-    // the player sees stops predicting what kills them.
-    const seed = new Uint8Array(32).fill(3);
-    for (let tick = 0; tick < 12; tick++) {
-      const t = tick * 1000;
-      for (const v of laneVehicles(roadLane, 4, seed, t)) {
-        assert.equal(v.renderX, v.x, `tick ${tick} car ${v.index}`);
+  it("every lethal tile belongs to a listed object", () => {
+    // The renderer draws what `laneObjects` enumerates; the program kills
+    // on what `laneObjectCovers` says. If the enumeration misses an object,
+    // that car is invisible and still lethal — which is exactly what a
+    // left-running lane used to do, listing two or three cars out of
+    // twenty. Sweep every lane shape rather than trusting one.
+    for (const footprint of [1, 2, 3, 4]) {
+      for (const gapTiles of [3, 4, 6, 8, 12]) {
+        for (const dirPositive of [0, 1]) {
+          for (const speedMtps of [1200, 2000, 3000, 4000]) {
+            for (const phaseMt of [0, 250, 700]) {
+              const lane = {
+                kind: 1,
+                dirPositive,
+                footprint,
+                gapTiles,
+                speedMtps,
+                phaseMt,
+                warningMs: 0,
+                periodMs: 0,
+                blockerMask: 0n,
+                sinking: 0,
+              };
+              for (let tick = 0; tick < 24; tick++) {
+                const t = tick * 1000;
+                const objects = laneObjects(lane, t);
+                for (let x = 0; x < 64; x++) {
+                  const listed = objects.some((o) => x >= o.x && x < o.x + footprint);
+                  assert.equal(
+                    listed,
+                    laneObjectCovers(lane, x, t),
+                    `fp=${footprint} gap=${gapTiles} dir=${dirPositive} ` +
+                      `spd=${speedMtps} phase=${phaseMt} t=${t} x=${x}`,
+                  );
+                }
+              }
+            }
+          }
+        }
       }
-      // Mid-tick the drawn position leads the authoritative one, never lags
-      // and never overshoots the next tick's position.
-      const mid = laneVehicles(roadLane, 4, seed, t + 500);
-      const next = laneVehicles(roadLane, 4, seed, t + 1000);
-      for (const v of mid) {
-        const after = next.find((n) => n.index === v.index);
-        if (!after) continue;
-        const lo = Math.min(v.x, after.x);
-        const hi = Math.max(v.x, after.x);
-        assert.ok(v.renderX >= lo && v.renderX <= hi, `car ${v.index} strayed`);
+    }
+  });
+
+  it("smooth car positions never draw ahead of the program", () => {
+    // Smoothing may glide a car between tiles for the eye, but the drawn
+    // position must never LEAD the authoritative one. A car drawn past its
+    // tile leaves a gap behind it that the program still calls lethal, and
+    // a player who hops into that gap dies with nothing on screen to
+    // explain it. Lagging is the safe direction: the car is shown arriving
+    // at a tile the program already considers occupied.
+    const seed = new Uint8Array(32).fill(3);
+    for (let tick = 1; tick < 12; tick++) {
+      const t = tick * 1000;
+      const here = laneVehicles(roadLane, 4, seed, t);
+      const prev = laneVehicles(roadLane, 4, seed, t - 1000);
+      for (let f = 0; f <= 10; f++) {
+        for (const v of laneVehicles(roadLane, 4, seed, t + f * 100)) {
+          const before = prev.find((p) => p.index === v.index);
+          if (!before) continue;
+          const lo = Math.min(before.x, v.x);
+          const hi = Math.max(before.x, v.x);
+          assert.ok(
+            v.renderX >= lo - 1e-9 && v.renderX <= hi + 1e-9,
+            `car ${v.index} strayed outside [${lo}, ${hi}] at frac ${f / 10}`,
+          );
+          // Never past the authoritative tile, in whichever direction the
+          // lane runs.
+          if (roadLane.dirPositive === 1) {
+            assert.ok(v.renderX <= v.x + 1e-9, `car ${v.index} led its tile`);
+          } else {
+            assert.ok(v.renderX >= v.x - 1e-9, `car ${v.index} led its tile`);
+          }
+        }
+      }
+      // And it does arrive: at the end of the tick the drawn position is
+      // the authoritative one.
+      for (const v of laneVehicles(roadLane, 4, seed, t + 999.999)) {
+        const target = here.find((h) => h.index === v.index);
+        if (target) assert.ok(Math.abs(v.renderX - target.x) < 0.01);
       }
     }
   });

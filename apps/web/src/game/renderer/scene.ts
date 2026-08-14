@@ -23,7 +23,7 @@ import { agentId, instantiate, pickDeterministic, ROCK_POOL } from "./assets";
 import { BlockDust, type Surface } from "./effects";
 import { sfx } from "../audio";
 import { arc, clamp01, easeOutBack, noise1d, smoothFactor } from "./tween";
-import { haptic } from "../../lib/settings";
+import { getSettings, haptic } from "../../lib/settings";
 
 export interface RemotePlayer {
   wallet: string;
@@ -326,6 +326,15 @@ export class WorldScene {
   /** Conveyor index and model currently held by each mover slot. */
   private moverSlots = new Map<number, Array<{ index: number; assetId: string }>>();
   private movers = new Map<number, THREE.Object3D[]>();
+  /**
+   * One flat mark per traffic slot, drawn on the AUTHORITATIVE tiles.
+   *
+   * The car body is smoothed for the eye and therefore lags the program by
+   * up to a step; these do not move between ticks. They are the contract
+   * made visible: the span the program will kill you on, exactly where it
+   * says it is.
+   */
+  private hazardMarks = new Map<number, THREE.Mesh[]>();
   private railStripMats = new Map<number, THREE.MeshLambertMaterial>();
   private players = new Map<string, PlayerRig>();
   private remoteTargets = new Map<string, THREE.Vector3>();
@@ -355,6 +364,13 @@ export class WorldScene {
   private riverSurfaceGeo = new THREE.PlaneGeometry(1, 1, 40, 6);
   private wheelGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.08, 8);
   private shadowGeo = new THREE.CircleGeometry(0.34, 12);
+  private hazardMarkGeo = new THREE.PlaneGeometry(1, 1);
+  private hazardMarkMat = new THREE.MeshBasicMaterial({
+    color: 0x0b0f1a,
+    transparent: true,
+    opacity: 0.26,
+    depthWrite: false,
+  });
   private shadowMat = new THREE.MeshBasicMaterial({
     color: COLORS.shadow,
     transparent: true,
@@ -472,6 +488,7 @@ export class WorldScene {
     if (old) {
       this.scene.remove(old);
       disposeLaneGroup(old);
+      this.hazardMarks.delete(row);
       this.movers.delete(row);
       this.railStripMats.delete(row);
     }
@@ -586,6 +603,22 @@ export class WorldScene {
       }
       this.movers.set(row, objs);
       this.moverSlots.set(row, slots);
+      // Roads get the contract drawn on them. Rivers do not need it (logs
+      // are slow and their footprint is where you STAND, not where you
+      // die) and a rail's whole row is lethal at once, so position carries
+      // no information there.
+      if (lane.kind === LANE_ROAD) {
+        const marks: THREE.Mesh[] = [];
+        for (let i = 0; i < count; i++) {
+          const mark = new THREE.Mesh(this.hazardMarkGeo, this.hazardMarkMat);
+          mark.rotation.x = -Math.PI / 2;
+          mark.position.y = 0.02;
+          mark.visible = false;
+          group.add(mark);
+          marks.push(mark);
+        }
+        this.hazardMarks.set(row, marks);
+      }
     }
     this.laneMeshes.set(row, group);
     this.scene.add(group);
@@ -1025,6 +1058,7 @@ export class WorldScene {
       this.railStripMats.get(row)?.dispose();
       this.railStripMats.delete(row);
       this.laneMeshes.delete(row);
+      this.hazardMarks.delete(row);
       this.movers.delete(row);
     }
   }
@@ -1075,6 +1109,9 @@ export class WorldScene {
 
     // Hazard visuals from deterministic descriptors.
     const nearRow = Math.round(-p.z);
+    // Read once per frame: the marks are a fairness aid, and a player who
+    // finds them noisy can turn them off.
+    const marksOn = getSettings().hazardMarks;
     if (++this.frame % 120 === 0) this.pruneBehind(nearRow);
     let riverNear = false;
     for (const [row, lane] of this.lanes) {
@@ -1135,9 +1172,25 @@ export class WorldScene {
           m.visible = true;
           m.position.y = (submerged ? -0.28 : 0) + bob;
           m.position.z = -row;
+          // The mark sits on `v.x` — the tile the program has, not the one
+          // the eye is being shown. Between ticks the body trails it, and
+          // the gap IS the difference between what is drawn and what
+          // collides. Showing it beats hiding it.
+          const mark = this.hazardMarks.get(row)?.[slot];
+          if (mark) {
+            if (marksOn) {
+              mark.position.set(v.x + lane.footprint / 2, 0.02, -row);
+              mark.scale.set(lane.footprint * 0.96, 0.86, 1);
+              mark.visible = true;
+            } else if (mark.visible) {
+              mark.visible = false;
+            }
+          }
         }
+        const marks = this.hazardMarks.get(row);
         for (let i = 0; i < meshes.length; i++) {
           if (!seen.has(i)) meshes[i].visible = false;
+          if (marks?.[i] && !seen.has(i)) marks[i].visible = false;
         }
       } else if (lane.kind === LANE_RAIL) {
         const { phase, trainX } = railPhaseVisual(lane, tMs);

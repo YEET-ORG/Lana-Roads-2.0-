@@ -404,6 +404,29 @@ export class CrossyClient {
     return this.program.account.worldHeader.fetchNullable(address).catch(() => null);
   }
 
+  /**
+   * The rollup's own wall clock, in milliseconds.
+   *
+   * Hazards are evaluated against `Clock::unix_timestamp` on the validator,
+   * so a client that anchors its animation to the BROWSER clock is one
+   * whole hazard tick out of step for every second of skew — and browser
+   * clocks are routinely off by that much. Ask the chain what time it is.
+   *
+   * `getBlockTime` reports the slot's production time, so the answer is a
+   * touch stale; that lands the client slightly BEHIND the program, which
+   * is the direction that cannot get a player killed. Null when the
+   * endpoint does not answer, in which case the caller keeps its own clock.
+   */
+  async chainTimeMs(): Promise<number | null> {
+    try {
+      const slot = await this.erConnection.getSlot("processed");
+      const seconds = await this.erConnection.getBlockTime(slot);
+      return seconds == null ? null : seconds * 1000;
+    } catch {
+      return null;
+    }
+  }
+
   async getProfile(wallet = this.wallet.publicKey) {
     return this.program.account.playerProfile.fetchNullable(pda.profile(wallet));
   }

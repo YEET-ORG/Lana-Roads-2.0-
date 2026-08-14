@@ -100,7 +100,16 @@ export function laneObjects(
   const traveled = traveledTiles(lane, tMs);
   const out: Array<{ index: number; x: number }> = [];
   // Solve for the slots whose footprint can touch [0, WORLD_WIDTH).
-  const lo = lane.dirPositive === 1 ? -traveled : traveled - WORLD_WIDTH;
+  //
+  // An object sits at `index * gap + traveled` when the lane runs right and
+  // `index * gap - traveled` when it runs left, so the lowest index that
+  // can still touch the world is found by moving `traveled` to the other
+  // side — it changes SIGN with the direction. Subtracting the world width
+  // instead (as this did) walks a window of indices that are entirely off
+  // the left edge: on a left-running lane only the first two or three cars
+  // were ever listed, while every other car on that row went on colliding
+  // unseen.
+  const lo = lane.dirPositive === 1 ? -traveled : traveled;
   const first = Math.floor((lo - lane.footprint) / lane.gapTiles);
   const span = Math.ceil((WORLD_WIDTH + lane.footprint * 2) / lane.gapTiles) + 2;
   for (let i = 0; i <= span; i++) {
@@ -268,9 +277,13 @@ export interface RenderedVehicle {
    */
   x: number;
   /**
-   * Where to draw it. Interpolated across the tick so motion is continuous,
-   * and equal to `x` exactly at each tick boundary — the object passes
-   * through every authoritative position rather than drifting off it.
+   * Where to draw it: interpolated across the tick so motion is continuous.
+   *
+   * Always between the previous authoritative tile and `x`, and never past
+   * `x`. The drawn car therefore lags the program by up to one step and
+   * catches up as the tick closes — a screen that is at worst cautious.
+   * Leading instead would open a gap behind every car that the program
+   * still calls lethal.
    */
   renderX: number;
   footprint: number;
@@ -292,16 +305,26 @@ export function laneVehicles(
   // Positions are resolved on the authoritative tick — passing a render
   // clock straight through would put objects a tile away from where the
   // program has them — and the leftover fraction only smooths the draw.
+  //
+  // The smoothing runs from the PREVIOUS tick INTO the current one, never
+  // forward out of it. Drawing ahead is the one direction that gets a
+  // player killed: a car rendered up to a full step past its authoritative
+  // tile leaves an inviting gap behind it that the program still calls
+  // lethal. Lagging instead means the screen is at worst conservative —
+  // the car is shown arriving at the tile the program already considers
+  // occupied.
   const tick = tickOf(tMs);
   const frac = Math.min(1, Math.max(0, (tMs - tick) / 1000));
-  const step = traveledTiles(lane, tick + 1000) - traveledTiles(lane, tick);
-  const drift = (lane.dirPositive === 1 ? 1 : -1) * step * frac;
+  const prevTick = Math.max(0, tick - 1000);
   return laneObjects(lane, tick).map(({ index, x }) => {
     const variant = vehicleVariant(randomness, row, index, cls);
+    // Conveyor indices are stable and positions are linear in `traveled`,
+    // so the previous tile is exactly one step back with no wraparound.
+    const prevX = objectTileX(lane, index, prevTick);
     return {
       index,
       x,
-      renderX: x + drift,
+      renderX: prevX + (x - prevX) * frac,
       footprint: lane.footprint,
       dirPositive: lane.dirPositive,
       cls,

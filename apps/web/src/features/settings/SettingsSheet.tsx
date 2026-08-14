@@ -161,6 +161,13 @@ export function SettingsSheet({
         onPick={set("haptics")}
       />
       <Choice
+        label="Danger markers"
+        hint="Traffic is smoothed between the program's whole-second steps. This marks the tiles a car actually occupies on chain."
+        value={s.hazardMarks}
+        options={ON_OFF}
+        onPick={set("hazardMarks")}
+      />
+      <Choice
         label="Reduced motion"
         hint="Trims non-essential animation."
         value={s.reduceMotion}

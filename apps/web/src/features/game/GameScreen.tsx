@@ -471,9 +471,15 @@ export function GameScreen({
         syncPresence();
       }
       if (worldAcc) {
-        // Anchor the hazard clock to the world's own timeline. Re-running
-        // this on every sweep must converge, not creep forward.
-        scene?.setWorldElapsed(Date.now() - Number(worldAcc.startTs.toString()) * 1000);
+        // Anchor the hazard clock to the world's own timeline, measured by
+        // the ROLLUP rather than this browser. The program evaluates
+        // hazards against the validator's clock, so a second of local skew
+        // draws every car a whole tick from where it really is. Falls back
+        // to the local clock only if the chain will not say.
+        const chainNow = await boot.client.chainTimeMs().catch(() => null);
+        scene?.setWorldElapsed(
+          (chainNow ?? Date.now()) - Number(worldAcc.startTs.toString()) * 1000,
+        );
         hudRecordRef.current = worldAcc.recordScore;
         setHud((h) =>
           h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },

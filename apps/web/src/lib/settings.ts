@@ -31,6 +31,14 @@ export interface Settings {
   region: string;
   /** Trim non-essential animation for motion sensitivity and weak GPUs. */
   reduceMotion: boolean;
+  /**
+   * Draw the tiles traffic legally occupies right now.
+   *
+   * Cars are smoothed between the program's whole-second steps, so the
+   * body on screen is not exactly the span that collides. This shows the
+   * span that does.
+   */
+  hazardMarks: boolean;
 }
 
 const KEY = "crossy-world:settings";
@@ -44,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showStatus: true,
   region: "auto",
   reduceMotion: false,
+  hazardMarks: true,
 };
 
 function load(): Settings {
