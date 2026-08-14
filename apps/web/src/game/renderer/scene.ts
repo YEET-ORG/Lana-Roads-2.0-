@@ -23,6 +23,7 @@ import { agentId, instantiate, pickDeterministic, ROCK_POOL } from "./assets";
 import { BlockDust, type Surface } from "./effects";
 import { sfx } from "../audio";
 import { arc, clamp01, easeOutBack, noise1d, smoothFactor } from "./tween";
+import { haptic } from "../../lib/settings";
 
 export interface RemotePlayer {
   wallet: string;
@@ -963,7 +964,7 @@ export class WorldScene {
     }
     this.addTrauma(cause === "water" ? 0.45 : cause === "train" ? 0.95 : 0.8);
     if (cause !== "water") this.hitStopUntil = performance.now() + 110;
-    if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+    haptic([20, 30, 20]);
   }
 
   reviveLocal() {

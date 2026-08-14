@@ -27,9 +27,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
-const TOKEN_PROGRAM = new web3.PublicKey(
-  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-);
+const TOKEN_PROGRAM = new web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new web3.PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
 );
@@ -229,9 +227,7 @@ export async function ensureDaySettled(opts: {
           `(deposits: ${deposited})`,
       );
     } else if (deposited > 0n) {
-      out.blocked.push(
-        `refusing to auto-void: ${deposited} was deposited into this day`,
-      );
+      out.blocked.push(`refusing to auto-void: ${deposited} was deposited into this day`);
     } else if (dry) {
       out.did.push("would void the unopened day");
     } else {
@@ -547,11 +543,7 @@ async function main() {
     log: (...a) => console.log(...a),
   });
   console.log(
-    JSON.stringify(
-      out,
-      (_k, v) => (typeof v === "bigint" ? v.toString() : v),
-      2,
-    ),
+    JSON.stringify(out, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2),
   );
 }
 

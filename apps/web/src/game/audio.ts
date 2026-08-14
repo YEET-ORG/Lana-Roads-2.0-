@@ -5,7 +5,23 @@
  * autoplay policies never block it; every call is safe to fire-and-forget.
  */
 
+import { getSettings } from "../lib/settings";
+
 let ctx: AudioContext | null = null;
+
+/**
+ * Player volume, applied at the point every sound is made.
+ *
+ * Muting has to happen HERE rather than at each call site: the scene, the
+ * HUD and the input layer all make noise, and a switch any one of them can
+ * forget is a switch that does not work.
+ */
+function gainScale(kind: "sfx" | "ambience"): number {
+  const s = getSettings();
+  if (kind === "sfx" && !s.sound) return 0;
+  if (kind === "ambience" && !s.ambience) return 0;
+  return Math.max(0, Math.min(1, s.volume));
+}
 
 function ac(): AudioContext | null {
   try {
@@ -27,6 +43,9 @@ interface Blip {
 }
 
 function blip({ type, freq, slide = 1, dur, vol }: Blip) {
+  const scale = gainScale("sfx");
+  if (scale <= 0) return;
+  vol *= scale;
   const a = ac();
   if (!a) return;
   const t0 = a.currentTime;
@@ -44,6 +63,9 @@ function blip({ type, freq, slide = 1, dur, vol }: Blip) {
 }
 
 function noiseBurst(dur: number, vol: number, hp = 400, lp = 2400) {
+  const scale = gainScale("sfx");
+  if (scale <= 0) return;
+  vol *= scale;
   const a = ac();
   if (!a) return;
   const n = a.sampleRate * dur;
@@ -87,7 +109,10 @@ function startRiver(a: AudioContext) {
   gain.gain.value = 0.0001;
   src.connect(filter).connect(gain).connect(a.destination);
   src.start();
-  gain.gain.exponentialRampToValueAtTime(0.028, a.currentTime + 0.4);
+  gain.gain.exponentialRampToValueAtTime(
+    Math.max(0.0002, 0.028 * gainScale("ambience")),
+    a.currentTime + 0.4,
+  );
   riverNodes = { src, gain };
 }
 
@@ -174,6 +199,9 @@ export const sfx = {
   },
   /** Soft looping river bed. Safe to call every frame with a bool. */
   river(on: boolean) {
+    // An ambience the player switched off is never "wanted", or it would
+    // start itself again the next time the loop restarts.
+    on = on && gainScale("ambience") > 0;
     riverWanted = on;
     const a = ac();
     if (!a) return;

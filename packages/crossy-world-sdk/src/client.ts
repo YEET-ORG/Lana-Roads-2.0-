@@ -153,6 +153,12 @@ export class CrossyClient {
 
   private txListeners = new Set<(a: TxActivity) => void>();
   private txSeq = 0;
+  /**
+   * Signature -> the activity it belongs to, so a later verdict lands on
+   * the SAME entry instead of opening a second one. Bounded: gameplay
+   * produces a signature every hop and this must not grow all session.
+   */
+  private txBySignature = new Map<string, TxActivity>();
 
   /**
    * Watch every transaction this client sends. Returns an unsubscribe.
@@ -204,12 +210,15 @@ export class CrossyClient {
     try {
       const out = await fn();
       const signature = typeof out === "string" ? out : undefined;
-      this.emitTx(
-        stamp({
-          status: opts.settles ?? (plane === "base" ? "confirmed" : "sent"),
-          signature,
-        }),
-      );
+      const settled = stamp({
+        status: opts.settles ?? (plane === "base" ? "confirmed" : "sent"),
+        signature,
+      });
+      if (signature) {
+        if (this.txBySignature.size > 64) this.txBySignature.clear();
+        this.txBySignature.set(signature, settled);
+      }
+      this.emitTx(settled);
       return out;
     } catch (e: any) {
       // anchor@0.32 + web3.js@1.98 disagree on SendTransactionError's shape,
@@ -222,6 +231,31 @@ export class CrossyClient {
       this.emitTx(stamp({ status: "failed", error }));
       throw e;
     }
+  }
+
+  /**
+   * Correct a transaction's story after the fact.
+   *
+   * A rollup send returns a signature the instant the validator takes the
+   * bytes, which is BEFORE the program has judged it. Only the caller
+   * watching authoritative state knows whether the action actually
+   * happened, so it can say so here and whatever is on screen updates
+   * rather than leaving a cheerful receipt for something that never
+   * occurred.
+   */
+  markTx(signature: string, status: TxStatus, error?: string, label?: string) {
+    const seen = this.txBySignature.get(signature);
+    this.emitTx({
+      id: seen?.id ?? ++this.txSeq,
+      label: label ?? seen?.label ?? "Action",
+      plane: seen?.plane ?? "er",
+      quiet: seen?.quiet,
+      background: seen?.background,
+      status,
+      signature,
+      error,
+      at: Date.now(),
+    });
   }
 
   private async routerRpc<T>(method: string, params: unknown[]): Promise<T> {
@@ -512,13 +546,18 @@ export class CrossyClient {
     const world = pda.world(WorldMode.Paid, params.day);
     return this.track("Reconciling receipt", "base", () =>
       this.program.methods
-      .reconcileReceipt()
-      .accountsPartial({
-        daily: pda.daily(params.day),
-        receipt: pda.receipt(params.kind, params.day, params.wallet, params.receiptNonce),
-        run: pda.run(world, params.wallet),
-        contribution: pda.contribution(params.day, params.wallet),
-      })
+        .reconcileReceipt()
+        .accountsPartial({
+          daily: pda.daily(params.day),
+          receipt: pda.receipt(
+            params.kind,
+            params.day,
+            params.wallet,
+            params.receiptNonce,
+          ),
+          run: pda.run(world, params.wallet),
+          contribution: pda.contribution(params.day, params.wallet),
+        })
         .rpc(),
     );
   }
@@ -820,9 +859,26 @@ export class CrossyClient {
   private erBlockhashCache: { value: string; fetchedAt: number } | null = null;
   private erBlockhashTimer: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * How long a rollup blockhash may be reused.
+   *
+   * Solana drops a transaction whose blockhash is older than 150 blocks. On
+   * the base layer that is about a minute; on an ephemeral rollup, where a
+   * block is ~50ms, it is roughly SEVEN SECONDS. A cache tuned for base
+   * timings therefore hands out dead blockhashes for part of every cycle,
+   * and the failure is invisible: `sendRawTransaction` still returns a
+   * signature, the toast still says the move went out, and the move simply
+   * never happens. Stay far inside the window.
+   */
+  private static readonly ER_BLOCKHASH_MAX_AGE_MS = 3_000;
+  private static readonly ER_BLOCKHASH_REFRESH_MS = 1_500;
+
   private async erBlockhash(): Promise<string> {
     const now = Date.now();
-    if (!this.erBlockhashCache || now - this.erBlockhashCache.fetchedAt > 15_000) {
+    if (
+      !this.erBlockhashCache ||
+      now - this.erBlockhashCache.fetchedAt > CrossyClient.ER_BLOCKHASH_MAX_AGE_MS
+    ) {
       const { blockhash } = await this.erConnection.getLatestBlockhash("processed");
       this.erBlockhashCache = { value: blockhash, fetchedAt: now };
     }
@@ -849,7 +905,7 @@ export class CrossyClient {
       } catch {
         /* next tick retries */
       }
-    }, 10_000);
+    }, CrossyClient.ER_BLOCKHASH_REFRESH_MS);
     return () => {
       if (this.erBlockhashTimer) clearInterval(this.erBlockhashTimer);
       this.erBlockhashTimer = null;
@@ -1095,14 +1151,11 @@ export class CrossyClient {
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
-    return this.track(
-      "Claiming the record",
-      "er",
-      () =>
-        this.erConnection.sendRawTransaction(tx.serialize(), {
-          skipPreflight: true,
-          maxRetries: 0,
-        }),
+    return this.track("Claiming the record", "er", () =>
+      this.erConnection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: true,
+        maxRetries: 0,
+      }),
     );
   }
 

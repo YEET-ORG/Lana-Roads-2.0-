@@ -20,6 +20,8 @@ import {
 } from "../../game/simulation/hazards";
 import { Button, Confetti, CountUp, Icon, IconButton, Modal } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
+import { haptic, useSettings } from "../../lib/settings";
+import { SettingsSheet } from "../settings/SettingsSheet";
 import type { Route } from "../../app/App";
 
 /**
@@ -124,6 +126,8 @@ export function GameScreen({
   const [respawning, setRespawning] = useState(false);
   /** Another window took this run over; this one is a spectator. */
   const [displaced, setDisplaced] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settings = useSettings();
   const world = pda.world(route.mode, route.day);
 
   // Casual: solsocket-style join — ONE base tx (profile + starter + run +
@@ -213,6 +217,8 @@ export function GameScreen({
   const lastAuthSeqRef = useRef(-1);
   /** Consecutive actions the chain never accepted. */
   const rejectedRunRef = useRef(0);
+  /** Attempt the sequence counter belongs to; a new attempt resets it. */
+  const attemptRef = useRef<number | null>(null);
   /** True while gameplay authority is back with the wallet. */
   const sessionEndedRef = useRef(false);
   /** Rotation counter this window last claimed; guards against a takeover war. */
@@ -263,10 +269,18 @@ export function GameScreen({
       const state = Object.keys(run.state)[0] ?? "?";
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
-        lastAuthSeqRef.current = Math.max(
-          lastAuthSeqRef.current,
-          run.actionSeq.toNumber(),
-        );
+        // A new attempt restarts the sequence at zero. Carrying the old
+        // high-water mark across would make every queued action look
+        // instantly accepted, so the counter resets with the attempt.
+        const authSeqNow = run.actionSeq.toNumber();
+        if (run.attemptNonce !== attemptRef.current) {
+          attemptRef.current = run.attemptNonce;
+          lastAuthSeqRef.current = authSeqNow;
+          outboxRef.current = [];
+        }
+        lastAuthSeqRef.current = Math.max(lastAuthSeqRef.current, authSeqNow);
+        // Nothing queued can apply to a run that is no longer playing.
+        if (Object.keys(run.state)[0] !== "active") outboxRef.current = [];
         hazardRef.current = {
           nonce: run.hazardNonce,
           deadlineMs: Number(run.hazardDeadlineMs?.toString() ?? 0),
@@ -422,7 +436,11 @@ export function GameScreen({
       // prediction back to the truth, so it must never sit behind work that
       // can fail: a chunk that will not load would otherwise leave the
       // player standing wherever they predicted, forever.
-      if (run) applyRun(run, true);
+      // Force-healing snaps the player to the authoritative tile. That is
+      // right when a prediction was wrong and WRONG while an action is
+      // still legitimately in flight — it would yank the player back a tile
+      // and then hop them forward again the moment it lands.
+      if (run) applyRun(run, outboxRef.current.length === 0);
       // Who else is here. The subscription only speaks when a run CHANGES,
       // so a player who is standing still is invisible to a client that
       // just connected — and someone who leaves never says so. A roster
@@ -562,6 +580,125 @@ export function GameScreen({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.day, route.mode]);
+
+  /**
+   * The outbound action queue.
+   *
+   * The program takes at most ONE accepted action per rollup slot and
+   * demands an exact `action_seq`; a refused action does not consume it. So
+   * firing a burst of optimistically-numbered moves at once means the first
+   * one wins and every later one is refused for a sequence that never
+   * advanced — and because gameplay is fire-and-forget, none of it reports
+   * anything. The player just watches their hops rewind a second later.
+   *
+   * One action is in flight at a time and the rest wait their turn. A lost
+   * one is RESENT WITH THE SAME SEQUENCE, which is idempotent by
+   * construction: if the original did land, the retry is refused for the
+   * sequence it claims, so a duplicate hop is impossible. Only after the
+   * retries are exhausted does the prediction get rolled back.
+   */
+  type Outbound =
+    | {
+        kind: "move";
+        seq: number;
+        attempt: number;
+        x: number;
+        y: number;
+        direction: Direction;
+        tries: number;
+        sig?: string;
+      }
+    | {
+        kind: "kick";
+        seq: number;
+        attempt: number;
+        x: number;
+        y: number;
+        facing: Direction;
+        target?: { wallet: PublicKey; x: number; y: number };
+        tries: number;
+        sig?: string;
+      };
+
+  /** Long enough for acceptance to come back on the subscription. */
+  const ACTION_ACK_MS = 420;
+  const ACTION_TRIES = 3;
+
+  const outboxRef = useRef<Outbound[]>([]);
+  const ackTimerRef = useRef(0);
+
+  function enqueueAction(action: Outbound) {
+    outboxRef.current.push(action);
+    if (outboxRef.current.length === 1) void pumpOutbox();
+  }
+
+  async function pumpOutbox() {
+    const head = outboxRef.current[0];
+    if (!head) return;
+    head.tries += 1;
+    const common = { day: route.day, mode: route.mode, session: boot.session };
+    try {
+      head.sig =
+        head.kind === "move"
+          ? await boot.client.sendMove({
+              ...common,
+              direction: head.direction,
+              x: head.x,
+              y: head.y,
+              attemptNonce: head.attempt,
+              actionSeq: head.seq,
+            })
+          : await boot.client.sendKick({
+              ...common,
+              attemptNonce: head.attempt,
+              actionSeq: head.seq,
+              facing: head.facing,
+              target: head.target,
+            });
+    } catch (e) {
+      const why = errorText(e);
+      setHud((h) => ({ ...h, lastRejection: why }));
+      // A lapsed session refuses every action, which reads as a game that
+      // simply stopped responding. Renew and carry on with the same run.
+      if (why.includes("SessionExpired") || why.includes("BadSession")) {
+        void renewSession();
+      }
+    }
+    window.clearTimeout(ackTimerRef.current);
+    ackTimerRef.current = window.setTimeout(checkOutboxHead, ACTION_ACK_MS);
+  }
+
+  function checkOutboxHead() {
+    const head = outboxRef.current[0];
+    if (!head) return;
+    if (lastAuthSeqRef.current > head.seq) {
+      // Accepted. Move on to whatever the player queued behind it.
+      outboxRef.current.shift();
+      rejectedRunRef.current = 0;
+      void pumpOutbox();
+      return;
+    }
+    if (head.tries < ACTION_TRIES) {
+      // Lost or refused for a reason that may not hold a slot later (the
+      // one-action-per-slot rule, a dropped packet). Same sequence, so the
+      // chain can apply it at most once however many copies arrive.
+      if (head.sig) boot.client.markTx(head.sig, "failed", "lost — resending");
+      void pumpOutbox();
+      return;
+    }
+    // Out of tries: the chain genuinely will not take this. Everything
+    // predicted behind it was predicated on it, so the whole queue goes.
+    if (head.sig) boot.client.markTx(head.sig, "failed", "refused by the world");
+    outboxRef.current = [];
+    reconcileNowRef.current();
+    rejectedRunRef.current += 1;
+    if (rejectedRunRef.current >= 3) {
+      rejectedRunRef.current = 0;
+      // Not a forced claim: if another window has taken the run, this one
+      // learns that instead of wrestling for the key.
+      void renewSession();
+    }
+  }
 
   /**
    * Re-authorise the session key on our own run (score is untouched).
@@ -727,12 +864,6 @@ export function GameScreen({
               return;
             }
           }
-          const sent = {
-            x: mine.x,
-            y: mine.y,
-            attemptNonce: mine.attempt,
-            actionSeq: mine.seq,
-          };
           // Optimistic: advance the local mirror + visual immediately.
           liveRun.current = {
             ...mine,
@@ -742,54 +873,21 @@ export function GameScreen({
             facing: action.direction,
           };
           sceneRef.current?.setLocal(nx, ny, action.direction);
-          if (navigator.vibrate) navigator.vibrate(10);
+          haptic(10);
           setHud((h) =>
             h.lastRejection == null && h.x === nx && h.y === ny
               ? h
               : { ...h, lastRejection: null, x: nx, y: ny },
           );
-          boot.client
-            .sendMove({
-              day: route.day,
-              mode: route.mode,
-              direction: action.direction,
-              session: boot.session,
-              ...sent,
-            })
-            .catch((e) => {
-              const why = errorText(e);
-              setHud((h) => ({ ...h, lastRejection: why }));
-              // A lapsed session refuses every action, which reads as a game
-              // that simply stopped responding. Renew and let the player
-              // carry on with the same run and score.
-              if (why.includes("SessionExpired") || why.includes("BadSession")) {
-                void renewSession();
-              }
-            });
-          // A REJECTED move changes nothing on chain, so the optimistic
-          // mirror would sit a tile ahead of the truth forever. If the
-          // sequence we spent has not been consumed by then, force a heal.
-          //
-          // Gameplay goes out fire-and-forget, so a refusal comes back
-          // looking exactly like an acceptance — an expired session simply
-          // stops the game with no error anywhere. Repeated refusals are
-          // the only symptom, so treat a run of them as a reason to check
-          // the session rather than leaving the player stuck.
-          const spentSeq = sent.actionSeq;
-          setTimeout(() => {
-            if (lastAuthSeqRef.current > spentSeq) {
-              rejectedRunRef.current = 0;
-              return;
-            }
-            reconcileNowRef.current();
-            rejectedRunRef.current += 1;
-            if (rejectedRunRef.current >= 3) {
-              rejectedRunRef.current = 0;
-              // Not a forced claim: if another window has taken the run,
-              // this one learns that instead of wrestling for the key.
-              void renewSession();
-            }
-          }, 1300);
+          enqueueAction({
+            kind: "move",
+            seq: mine.seq,
+            attempt: mine.attempt,
+            x: mine.x,
+            y: mine.y,
+            direction: action.direction,
+            tries: 0,
+          });
         } else if (action.kind === "kick") {
           const now = performance.now();
           const coolLeft = 5000 - (now - lastKickAtRef.current);
@@ -818,27 +916,22 @@ export function GameScreen({
             }
           }
           lastKickAtRef.current = now;
-          const sent = { attemptNonce: mine.attempt, actionSeq: mine.seq };
           liveRun.current = { ...mine, seq: mine.seq + 1 };
           sceneRef.current?.kickLocal(mine.facing);
-          if (navigator.vibrate) navigator.vibrate(20);
+          haptic(20);
           setHud((h) => ({ ...h, lastRejection: null }));
-          boot.client
-            .sendKick({
-              day: route.day,
-              mode: route.mode,
-              session: boot.session,
-              ...sent,
-              facing: mine.facing as Direction,
-              target: targetWallet
-                ? { wallet: new PublicKey(targetWallet), x: tx, y: ty }
-                : undefined,
-            })
-            .catch((e) => setHud((h) => ({ ...h, lastRejection: errorText(e) })));
-          const spentSeq = sent.actionSeq;
-          setTimeout(() => {
-            if (lastAuthSeqRef.current <= spentSeq) reconcileNowRef.current();
-          }, 1300);
+          enqueueAction({
+            kind: "kick",
+            seq: mine.seq,
+            attempt: mine.attempt,
+            x: mine.x,
+            y: mine.y,
+            facing: mine.facing as Direction,
+            target: targetWallet
+              ? { wallet: new PublicKey(targetWallet), x: tx, y: ty }
+              : undefined,
+            tries: 0,
+          });
         }
       },
       { surface: canvasRef.current ?? undefined },
@@ -939,29 +1032,32 @@ export function GameScreen({
         </div>
       )}
       <div className="hud top-right">
+        <IconButton icon="gear" label="settings" onClick={() => setSettingsOpen(true)} />
         <IconButton icon="close" label="exit" onClick={onExit} />
       </div>
 
       {/* Live world status: who is here, and how far away the rollup is. */}
-      <div className="hud live-strip">
-        <span className="live-chip" title="players alive in this world">
-          <Icon name="users" size={13} />
-          {hud.players}
-        </span>
-        <span
-          className={`live-chip live-chip--${pingTone(hud.pingMs)}`}
-          title="round-trip to the ephemeral rollup"
-        >
-          <Icon name="signal" size={13} />
-          {hud.pingMs == null ? "offline" : `${hud.pingMs} ms`}
-        </span>
-      </div>
+      {settings.showStatus && (
+        <div className="hud live-strip">
+          <span className="live-chip" title="players alive in this world">
+            <Icon name="users" size={13} />
+            {hud.players}
+          </span>
+          <span
+            className={`live-chip live-chip--${pingTone(hud.pingMs)}`}
+            title="round-trip to the ephemeral rollup"
+          >
+            <Icon name="signal" size={13} />
+            {hud.pingMs == null ? "offline" : `${hud.pingMs} ms`}
+          </span>
+        </div>
+      )}
 
       {displaced && (
         <Modal title="Playing elsewhere" ariaLabel="Playing elsewhere">
           <p>
-            This run was opened in another window or device, which now holds the
-            controls. Only one can play a run at a time.
+            This run was opened in another window or device, which now holds the controls.
+            Only one can play a run at a time.
           </p>
           <div className="row">
             <Button
@@ -1004,6 +1100,10 @@ export function GameScreen({
             </div>
           </div>
         </Modal>
+      )}
+
+      {settingsOpen && (
+        <SettingsSheet boot={boot} onClose={() => setSettingsOpen(false)} />
       )}
 
       {death && (

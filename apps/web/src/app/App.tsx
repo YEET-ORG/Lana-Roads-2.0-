@@ -10,7 +10,8 @@ import { GameScreen } from "../features/game/GameScreen";
 import { IdentityGate } from "../features/identity/IdentityGate";
 import { DemoScreen } from "../features/demo/DemoScreen";
 import { AgentGallery } from "../features/demo/AgentGallery";
-import { Button, Icon, Loader, Notice, TxToasts } from "../design-system";
+import { Button, Icon, IconButton, Loader, Notice, TxToasts } from "../design-system";
+import { SettingsSheet } from "../features/settings/SettingsSheet";
 import { sfx } from "../game/audio";
 
 export type Route =
@@ -50,6 +51,7 @@ function AppInner() {
   const showGallery = new URLSearchParams(window.location.search).has("agents");
   const [balance, setBalance] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Models download while the player is still reading the menu.
   useEffect(() => {
@@ -136,6 +138,11 @@ function AppInner() {
               {balance != null && ` · ${balance.toFixed(3)} SOL`}
             </button>
           )}
+          <IconButton
+            icon="gear"
+            label="settings"
+            onClick={() => setSettingsOpen(true)}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -171,6 +178,9 @@ function AppInner() {
       {/* Mounted at the shell so a transaction started on one screen still
           reports after the player has navigated to another. */}
       <TxToasts client={boot?.client ?? null} />
+      {settingsOpen && (
+        <SettingsSheet boot={boot} onClose={() => setSettingsOpen(false)} />
+      )}
     </div>
   );
 }

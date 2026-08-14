@@ -10,6 +10,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { PublicKey } from "@solana/web3.js";
+import { getSettings } from "./settings";
 import {
   BrowserSessionStore,
   CROSSY_WORLD_PROGRAM_ID,
@@ -68,8 +69,14 @@ export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
     wsEndpoint: BASE_WS,
     commitment: "confirmed",
   });
-  const erConnection = new Connection(ER_RPC, {
-    wsEndpoint: ER_WS,
+  // A pinned region replaces the build's default rollup AND suppresses
+  // router resolution: the point of pinning is to stop something else
+  // choosing for you. Pinning the wrong one means playing alone, which the
+  // settings sheet says out loud.
+  const pinned = getSettings().region;
+  const erUrl = pinned !== "auto" ? pinned.replace(/\/$/, "") : ER_RPC;
+  const erConnection = new Connection(erUrl, {
+    wsEndpoint: pinned !== "auto" ? erUrl.replace(/^http/, "ws") : ER_WS,
     commitment: "processed",
   });
   const session = await loadOrCreateSession(new BrowserSessionStore(), {
@@ -81,7 +88,7 @@ export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
     connection,
     erConnection,
     validator: VALIDATOR,
-    routerUrl: ROUTER,
+    routerUrl: pinned === "auto" ? ROUTER : undefined,
     wallet: new KeypairWallet(wallet),
   });
   return { client, wallet, session, cluster: CLUSTER };

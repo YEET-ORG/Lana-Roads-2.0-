@@ -560,7 +560,8 @@
 /* ---------- transaction toasts ----------
    Bottom-right, above everything, and deliberately narrow: this is a
    receipt, not a dialog. Pointer events only on the explorer link so a
-   toast can never eat a tap meant for the world. */
+   toast can never eat a tap meant for the world. Motion is fast and
+   springy — a receipt that lingers in animation reads as lag. */
 .tx-toasts {
   position: fixed;
   right: max(12px, env(safe-area-inset-right));
@@ -568,10 +569,11 @@
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   align-items: flex-end;
   pointer-events: none;
   max-width: min(340px, calc(100vw - 24px));
+  perspective: 600px;
 }
 
 .tx-toast {
@@ -583,8 +585,32 @@
   border-radius: var(--ds-radius-m);
   background: var(--ds-surface);
   border: 1px solid var(--ds-line);
-  box-shadow: 0 var(--ds-edge-s) 0 var(--navy-950), 0 10px 24px rgba(8, 17, 31, 0.45);
-  animation: ds-pop-in var(--t-quick) var(--ease-pop) both;
+  box-shadow:
+    0 var(--ds-edge-s) 0 var(--navy-950),
+    0 10px 24px rgba(8, 17, 31, 0.45);
+  /* Depth: entries behind the newest shrink and fade, so the stack reads
+     as one object with a front rather than five competing cards. */
+  transform-origin: 100% 100%;
+  scale: calc(1 - var(--depth, 0) * 0.035);
+  opacity: calc(1 - var(--depth, 0) * 0.16);
+  animation: tx-toast-in 260ms var(--ease-pop) both;
+  transition:
+    scale 180ms var(--ease-out),
+    opacity 180ms var(--ease-out);
+}
+
+@keyframes tx-toast-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(28px, 6px, 0) rotate(2.5deg);
+  }
+  60% {
+    transform: translate3d(-3px, 0, 0) rotate(-0.6deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0);
+  }
 }
 
 .tx-toast__icon {
@@ -596,15 +622,38 @@
   border-radius: 7px;
   background: var(--navy-900);
   color: var(--slate-300);
+  animation: tx-badge-pop 320ms var(--ease-pop) both;
+}
+
+@keyframes tx-badge-pop {
+  0% {
+    transform: scale(0.4) rotate(-25deg);
+  }
+  55% {
+    transform: scale(1.22) rotate(6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
 }
 
 .tx-toast--confirmed .tx-toast__icon,
 .tx-toast--sent .tx-toast__icon {
   color: var(--grass-400);
+  box-shadow: 0 0 0 2px rgba(75, 224, 143, 0.18);
 }
 
 .tx-toast--failed .tx-toast__icon {
   color: var(--coral-500);
+  box-shadow: 0 0 0 2px rgba(244, 81, 105, 0.2);
+}
+
+/* A failure earns exactly one shake — enough to catch the eye, not enough
+   to become the thing the player is watching. */
+.tx-toast--failed {
+  animation:
+    tx-toast-in 260ms var(--ease-pop) both,
+    ds-shake-x 320ms var(--ease-out) 240ms;
 }
 
 .tx-toast__body {
@@ -647,8 +696,14 @@
   text-overflow: ellipsis;
 }
 
+/* A failure is the one message worth reading in full — give it two lines. */
 .tx-toast--failed .tx-toast__detail {
   color: var(--coral-500);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .tx-toast__link {
@@ -661,10 +716,14 @@
   border-radius: 7px;
   color: var(--slate-300);
   background: var(--navy-900);
+  transition:
+    color var(--t-instant) var(--ease-out),
+    transform var(--t-instant) var(--ease-pop);
 }
 
 .tx-toast__link:hover {
   color: var(--sky-400);
+  transform: translateY(-1px) scale(1.08);
 }
 
 /* Square spinner — the voxel motif, not a circle. */
@@ -688,17 +747,103 @@
   }
 }
 
+/* Reduced motion (setting or OS): state still changes, nothing dances. */
+.tx-toasts--still .tx-toast,
+.tx-toasts--still .tx-toast__icon,
+.tx-toasts--still .tx-spinner {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .tx-toast,
+  .tx-toast__icon,
   .tx-spinner {
     animation: none;
   }
 }
 
-/* A failure is the one message worth reading in full — give it two lines. */
-.tx-toast--failed .tx-toast__detail {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
+/* ---------- settings rows ----------
+   A label with its consequence spelled out, and the choices as one segmented
+   control — no hidden state, nothing that needs a second tap to reveal. */
+.setting-group {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.6px;
+  color: var(--sun-400);
+  margin: 18px 0 2px;
+}
+
+.setting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ds-line);
+  flex-wrap: wrap;
+}
+
+.setting__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 190px;
+}
+
+.setting__label {
+  font-weight: 800;
+  color: var(--ds-text);
+  font-size: 14px;
+}
+
+.setting__hint {
+  font-size: 11.5px;
+  color: var(--ds-text-dim);
+  line-height: 1.35;
+}
+
+.setting__choices {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--ds-surface-deep);
+  border: 1px solid var(--ds-line);
+  flex: 0 0 auto;
+}
+
+.setting__choices--wrap {
+  flex-wrap: wrap;
+  border-radius: var(--ds-radius-m);
+}
+
+.setting__choice {
+  border: 0;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ds-text-dim);
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 12px;
+  transition:
+    background var(--t-instant) var(--ease-out),
+    color var(--t-instant) var(--ease-out),
+    transform var(--t-instant) var(--ease-pop);
+}
+
+.setting__choice:hover {
+  color: var(--ds-text);
+}
+
+.setting__choice:active {
+  transform: scale(0.94);
+}
+
+.setting__choice.is-on {
+  background: var(--grass-400);
+  color: var(--navy-950);
+  box-shadow: 0 2px 0 var(--grass-600);
 }

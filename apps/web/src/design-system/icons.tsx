@@ -36,10 +36,13 @@ export type IconName =
   | "calendar"
   | "coin"
   | "target"
-  | "external";
+  | "external"
+  | "gear";
 
 const PATHS: Record<IconName, JSX.Element> = {
-  play: <path d="M7 4.5v15c0 .9 1 1.5 1.8 1L20 13a1.2 1.2 0 0 0 0-2L8.8 3.5c-.8-.5-1.8.1-1.8 1Z" />,
+  play: (
+    <path d="M7 4.5v15c0 .9 1 1.5 1.8 1L20 13a1.2 1.2 0 0 0 0-2L8.8 3.5c-.8-.5-1.8.1-1.8 1Z" />
+  ),
   close: (
     <path
       d="M6 6l12 12M18 6L6 18"
@@ -78,8 +81,9 @@ const PATHS: Record<IconName, JSX.Element> = {
   user: (
     <path d="M12 3a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V7a4 4 0 0 1 4-4Zm-7 16.5C5 16 8 14.5 12 14.5s7 1.5 7 5V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-1.5Z" />
   ),
-  switch: (
-    <path d="M7 4 3 8l4 4V9.5h9v-3H7V4Zm10 8 4 4-4 4v-2.5H8v-3h9V12Z" />
+  switch: <path d="M7 4 3 8l4 4V9.5h9v-3H7V4Zm10 8 4 4-4 4v-2.5H8v-3h9V12Z" />,
+  gear: (
+    <path d="M10.2 2h3.6l.5 2.5 1.6.9 2.3-1.1 2.5 2.5-1.1 2.3.9 1.6 2.5.5v3.6l-2.5.5-.9 1.6 1.1 2.3-2.5 2.5-2.3-1.1-1.6.9-.5 2.5h-3.6l-.5-2.5-1.6-.9-2.3 1.1L3.3 19l1.1-2.3-.9-1.6L1 14.6v-3.6l2.5-.5.9-1.6L3.3 6.6 5.8 4.1l2.3 1.1 1.6-.9L10.2 2Zm1.8 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z" />
   ),
   external: (
     <path d="M13 3h8v8h-2.6V7.4l-7 7-1.8-1.8 7-7H13V3ZM4 6h6v2.4H6.4v9.2h9.2V14H18v6H4V6Z" />
@@ -118,9 +122,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   exit: (
     <path d="M10 3h9a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-9v-3h8V6h-8V3Zm-1.5 7.5H2v3h6.5V17l5-5-5-5v3.5Z" />
   ),
-  signal: (
-    <path d="M4 14h3v7H4v-7Zm6-5h3v12h-3V9Zm6-6h3v18h-3V3Z" />
-  ),
+  signal: <path d="M4 14h3v7H4v-7Zm6-5h3v12h-3V9Zm6-6h3v18h-3V3Z" />,
   users: (
     <path d="M8.5 4a3.5 3.5 0 0 1 3.5 3.5v.8a3.5 3.5 0 0 1-7 0v-.8A3.5 3.5 0 0 1 8.5 4Zm8 1.5a3 3 0 0 1 3 3v.7a3 3 0 0 1-6 0v-.7a3 3 0 0 1 3-3ZM2 19.2C2 16.1 4.9 14.8 8.5 14.8s6.5 1.3 6.5 4.4V20a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-.8Zm15 1.8v-1.6c0-1.4-.4-2.5-1.1-3.4 2.6.3 4.6 1.3 4.6 3.4V20a1 1 0 0 1-1 1H17Z" />
   ),

@@ -24,6 +24,7 @@ import {
   Modal,
 } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
+import { haptic } from "../../lib/settings";
 import { deathHeadline, type DeathCause } from "../../game/renderer/scene";
 
 export function DemoScreen({ onExit }: { onExit: () => void }) {
@@ -144,7 +145,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
         posRef.current = { x: nx, y: ny };
         setRejection(null);
         s.setLocal(nx, ny, action.direction);
-        if (navigator.vibrate) navigator.vibrate(10);
+        haptic(10);
         if (ny > scoreRef.current) {
           if (Math.floor(ny / 10) > Math.floor(scoreRef.current / 10)) s.celebrate();
           scoreRef.current = ny;
