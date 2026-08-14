@@ -195,6 +195,14 @@ header {
   flex: 1;
 }
 
+/* Presence strip: proof the world is live before you commit to a run. */
+.home-live {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  animation: ds-pop-in var(--t-screen) var(--ease-pop) both;
+}
+
 .home-overlay .notice-float {
   max-width: 420px;
 }
@@ -389,6 +397,48 @@ header {
 .hud.bottom-left {
   bottom: max(12px, env(safe-area-inset-bottom));
   left: 12px;
+}
+
+/* Live-world status strip: population + rollup latency. Deliberately quiet —
+   it sits under the world, never competing with the score. */
+.hud.live-strip {
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  animation: ds-pop-in var(--t-screen) var(--ease-pop) both;
+}
+
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(16, 24, 39, 0.66);
+  border: 1px solid var(--ds-line);
+  color: var(--ds-text-dim);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-chip svg {
+  opacity: 0.9;
+}
+
+.live-chip--good {
+  color: var(--grass-400);
+}
+
+.live-chip--fair {
+  color: var(--sun-400);
+}
+
+.live-chip--poor {
+  color: var(--coral-500);
 }
 
 .rejection {

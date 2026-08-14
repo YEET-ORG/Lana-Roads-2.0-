@@ -12,6 +12,25 @@ It is bootstrapped from the open-source solsocket starter so its MagicBlock conn
 
 Only the curated vehicle subset defined in [`docs/FRONTEND.md`](docs/FRONTEND.md) should be converted into distributable runtime derivatives; do not import every source model into the web bundle.
 
+## Running a live world (devnet)
+
+A day is a set of accounts, not a config flag. Until they exist and are
+delegated, the client cannot tell the difference between "the day just rolled
+over" and "the cluster is down", so it falls back to offline practice.
+
+```bash
+cd program
+npx tsx scripts/open-day.ts              # today, casual world
+MODES=0,1 npx tsx scripts/open-day.ts    # paid world as well
+./scripts/run-keeper.sh                  # frontier + hazard crank, supervised
+npx tsx scripts/presence-check.ts        # who is online, and ER round-trip
+```
+
+`open-day.ts` is idempotent — it only does what is still missing — and the
+keeper calls the same routine itself when it finds no world on the rollup, so
+a UTC boundary rolls over without an operator. Both need the admin/vrf
+keypair (`ADMIN_KEYPAIR` / `KEEPER_KEYPAIR`, default `~/.config/solana/id.json`).
+
 ## Starter reference documentation
 
 <p align="center">

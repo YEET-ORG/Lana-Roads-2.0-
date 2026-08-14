@@ -34,11 +34,25 @@ interface DayInfo {
   recordScore: number;
   recordHolder: string;
   activePlayers: number;
+  /** Status of the PAID competition; casual play does not depend on it. */
   status: string;
+  /** The casual world exists on the rollup, so free play can start. */
+  casualReady: boolean;
 }
 
 function agentIndexFromModelId(id: string): number {
   return Number(id.slice(-2));
+}
+
+/** Live-world telemetry shown before the player commits to a run. */
+interface Presence {
+  players: number;
+  pingMs: number | null;
+}
+
+function pingTone(ms: number | null): "good" | "fair" | "poor" {
+  if (ms == null) return "poor";
+  return ms < 120 ? "good" : ms < 300 ? "fair" : "poor";
 }
 
 export function Home({
@@ -49,6 +63,7 @@ export function Home({
   onPlay: (r: Route) => void;
 }) {
   const [info, setInfo] = useState<DayInfo | null>(null);
+  const [presence, setPresence] = useState<Presence | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
   const [countdown, setCountdown] = useState("");
   const [entering, setEntering] = useState(false);
@@ -71,20 +86,26 @@ export function Home({
         recordHolder: "",
         activePlayers: 0,
         status: "offline",
+        casualReady: false,
       });
       return;
     }
     let live = true;
-    (async () => {
+    const load = async () => {
       try {
         const day = await boot.client.getCurrentDay();
-        const daily = await boot.client.getDaily(day).catch(() => null);
-        const world = await boot.client.getWorld(WorldMode.Paid, day).catch(() => null);
+        // Casual and paid are separate worlds with separate readiness. The
+        // free game must not be gated on the competition: a paid world that
+        // hasn't been delegated yet would otherwise send every casual player
+        // to offline practice while the casual world is live and waiting.
+        const [daily, paid, casual] = await Promise.all([
+          boot.client.getDaily(day).catch(() => null),
+          boot.client.getWorld(WorldMode.Paid, day).catch(() => null),
+          boot.client.getWorld(WorldMode.Casual, day).catch(() => null),
+        ]);
         if (!live) return;
-        if (!daily || !world) {
-          setWarn(
-            `Today's competition (day ${day}) is not prepared on this cluster yet.`,
-          );
+        if (!casual && !paid) {
+          setWarn(`Today's world (day ${day}) is not live on this cluster yet.`);
           setInfo({
             day,
             pool: 0n,
@@ -93,27 +114,84 @@ export function Home({
             recordHolder: "",
             activePlayers: 0,
             status: "unprepared",
+            casualReady: false,
           });
-          return;
+          return false;
         }
+        // A retry that finally lands must clear whatever the failed attempts
+        // put on screen, or the player keeps reading an outage that is over.
+        setWarn(
+          !paid || !daily
+            ? "The daily competition isn't open yet — casual play is live."
+            : null,
+        );
+        const shown = paid ?? casual!;
         setInfo({
           day,
-          pool: BigInt(daily.activePool.toString()),
-          rollover: BigInt(daily.rolloverIn.toString()),
-          recordScore: world.recordScore,
-          recordHolder: world.recordHolder.toBase58(),
-          activePlayers: world.activePlayers,
-          status: Object.keys(daily.status)[0] ?? "?",
+          pool: daily ? BigInt(daily.activePool.toString()) : 0n,
+          rollover: daily ? BigInt(daily.rolloverIn.toString()) : 0n,
+          recordScore: shown.recordScore,
+          recordHolder: shown.recordHolder.toBase58(),
+          activePlayers: shown.activePlayers,
+          status: daily && paid ? (Object.keys(daily.status)[0] ?? "?") : "unprepared",
+          casualReady: casual != null,
         });
+        return casual != null;
       } catch {
         if (live)
           setWarn("Can't reach the cluster — the daily competition is unavailable.");
+        return false;
       }
-    })();
+    };
+
+    // Public devnet RPC throttles, and one refused call here is the whole
+    // difference between the real world and offline practice — the Play
+    // button reads this state. Keep asking until the world answers.
+    let timer = 0;
+    const attempt = async () => {
+      const ready = await load();
+      if (!live || ready) return;
+      timer = window.setTimeout(() => void attempt(), 6000);
+    };
+    void attempt();
     return () => {
       live = false;
+      window.clearTimeout(timer);
     };
   }, [boot]);
+
+  // Live presence: how busy the world is right now, and how far away the
+  // rollup that runs it is. Both worlds count — a player in casual is just
+  // as online as one in the paid competition.
+  useEffect(() => {
+    if (!boot || !info || info.day === 0n) return;
+    let live = true;
+    const ping = async () => {
+      // Timed on its own: a round-trip measured across a batch would report
+      // the slowest call in the batch, not the latency of the link.
+      const t0 = performance.now();
+      const slot = await boot.client.erConnection.getSlot("processed").catch(() => null);
+      return slot == null ? null : Math.round(performance.now() - t0);
+    };
+    const poll = async () => {
+      const [casual, paid, pingMs] = await Promise.all([
+        boot.client.getWorld(WorldMode.Casual, info.day).catch(() => null),
+        boot.client.getWorld(WorldMode.Paid, info.day).catch(() => null),
+        ping(),
+      ]);
+      if (!live) return;
+      setPresence({
+        players: (casual?.activePlayers ?? 0) + (paid?.activePlayers ?? 0),
+        pingMs,
+      });
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 8000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [boot, info]);
 
   useEffect(() => {
     if (!info) return;
@@ -163,6 +241,22 @@ export function Home({
           </div>
         )}
 
+        {presence && (
+          <div className="home-live">
+            <span className="live-chip" title="players in a live run right now">
+              <Icon name="users" size={13} />
+              {presence.players} online
+            </span>
+            <span
+              className={`live-chip live-chip--${pingTone(presence.pingMs)}`}
+              title="round-trip to the ephemeral rollup"
+            >
+              <Icon name="signal" size={13} />
+              {presence.pingMs == null ? "offline" : `${presence.pingMs} ms`}
+            </span>
+          </div>
+        )}
+
         <div className="home-spacer" />
 
         <div
@@ -204,23 +298,18 @@ export function Home({
             size="giant"
             icon="play"
             onClick={() => {
-              if (
-                !boot ||
-                !info ||
-                info.status === "offline" ||
-                info.status === "unprepared"
-              ) {
+              // Free play needs exactly one thing: a live casual world.
+              if (!boot || !info || !info.casualReady) {
                 onPlay({ name: "demo" });
                 return;
               }
-              info &&
-                onPlay({
-                  name: "play",
-                  mode: WorldMode.Casual,
-                  day: info.day,
-                  attemptNonce: 0,
-                  receiptNonce: 0,
-                });
+              onPlay({
+                name: "play",
+                mode: WorldMode.Casual,
+                day: info.day,
+                attemptNonce: 0,
+                receiptNonce: 0,
+              });
             }}
           >
             PLAY

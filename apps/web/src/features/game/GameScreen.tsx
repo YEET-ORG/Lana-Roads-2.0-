@@ -72,6 +72,14 @@ interface Hud {
   pending: boolean;
   lastRejection: string | null;
   pingMs: number | null;
+  /** Runs currently alive in this world, this player included. */
+  players: number;
+}
+
+/** Latency bands for the connection chip: playable, laggy, painful. */
+function pingTone(ms: number | null): "good" | "fair" | "poor" {
+  if (ms == null || ms < 120) return "good";
+  return ms < 300 ? "fair" : "poor";
 }
 
 interface DeathInfo {
@@ -103,6 +111,7 @@ export function GameScreen({
     pending: false,
     lastRejection: null,
     pingMs: null,
+    players: 0,
   });
   const [death, setDeath] = useState<DeathInfo | null>(null);
   const [reviving, setReviving] = useState(false);
@@ -240,6 +249,15 @@ export function GameScreen({
     >();
     occupiedRef.current = remotes;
 
+    /**
+     * Headcount for the HUD. `remotes` only ever holds active runs, so the
+     * live population is those plus us when we are still standing.
+     */
+    const syncPresence = () => {
+      const online = remotes.size + (liveRun.current?.state === "active" ? 1 : 0);
+      setHud((h) => (h.players === online ? h : { ...h, players: online }));
+    };
+
     const applyRun = (run: any, force = false) => {
       const wallet = run.wallet.toBase58();
       const state = Object.keys(run.state)[0] ?? "?";
@@ -345,6 +363,7 @@ export function GameScreen({
           [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
         );
       }
+      syncPresence();
     };
 
     // Chunk/lane loading (repeats when the frontier grows).
@@ -404,6 +423,29 @@ export function GameScreen({
       // can fail: a chunk that will not load would otherwise leave the
       // player standing wherever they predicted, forever.
       if (run) applyRun(run, true);
+      // Who else is here. The subscription only speaks when a run CHANGES,
+      // so a player who is standing still is invisible to a client that
+      // just connected — and someone who leaves never says so. A roster
+      // snapshot is the only thing that makes both true on screen.
+      const roster = await boot.client.listRuns(world).catch(() => null);
+      if (roster && live) {
+        remotes.clear();
+        for (const r of roster) {
+          if (r.state !== "active") continue;
+          const w = r.wallet.toBase58();
+          if (w === me) continue;
+          remotes.set(w, {
+            x: r.x,
+            y: r.y,
+            state: r.state,
+            hazardNonce: r.hazardNonce,
+          });
+        }
+        scene?.setRemotes(
+          [...remotes.entries()].map(([w, r]) => ({ wallet: w, x: r.x, y: r.y })),
+        );
+        syncPresence();
+      }
       if (worldAcc) {
         // Anchor the hazard clock to the world's own timeline. Re-running
         // this on every sweep must converge, not creep forward.
@@ -493,12 +535,17 @@ export function GameScreen({
       else stop();
     });
 
-    // Ping meter: ER RPC round-trip every 3s.
-    const pingTimer = setInterval(async () => {
+    // Ping meter: ER RPC round-trip. This is the number that matters for
+    // game feel — the rollup is what answers a move, not the base cluster.
+    const measurePing = async () => {
       const t0 = performance.now();
-      await boot.client.erConnection.getSlot("processed").catch(() => null);
-      if (live) setHud((h) => ({ ...h, pingMs: Math.round(performance.now() - t0) }));
-    }, 3000);
+      const slot = await boot.client.erConnection.getSlot("processed").catch(() => null);
+      if (!live) return;
+      const ms = slot == null ? null : Math.round(performance.now() - t0);
+      setHud((h) => (h.pingMs === ms ? h : { ...h, pingMs: ms }));
+    };
+    void measurePing();
+    const pingTimer = setInterval(() => void measurePing(), 3000);
 
     return () => {
       live = false;
@@ -893,6 +940,21 @@ export function GameScreen({
       )}
       <div className="hud top-right">
         <IconButton icon="close" label="exit" onClick={onExit} />
+      </div>
+
+      {/* Live world status: who is here, and how far away the rollup is. */}
+      <div className="hud live-strip">
+        <span className="live-chip" title="players alive in this world">
+          <Icon name="users" size={13} />
+          {hud.players}
+        </span>
+        <span
+          className={`live-chip live-chip--${pingTone(hud.pingMs)}`}
+          title="round-trip to the ephemeral rollup"
+        >
+          <Icon name="signal" size={13} />
+          {hud.pingMs == null ? "offline" : `${hud.pingMs} ms`}
+        </span>
       </div>
 
       {displaced && (

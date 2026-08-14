@@ -362,7 +362,9 @@ Temporary feedback:
 - train warning;
 - target/effect feedback.
 
-Developer coordinates, raw run state, RPC region, and ping diagnostics are hidden from production HUD and available through a dev panel.
+Developer coordinates, raw run state, and RPC region are hidden from production HUD and available through a dev panel.
+
+One exception to that rule ships: a bottom-left presence strip showing live player count and rollup round-trip. In a real-money multiplayer game these are not diagnostics — they are what tells a player the world is populated and that a refused move was latency rather than the game breaking. Home carries the same pair before the player commits to a run. Both stay quiet: small chips, dimmed, never competing with the score, with the latency chip coloured only when it crosses into laggy (120ms) or painful (300ms).
 
 ### 8.8 Interruption sheet
 

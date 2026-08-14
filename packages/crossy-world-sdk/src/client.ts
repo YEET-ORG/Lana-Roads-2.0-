@@ -62,6 +62,16 @@ export interface ErRoute {
   countryCode: string;
 }
 
+/** One player's run as seen from outside: enough to draw and to count. */
+export interface RunSummary {
+  wallet: PublicKey;
+  x: number;
+  y: number;
+  score: number;
+  state: string;
+  hazardNonce: number;
+}
+
 /** Human-readable review returned before any financial signature. */
 export interface TransactionReview {
   action: string;
@@ -194,6 +204,29 @@ export class CrossyClient {
 
   async getRun(world: PublicKey, wallet = this.wallet.publicKey) {
     return this.erProgram.account.playerRun.fetchNullable(pda.run(world, wallet));
+  }
+
+  /**
+   * Every run account attached to a world, straight from the ER.
+   *
+   * The realtime subscription only reports runs that CHANGE, so a client
+   * that just connected cannot see anyone standing still — it learns of
+   * them the moment they hop, and not before. A roster snapshot is how the
+   * "who is here" question gets an answer that is true at connect time
+   * rather than eventually.
+   */
+  async listRuns(world: PublicKey): Promise<RunSummary[]> {
+    const rows = await this.erProgram.account.playerRun.all([
+      { memcmp: { offset: 8, bytes: world.toBase58() } },
+    ]);
+    return rows.map(({ account }: { account: any }) => ({
+      wallet: account.wallet as PublicKey,
+      x: account.x as number,
+      y: account.y as number,
+      score: account.score as number,
+      state: (Object.keys(account.state)[0] ?? "?") as string,
+      hazardNonce: account.hazardNonce as number,
+    }));
   }
 
   async getChunk(day: bigint, chunkIndex: number) {

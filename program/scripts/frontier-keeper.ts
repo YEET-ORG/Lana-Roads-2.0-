@@ -30,6 +30,7 @@ import { Program, web3, BN } from "@coral-xyz/anchor";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ensureDayReady } from "./open-day";
 
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
@@ -159,6 +160,17 @@ async function main() {
   // Modes are keyed by the world PDA discriminant: 0 = paid, 1 = casual.
   const modes = (process.env.MODES ?? "1").split(",").map(Number);
 
+  /**
+   * State the hoisted helpers below close over. It has to be initialised
+   * BEFORE the loop: `function` declarations hoist but `const` does not, and
+   * the loop never returns, so anything declared after it stays in the
+   * temporal dead zone forever — the helper throws on first use instead.
+   */
+  /** Lane layouts per (day, chunk); chunks are immutable once revealed. */
+  const laneCache = new Map<string, any[]>();
+  /** Last day-setup attempt per (mode, day), to rate-limit the roll. */
+  const dayRollAt = new Map<string, number>();
+
   for (;;) {
     for (const mode of modes) {
       try {
@@ -232,7 +244,6 @@ async function main() {
   }
 
   /** Revealed lanes for a day, cached — chunks never change once revealed. */
-  const laneCache = new Map<string, any[]>();
   async function revealedLanes(day: bigint, chunks: number) {
     const key = `${day}:${chunks}`;
     const hit = laneCache.get(key);
@@ -256,7 +267,12 @@ async function main() {
     try {
       live = await erProgram.account.worldHeader.fetch(world);
     } catch {
-      return; // world not delegated / not created yet
+      // No world on the ER. At a UTC boundary that is simply the new day
+      // arriving: the accounts for it do not exist until somebody makes
+      // them, and until then the game looks like an outage to every client.
+      // Build it here rather than waiting for an operator to notice.
+      await rollDay(mode, day);
+      return;
     }
     // `world.record_score` only moves when someone calls claim_record, which
     // is deliberately decoupled from movement — so it is not a reliable
@@ -286,6 +302,39 @@ async function main() {
       revealed = (index + 1) * CHUNK_ROWS;
       index += 1;
       log(`mode ${mode}: frontier now ${revealed} rows`);
+    }
+  }
+
+  /**
+   * Create and delegate a day's world when it is missing.
+   *
+   * Rate-limited per (mode, day): day setup is a burst of writes on a public
+   * RPC that throttles, and a keeper polling every few seconds would retry
+   * the burst forever if the cluster were merely busy. One attempt a minute
+   * is fast enough for a boundary nobody is watching.
+   */
+  async function rollDay(mode: number, day: bigint) {
+    const key = `${mode}:${day}`;
+    const last = dayRollAt.get(key) ?? 0;
+    if (Date.now() - last < 60_000) return;
+    dayRollAt.set(key, Date.now());
+    log(`mode ${mode} day ${day}: no world on the ER — bringing the day online`);
+    try {
+      const out = await ensureDayReady({
+        baseProgram,
+        admin: keeper,
+        validator: VALIDATOR,
+        day,
+        modes: [mode],
+        log: (...a: any[]) => log(" ", ...a),
+      });
+      log(
+        `mode ${mode} day ${day}: prepared=${out.prepared} sectors=${out.sectorsCreated} ` +
+          `delegated=[${out.delegated.join(",")}] opened=${out.opened}` +
+          (out.notes.length ? ` notes=${out.notes.join("; ")}` : ""),
+      );
+    } catch (e: any) {
+      log(`mode ${mode} day ${day}: day setup failed:`, e?.message ?? e);
     }
   }
 
