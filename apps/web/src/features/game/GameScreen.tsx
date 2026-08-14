@@ -18,8 +18,7 @@ import {
   LANE_RIVER,
   tickOf,
 } from "../../game/simulation/hazards";
-import { CountUp } from "../../ui/CountUp";
-import { Confetti } from "../../ui/Confetti";
+import { Button, Confetti, CountUp, Icon, IconButton, Modal } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
 import type { Route } from "../../app/App";
 
@@ -862,9 +861,18 @@ export function GameScreen({
     }
   }
 
-  const deadlineLeft = death
-    ? Math.max(0, death.deadline - Math.floor(Date.now() / 1000))
-    : 0;
+  // The revival deadline is authoritative and untouched; only the countdown
+  // the player watches is presentation, so tick it once a second while the
+  // death card is up instead of freezing at the moment the card opened.
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (!death) return;
+    setNowSec(Math.floor(Date.now() / 1000));
+    const tick = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(tick);
+  }, [death]);
+
+  const deadlineLeft = death ? Math.max(0, death.deadline - nowSec) : 0;
 
   return (
     <div className="game">
@@ -884,39 +892,35 @@ export function GameScreen({
         </div>
       )}
       <div className="hud top-right">
-        <button className="icon-btn" onClick={onExit} aria-label="exit">
-          ×
-        </button>
+        <IconButton icon="close" label="exit" onClick={onExit} />
       </div>
 
       {displaced && (
-        <div className="modal-backdrop">
-          <div className="modal card death">
-            <h2>Playing elsewhere</h2>
-            <p>
-              This run was opened in another window or device, which now holds the
-              controls. Only one can play a run at a time.
-            </p>
-            <div className="row">
-              <button
-                disabled={respawning}
-                onClick={() => {
-                  void renewSession(true);
-                }}
-              >
-                Play here instead
-              </button>
-              <button className="ghost" onClick={onExit}>
-                Exit
-              </button>
-            </div>
+        <Modal title="Playing elsewhere" ariaLabel="Playing elsewhere">
+          <p>
+            This run was opened in another window or device, which now holds the
+            controls. Only one can play a run at a time.
+          </p>
+          <div className="row">
+            <Button
+              variant="info"
+              disabled={respawning}
+              onClick={() => {
+                void renewSession(true);
+              }}
+            >
+              Play here instead
+            </Button>
+            <Button variant="ghost" onClick={onExit}>
+              Exit
+            </Button>
           </div>
-        </div>
+        </Modal>
       )}
 
       {endedScore != null && !death && (
-        <div className="modal-backdrop">
-          <div className="modal card death">
+        <Modal ariaLabel="Run over">
+          <div className="death-card">
             {endedScore.score >= hud.record && endedScore.score > 0 && <Confetti />}
             <h2>{deathHeadline(endedScore.cause)}</h2>
             <div className="final-label">You reached</div>
@@ -924,25 +928,26 @@ export function GameScreen({
               row <CountUp value={endedScore.score} durationMs={650} />
             </div>
             {endedScore.score >= hud.record && endedScore.score > 0 && (
-              <div className="final-label" style={{ color: "var(--sun-400)" }}>
+              <div className="final-label final-label--gold">
                 New personal course record
               </div>
             )}
             <div className="row">
-              <button className="play" disabled={respawning} onClick={playAgain}>
+              <Button variant="play" disabled={respawning} onClick={playAgain}>
                 {respawning ? "Starting…" : "TAP TO RETRY"}
-              </button>
-              <button className="ghost" onClick={onExit}>
+              </Button>
+              <Button variant="ghost" onClick={onExit}>
                 Exit
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {death && (
-        <div className="modal-backdrop">
-          <div className="modal card death">
+        <Modal ariaLabel="You went down — revive or end the attempt">
+          <div className="death-card">
+            {hud.score >= hud.record && hud.score > 0 && <Confetti />}
             <h2>{deathHeadline(deathCauseRef.current)}</h2>
             <div className="final-label">Score retained</div>
             <div className="final-score">
@@ -950,35 +955,42 @@ export function GameScreen({
             </div>
             {death.price != null ? (
               <>
-                <p style={{ textAlign: "center" }}>
+                <p>
                   Revive for{" "}
-                  <span className="price">
+                  <span className="death-price">
                     {(Number(death.price) / 1e6).toFixed(2)} USDC
                   </span>{" "}
-                  — <span className="deadline">{deadlineLeft}s</span> left.
+                  —{" "}
+                  <span className="death-deadline">
+                    <Icon name="timer" size={14} style={{ verticalAlign: "-2px" }} />{" "}
+                    {deadlineLeft}s
+                  </span>{" "}
+                  left.
                   <br />
-                  <small className="dim">Later revivals double in price.</small>
+                  <small className="ds-dim">Later revivals double in price.</small>
                 </p>
                 <div className="row">
-                  <button
-                    className="danger"
-                    disabled={reviving || deadlineLeft === 0}
+                  <Button
+                    variant="danger"
+                    icon="heart"
+                    busy={reviving}
+                    disabled={deadlineLeft === 0}
                     onClick={revive}
                   >
                     {reviving
                       ? "Reviving…"
                       : `Continue (${(Number(death.price) / 1e6).toFixed(0)} USDC)`}
-                  </button>
-                  <button className="ghost" onClick={onExit}>
+                  </Button>
+                  <Button variant="ghost" onClick={onExit}>
                     End attempt
-                  </button>
+                  </Button>
                 </div>
               </>
             ) : (
               <p>Revival price exceeds representable limits — the attempt ends.</p>
             )}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

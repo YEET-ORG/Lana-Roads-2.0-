@@ -17,6 +17,14 @@ import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
 import { EntryFlow } from "../entry/EntryFlow";
 import { MenuBackdrop } from "./MenuBackdrop";
+import {
+  Button,
+  Icon,
+  IconButton,
+  Notice,
+  Sheet,
+  StatGrid,
+} from "../../design-system";
 import type { Route } from "../../app/App";
 
 interface DayInfo {
@@ -149,7 +157,11 @@ export function Home({
         onScene={(s) => (menuSceneRef.current = s)}
       />
       <div className="home-overlay">
-        {warn && <div className="banner floating">{warn}</div>}
+        {warn && (
+          <div className="notice-float">
+            <Notice>{warn}</Notice>
+          </div>
+        )}
 
         <div className="home-spacer" />
 
@@ -161,31 +173,36 @@ export function Home({
             swipeRef.current = null;
           }}
         >
-          <button
-            className="arrow round"
-            aria-label="previous agent"
+          <IconButton
+            icon="chevron-left"
+            label="previous agent"
+            variant="sun"
+            size="lg"
             onClick={() => cycleAgent(-1)}
-          >
-            ‹
-          </button>
+          />
           <div className="agent-nameplate">
             <span className="agent-name" key={agentIdx}>
               {agentName(agentIdx)}
             </span>
-            <span className="agent-sub">swipe or tap to switch</span>
+            <span className="agent-sub">
+              <Icon name="paw" size={11} style={{ verticalAlign: "-1px" }} /> swipe or tap
+              to switch
+            </span>
           </div>
-          <button
-            className="arrow round"
-            aria-label="next agent"
+          <IconButton
+            icon="chevron-right"
+            label="next agent"
+            variant="sun"
+            size="lg"
             onClick={() => cycleAgent(1)}
-          >
-            ›
-          </button>
+          />
         </div>
 
         <div className="home-cta">
-          <button
-            className="play giant"
+          <Button
+            variant="play"
+            size="giant"
+            icon="play"
             onClick={() => {
               if (
                 !boot ||
@@ -207,51 +224,63 @@ export function Home({
             }}
           >
             PLAY
-          </button>
+          </Button>
           <button
-            className="ticket"
+            className="home-ticket"
             onClick={() => {
               sfx.click();
               setPaidOpen(true);
             }}
           >
-            <span>DAILY POT</span>
-            <b>1 USDC</b>
+            <span className="home-ticket__label">
+              <Icon name="ticket" size={22} />
+              <span>
+                DAILY POT · PAID
+                <small>
+                  {info && info.status !== "offline"
+                    ? `pool ${(Number(info.pool) / 1e6).toFixed(2)} USDC${
+                        countdown ? ` · ${countdown} left` : ""
+                      }`
+                    : "daily prize competition"}
+                </small>
+              </span>
+            </span>
+            <b className="home-ticket__price">1 USDC</b>
           </button>
-          <button className="text-link" onClick={() => onPlay({ name: "demo" })}>
+          <Button variant="link" icon="target" onClick={() => onPlay({ name: "demo" })}>
             Practice offline
-          </button>
+          </Button>
         </div>
       </div>
 
-      {paidOpen && info && (
-        <div className="sheet-backdrop" onClick={() => setPaidOpen(false)}>
-          <div
-            className="sheet paid-sheet"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="Daily competition"
-          >
-            <div className="sheet-handle" />
-            <h2>Daily competition</h2>
-            <div className="sheet-stats">
-              <span>
-                <label>pool</label>
-                {(Number(info.pool) / 1e6).toFixed(2)} USDC
-              </span>
-              <span>
-                <label>record</label>
-                row {info.recordScore}
-              </span>
-              <span>
-                <label>live</label>
-                {info.activePlayers}
-              </span>
-              <span>
-                <label>cutoff</label>
-                {countdown || "…"}
-              </span>
-            </div>
+      {paidOpen && (
+        <Sheet
+          tone="gold"
+          title="Daily competition"
+          ariaLabel="Daily competition"
+          onClose={() => setPaidOpen(false)}
+        >
+          {info ? (
+            <StatGrid
+              items={[
+                {
+                  label: "pool",
+                  value: `${(Number(info.pool) / 1e6).toFixed(2)} USDC`,
+                  tone: "gold",
+                  icon: "vault",
+                },
+                { label: "record", value: `row ${info.recordScore}`, icon: "flag" },
+                { label: "live", value: info.activePlayers, icon: "users" },
+                { label: "cutoff", value: countdown || "…", icon: "timer" },
+              ]}
+            />
+          ) : (
+            <Notice tone="info">
+              Today's competition isn't reachable right now — practice mode is still
+              open.
+            </Notice>
+          )}
+          <div className="paid-sheet-copy">
             <p>
               Entry <b>1 USDC</b> · winner takes <b>90%</b> · revival 10 → 20 → 40 USDC,
               doubling, 60s window.
@@ -259,24 +288,27 @@ export function Home({
             <p className="disclosure">
               Stronger classes come from rarer agents — intentionally pay-to-win.
             </p>
-            <div className="row">
-              <button
-                className="primary"
-                disabled={entering || !paidOpenable}
-                onClick={() => {
-                  sfx.confirm();
-                  setEntering(true);
-                  setPaidOpen(false);
-                }}
-              >
-                {paidOpenable ? "Enter for 1 USDC" : `Day is ${info.status}`}
-              </button>
-              <button className="ghost" onClick={() => setPaidOpen(false)}>
-                Back
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="row">
+            <Button
+              variant="primary"
+              icon="coin"
+              disabled={entering || !paidOpenable}
+              onClick={() => {
+                sfx.confirm();
+                setEntering(true);
+                setPaidOpen(false);
+              }}
+            >
+              {paidOpenable
+                ? "Enter for 1 USDC"
+                : `Unavailable${info ? ` — day is ${info.status}` : ""}`}
+            </Button>
+            <Button variant="ghost" onClick={() => setPaidOpen(false)}>
+              Back
+            </Button>
+          </div>
+        </Sheet>
       )}
 
       {entering && info && boot && (

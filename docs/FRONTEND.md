@@ -76,7 +76,7 @@ The finished frontend must not resemble:
 
 ## 4. Current implementation baseline and migration
 
-The repository currently contains a devnet vertical slice under `apps/web/`:
+The repository contains a devnet vertical slice under `apps/web/`:
 
 - app bootstrap and burner funding;
 - paid/casual mode information;
@@ -84,10 +84,17 @@ The repository currently contains a devnet vertical slice under `apps/web/`:
 - live Three.js world;
 - Magic Router resolution and ER subscriptions;
 - optimistic movement and reconciliation;
-- keyboard movement;
-- simple score/ping/state HUD;
-- paid revival modal;
-- generic CSS and temporary text/emoji presentation.
+- keyboard and gesture movement;
+- score/state HUD;
+- paid revival modal with live authoritative countdown;
+- a shared Voxel Arcade design system (`apps/web/src/design-system/`) with tokens, original SVG icons, and reusable components (Button, IconButton, Card, Modal, Sheet, Pill, StatGrid, Steps, Notice, Loader, Confetti, CountUp) applied to Home, identity onboarding, paid entry, gameplay HUD, death/revival, and practice mode.
+
+**2026-08-13 redesign status:** the shipped UI now follows the approved Voxel Arcade direction via the design system above. Known divergences from this document, to be closed by later phases:
+
+- Onboarding is lightweight (polished identity/wallet gate plus contextual first-run hints); the full §17 tutorial sequence is not yet implemented.
+- Routing remains the hand-rolled `Route` union; the §7 route map, bottom navigation, and the missing product surfaces (leaderboards, gacha, marketplace, profile, settings, admin) are not yet built.
+- Kick/ability side buttons (§9.3) are not yet in the mobile HUD; Kick is keyboard-only.
+- The design system keeps motion in CSS (`tokens.css`/`components.css`) rather than a `motion.ts` module, and icons are hand-drawn inline SVG (`icons.tsx`) rather than extracted atlas sprites.
 
 This code proves networking and gameplay integration. It is not the final frontend architecture or visual quality bar.
 
@@ -103,12 +110,14 @@ This code proves networking and gameplay integration. It is not the final fronte
 
 ### 4.2 Replace or refactor
 
+Done in the 2026-08-13 redesign: production emoji/text-symbol icons removed (original SVG set); generic styling replaced by the token/type system in `design-system/`; ad-hoc per-screen buttons/modals replaced by shared components.
+
+Still open:
+
 - Replace the single `Route` union with a typed route/state hierarchy.
-- Break large `GameScreen`, `Home`, and global stylesheet responsibilities into focused modules.
-- Remove production emoji and text-symbol icons.
-- Replace generic Segoe/system styling with the approved type and token system.
+- Break the remaining large `GameScreen` responsibilities into focused modules.
 - Remove desktop maximum-width shell behavior from the game experience.
-- Add gesture-first touch input and side buttons.
+- Add side buttons (Kick/ability) to the mobile HUD.
 - Separate development diagnostics from player HUD.
 - Add persistent canvas/app shell and camera-led route transitions.
 - Add the missing product surfaces described below.
@@ -665,21 +674,20 @@ Mobile scale:
 
 ### 12.5 Components
 
-- ArcadeButton
+Implemented in `apps/web/src/design-system/` (import from `design-system/index.ts`):
+
+- Button (ArcadeButton: info/primary/play/danger/violet/ghost/link, sm/giant, busy state)
 - IconButton
-- ArcadeCard
-- BottomSheet
-- FocusModal
-- StatusPill
-- ModeCard
-- AgentCard
-- NumericDisplay
-- CooldownButton
-- ProgressTrack
-- TransactionTimeline
-- Toast/EventBanner
-- PodiumRow
-- VirtualizedAgentGrid
+- Card (ArcadeCard)
+- Sheet (BottomSheet) and Modal (FocusModal), both with Escape/backdrop dismiss and ARIA dialog semantics
+- Pill (StatusPill)
+- StatGrid (label/value tiles, tabular numerals)
+- Steps (bounded progress track; grows into TransactionTimeline)
+- Notice (durable banner), Loader (hopping-block async indicator)
+- Confetti, CountUp
+- Icon (original inline SVG set in `icons.tsx`)
+
+Planned as product surfaces arrive: ModeCard, AgentCard, NumericDisplay, CooldownButton, ProgressTrack, TransactionTimeline, Toast/EventBanner, PodiumRow, VirtualizedAgentGrid.
 
 Every component defines idle, hover, focus, press, loading, success, disabled, and error states where applicable.
 

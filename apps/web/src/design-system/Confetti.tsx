@@ -7,7 +7,7 @@ const COLORS = ["#FFD23F", "#4BE08F", "#22B9E6", "#F45169", "#8E63EA", "#FFFDF5"
 
 export function Confetti({ count = 14 }: { count?: number }) {
   return (
-    <div className="confetti" aria-hidden>
+    <div className="ds-confetti" aria-hidden>
       {Array.from({ length: count }, (_, i) => (
         <span
           key={i}

@@ -1,0 +1,228 @@
+/*
+ * Lana Roads — Voxel Arcade design tokens (docs/FRONTEND.md §12, §14).
+ * Single source of truth for palette, type, depth, motion and layering.
+ * All animation is transform/opacity only; entrances use capped
+ * back-easing, exits use fast cubic acceleration; countdowns stay linear.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Titan+One&family=Nunito:wght@400;700;800&display=swap");
+
+:root {
+  /* ---- palette (spec §12.1) ---- */
+  --sky-400: #57cff2;
+  --aqua-500: #22b9e6;
+  --aqua-700: #10769c;
+  --grass-400: #4be08f;
+  --grass-600: #169b60;
+  --sun-400: #ffd23f;
+  --sun-700: #c96f14;
+  --coral-500: #f45169;
+  --coral-700: #a82443;
+  --violet-500: #8e63ea;
+  --violet-700: #5b3aa8;
+  --navy-950: #08111f;
+  --navy-900: #101827;
+  --navy-800: #18243a;
+  --navy-700: #223252;
+  --slate-300: #b8c5d9;
+  --paper: #fffdf5;
+
+  /* ---- semantic aliases ---- */
+  --ds-text: var(--paper);
+  --ds-text-dim: var(--slate-300);
+  --ds-surface: var(--navy-800);
+  --ds-surface-deep: var(--navy-900);
+  --ds-line: rgba(184, 197, 217, 0.14);
+  --ds-line-strong: rgba(184, 197, 217, 0.35);
+  --ds-scrim: rgba(8, 17, 31, 0.72);
+  --ds-scrim-soft: rgba(8, 17, 31, 0.45);
+
+  /* ---- shape / depth (spec §12.4) ---- */
+  --ds-radius-s: 10px;
+  --ds-radius-m: 14px;
+  --ds-radius-l: 18px;
+  --ds-radius-xl: 22px;
+  --ds-edge-s: 4px; /* small hard lower edge */
+  --ds-edge-m: 6px; /* default button edge */
+  --ds-edge-l: 8px; /* giant CTA edge */
+
+  /* ---- motion (spec §14.1) ---- */
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-exit: cubic-bezier(0.55, 0, 0.55, 0.2);
+  --t-instant: 90ms;
+  --t-quick: 160ms;
+  --t-screen: 260ms;
+  --t-celebrate: 420ms;
+
+  /* ---- type ---- */
+  --font-display: "Titan One", "Arial Black", sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
+
+  /* ---- layering ---- */
+  --z-world: 0;
+  --z-overlay: 2;
+  --z-header: 4;
+  --z-game: 5;
+  --z-sheet: 8;
+  --z-modal: 10;
+  --z-toast: 12;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--navy-950);
+  color: var(--ds-text);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--aqua-500);
+  color: var(--navy-950);
+}
+
+/* Visible stepped focus for keyboard users (spec §20). */
+:focus-visible {
+  outline: 3px solid var(--sky-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- keyframes (transform/opacity only) ---------- */
+@keyframes ds-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ds-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ds-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes ds-stamp-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.6) rotate(-3deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.95) rotate(0.5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ds-score-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ds-cube-hop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  15% {
+    transform: translateY(0) scale(1.15, 0.8);
+  }
+  50% {
+    transform: translateY(-22px) scale(0.92, 1.12);
+  }
+  85% {
+    transform: translateY(0) scale(1.1, 0.86);
+  }
+}
+
+@keyframes ds-confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+  }
+  100% {
+    opacity: 0.15;
+    transform: translateY(340px) rotate(var(--r));
+  }
+}
+
+@keyframes ds-hint-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes ds-shake-x {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Offline practice mode: the full world runtime with locally synthesized
  * lanes and client-side collision — no cluster, no signatures. Exists to
  * tune game feel (and let players warm up); scoring here is cosmetic and
@@ -16,8 +16,13 @@ import {
   makeLane,
 } from "../../game/simulation/demoLanes";
 import { Direction } from "@crossy-world/sdk";
-import { CountUp } from "../../ui/CountUp";
-import { Confetti } from "../../ui/Confetti";
+import {
+  Button,
+  Confetti,
+  CountUp,
+  IconButton,
+  Modal,
+} from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
 import { deathHeadline, type DeathCause } from "../../game/renderer/scene";
 
@@ -177,17 +182,18 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
         </div>
       )}
       <div className="hud top-right">
-        <button className="icon-btn" onClick={onExit} aria-label="exit">
-          ×
-        </button>
+        <IconButton icon="close" label="exit practice" onClick={onExit} />
       </div>
       {score === 0 && dead == null && (
-        <div className="hud hop-hint">Tap or press W to hop</div>
+        <div className="hud hop-hint">
+          Swipe or tap to hop
+          <small>WASD / arrows move · Space kicks</small>
+        </div>
       )}
 
       {dead != null && (
-        <div className="modal-backdrop">
-          <div className="modal card death">
+        <Modal ariaLabel="Run over">
+          <div className="death-card">
             {dead.score >= best && dead.score > 0 && <Confetti />}
             <h2>{deathHeadline(dead.cause)}</h2>
             <div className="final-label">You reached</div>
@@ -195,20 +201,22 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
               row <CountUp value={dead.score} durationMs={650} />
             </div>
             {dead.score >= best && dead.score > 0 && (
-              <div className="final-label" style={{ color: "var(--sun-400)" }}>
-                New practice best
-              </div>
+              <div className="final-label final-label--gold">New practice best</div>
             )}
             <div className="row">
-              <button className="play" onClick={() => setRunNonce((n) => n + 1)}>
-                TAP TO RETRY
-              </button>
-              <button className="ghost" onClick={onExit}>
+              <Button
+                variant="play"
+                icon="play"
+                onClick={() => setRunNonce((n) => n + 1)}
+              >
+                RUN AGAIN · FREE
+              </Button>
+              <Button variant="ghost" onClick={onExit}>
                 Exit
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

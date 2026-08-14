@@ -1,0 +1,558 @@
+/*
+ * Voxel Arcade components. Class contract for the wrappers in
+ * design-system/*.tsx — screens compose these, they don't restyle them.
+ */
+
+/* ============================== buttons ============================== */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1.1;
+  color: var(--navy-950);
+  background: var(--aqua-500);
+  border: 0;
+  border-radius: var(--ds-radius-m);
+  padding: 12px 22px;
+  min-height: 48px;
+  cursor: pointer;
+  box-shadow: 0 var(--ds-edge-m) 0 var(--aqua-700);
+  transform: translateY(0);
+  transition:
+    transform var(--t-instant) var(--ease-out),
+    box-shadow var(--t-instant) var(--ease-out),
+    filter var(--t-quick) var(--ease-out);
+  touch-action: manipulation;
+  user-select: none;
+  text-decoration: none;
+}
+
+.ds-btn:hover {
+  filter: brightness(1.08);
+}
+
+.ds-btn:active {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 var(--aqua-700);
+}
+
+.ds-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+  filter: none;
+}
+
+.ds-btn--primary {
+  background: var(--sun-400);
+  box-shadow: 0 var(--ds-edge-m) 0 var(--sun-700);
+}
+.ds-btn--primary:active {
+  box-shadow: 0 2px 0 var(--sun-700);
+}
+
+.ds-btn--play {
+  background: var(--grass-400);
+  box-shadow: 0 var(--ds-edge-m) 0 var(--grass-600);
+}
+.ds-btn--play:active {
+  box-shadow: 0 2px 0 var(--grass-600);
+}
+
+.ds-btn--danger {
+  background: var(--coral-500);
+  color: var(--paper);
+  box-shadow: 0 var(--ds-edge-m) 0 var(--coral-700);
+}
+.ds-btn--danger:active {
+  box-shadow: 0 2px 0 var(--coral-700);
+}
+
+.ds-btn--violet {
+  background: var(--violet-500);
+  color: var(--paper);
+  box-shadow: 0 var(--ds-edge-m) 0 var(--violet-700);
+}
+.ds-btn--violet:active {
+  box-shadow: 0 2px 0 var(--violet-700);
+}
+
+.ds-btn--ghost {
+  background: transparent;
+  color: var(--ds-text-dim);
+  border: 2px solid var(--ds-line-strong);
+  box-shadow: 0 var(--ds-edge-s) 0 rgba(184, 197, 217, 0.15);
+}
+.ds-btn--ghost:active {
+  box-shadow: 0 1px 0 rgba(184, 197, 217, 0.15);
+}
+
+.ds-btn--link {
+  background: transparent;
+  box-shadow: none;
+  color: var(--paper);
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-shadow: 0 2px 0 var(--navy-950);
+}
+.ds-btn--link:hover {
+  filter: none;
+  color: var(--sky-400);
+}
+.ds-btn--link:active {
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+.ds-btn--sm {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--ds-radius-s);
+  box-shadow: 0 var(--ds-edge-s) 0 var(--aqua-700);
+}
+.ds-btn--sm:active {
+  box-shadow: 0 1px 0 var(--aqua-700);
+}
+
+.ds-btn--giant {
+  width: 100%;
+  min-height: 68px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: 2px;
+  border-radius: var(--ds-radius-l);
+  box-shadow: 0 var(--ds-edge-l) 0 var(--grass-600);
+}
+.ds-btn--giant:active {
+  transform: translateY(6px);
+  box-shadow: 0 2px 0 var(--grass-600);
+}
+
+.ds-btn--block {
+  width: 100%;
+}
+
+/* Busy spinner: three hopping blocks. */
+.ds-btn__loader {
+  display: inline-flex;
+  gap: 4px;
+}
+.ds-btn__loader i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: ds-btn-hop 0.7s var(--ease-pop) infinite;
+}
+.ds-btn__loader i:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.ds-btn__loader i:nth-child(3) {
+  animation-delay: 0.2s;
+}
+@keyframes ds-btn-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* ============================== icon buttons ============================== */
+.ds-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  background: rgba(16, 24, 39, 0.78);
+  color: var(--paper);
+  box-shadow: 0 var(--ds-edge-s) 0 rgba(8, 17, 31, 0.85);
+  transition:
+    transform var(--t-instant) var(--ease-out),
+    box-shadow var(--t-instant) var(--ease-out),
+    filter var(--t-quick) var(--ease-out);
+  touch-action: manipulation;
+  user-select: none;
+}
+.ds-iconbtn:hover {
+  filter: brightness(1.15);
+}
+.ds-iconbtn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(8, 17, 31, 0.85);
+}
+.ds-iconbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.ds-iconbtn--sun {
+  background: var(--sun-400);
+  color: var(--navy-950);
+  box-shadow: 0 var(--ds-edge-m) 0 var(--sun-700);
+}
+.ds-iconbtn--sun:active {
+  box-shadow: 0 2px 0 var(--sun-700);
+}
+
+.ds-iconbtn--lg {
+  min-height: 60px;
+  min-width: 60px;
+}
+
+/* ============================== cards / panels ============================== */
+.ds-card {
+  background: var(--ds-surface);
+  border: 2px solid var(--ds-line);
+  border-radius: var(--ds-radius-l);
+  padding: 18px;
+}
+
+.ds-card--gold {
+  border-color: var(--sun-700);
+  background: linear-gradient(165deg, #2a2410, var(--navy-800) 55%);
+}
+
+.ds-card--aqua {
+  border-color: var(--aqua-500);
+}
+
+/* ============================== pills / badges ============================== */
+.ds-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--ds-radius-s);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+  user-select: none;
+}
+
+.ds-pill--paid {
+  background: var(--sun-400);
+  color: var(--navy-950);
+  box-shadow: 0 2px 0 var(--sun-700);
+}
+.ds-pill--casual {
+  background: var(--grass-400);
+  color: var(--navy-950);
+  box-shadow: 0 2px 0 var(--grass-600);
+}
+.ds-pill--info {
+  background: var(--aqua-500);
+  color: var(--navy-950);
+  box-shadow: 0 2px 0 var(--aqua-700);
+}
+.ds-pill--warn {
+  background: var(--sun-400);
+  color: var(--navy-950);
+  box-shadow: 0 2px 0 var(--sun-700);
+}
+.ds-pill--error {
+  background: var(--coral-500);
+  color: var(--paper);
+  box-shadow: 0 2px 0 var(--coral-700);
+}
+.ds-pill--neutral {
+  background: var(--navy-700);
+  color: var(--ds-text-dim);
+  box-shadow: 0 2px 0 var(--navy-950);
+}
+.ds-pill--outline {
+  background: rgba(16, 24, 39, 0.82);
+  color: var(--paper);
+  border: 2px solid var(--ds-line);
+  box-shadow: 0 2px 0 rgba(8, 17, 31, 0.6);
+}
+
+/* ============================== modal / sheet ============================== */
+.ds-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--ds-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: ds-fade-in var(--t-quick) var(--ease-out) both;
+}
+
+.ds-modal {
+  width: min(460px, 94vw);
+  max-height: min(640px, 92vh);
+  overflow-y: auto;
+  animation: ds-rise-in var(--t-screen) var(--ease-pop) both;
+}
+
+.ds-modal__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 26px;
+  margin: 0 0 10px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 3px 0 var(--navy-950);
+}
+
+.ds-sheet-zone {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: var(--ds-scrim-soft);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: ds-fade-in var(--t-quick) var(--ease-out) both;
+}
+
+.ds-sheet {
+  width: min(520px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--ds-surface);
+  border: 2px solid var(--ds-line-strong);
+  border-bottom: 0;
+  border-radius: var(--ds-radius-xl) var(--ds-radius-xl) 0 0;
+  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
+  animation: ds-slide-up var(--t-screen) var(--ease-out) both;
+}
+
+.ds-sheet--gold {
+  border-color: var(--sun-700);
+}
+
+.ds-sheet__handle {
+  width: 48px;
+  height: 5px;
+  border-radius: 4px;
+  background: var(--ds-line-strong);
+  margin: 4px auto 12px;
+}
+
+.ds-sheet__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  margin: 0 0 10px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 3px 0 var(--navy-950);
+}
+
+.ds-sheet--gold .ds-sheet__title {
+  color: var(--sun-400);
+  text-shadow: 0 3px 0 var(--sun-700);
+}
+
+/* ============================== stat grid ============================== */
+.ds-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ds-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--ds-surface-deep);
+  border-radius: var(--ds-radius-s);
+  padding: 8px 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-stat .ds-icon {
+  flex: none;
+  color: var(--aqua-500);
+}
+
+.ds-stat--gold .ds-icon {
+  color: var(--sun-400);
+}
+
+.ds-stat__label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ds-text-dim);
+}
+
+.ds-stat--gold .ds-stat__value {
+  color: var(--sun-400);
+}
+
+/* ============================== steps ============================== */
+.ds-steps {
+  display: flex;
+  gap: 6px;
+}
+
+.ds-step {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ds-text-dim);
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: rgba(184, 197, 217, 0.08);
+  border-bottom: 3px solid rgba(184, 197, 217, 0.15);
+  transition: all var(--t-quick) var(--ease-out);
+}
+
+.ds-step--active {
+  color: var(--navy-950);
+  background: var(--sun-400);
+  border-bottom-color: var(--sun-700);
+  animation: ds-score-pop 240ms var(--ease-pop);
+}
+
+.ds-step--done {
+  color: var(--navy-950);
+  background: var(--grass-400);
+  border-bottom-color: var(--grass-600);
+}
+
+/* ============================== notice / banner ============================== */
+.ds-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--ds-surface);
+  border: 2px solid var(--sun-700);
+  border-left: 8px solid var(--sun-400);
+  padding: 10px 14px;
+  border-radius: 12px;
+  animation: ds-pop-in var(--t-screen) var(--ease-pop) both;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ds-notice--error {
+  border-color: var(--coral-700);
+  border-left-color: var(--coral-500);
+}
+
+.ds-notice--info {
+  border-color: var(--aqua-700);
+  border-left-color: var(--aqua-500);
+}
+
+.ds-notice a {
+  color: var(--sky-400);
+}
+
+.ds-notice__icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--sun-400);
+}
+.ds-notice--error .ds-notice__icon {
+  color: var(--coral-500);
+}
+.ds-notice--info .ds-notice__icon {
+  color: var(--aqua-500);
+}
+
+/* ============================== review list ============================== */
+.ds-review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.ds-review li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--ds-surface-deep);
+  border-radius: var(--ds-radius-s);
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ds-review li .ds-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--aqua-500);
+}
+
+.ds-review li.ds-review--warn {
+  border: 2px solid var(--sun-700);
+}
+.ds-review li.ds-review--warn .ds-icon {
+  color: var(--sun-400);
+}
+
+/* ============================== misc ============================== */
+.ds-error-text {
+  color: var(--coral-500);
+  word-break: break-word;
+  font-size: 13.5px;
+}
+
+.ds-dim {
+  color: var(--ds-text-dim);
+}
+
+.ds-loader {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--ds-text-dim);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.ds-loader__cube {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--grass-400);
+  box-shadow: 0 4px 0 var(--grass-600);
+  animation: ds-cube-hop 0.7s var(--ease-pop) infinite;
+}
+
+/* One-shot voxel confetti (square motif). Parent must be positioned. */
+.ds-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ds-confetti span {
+  position: absolute;
+  top: -12px;
+  left: var(--x);
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  animation: ds-confetti-fall 1100ms ease-in var(--d) forwards;
+}

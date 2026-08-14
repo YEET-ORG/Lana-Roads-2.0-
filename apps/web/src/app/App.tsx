@@ -10,6 +10,7 @@ import { GameScreen } from "../features/game/GameScreen";
 import { IdentityGate } from "../features/identity/IdentityGate";
 import { DemoScreen } from "../features/demo/DemoScreen";
 import { AgentGallery } from "../features/demo/AgentGallery";
+import { Button, Icon, Loader, Notice } from "../design-system";
 import { sfx } from "../game/audio";
 
 export type Route =
@@ -103,30 +104,26 @@ function AppInner() {
   if (route.name === "demo")
     return <DemoScreen onExit={() => setRoute({ name: "home" })} />;
   if (!identity) return <IdentityGate onReady={setIdentity} />;
-  if (!boot && !error)
-    return (
-      <div className="splash">
-        <h1>LANA ROADS</h1>
-        <div className="splash-cube" />
-        <p>hopping in…</p>
-      </div>
-    );
+  if (!boot && !error) return <BootSplash />;
 
   const gameAddress = boot?.wallet.publicKey.toBase58() ?? "";
 
   return (
     <div className={`shell ${route.name === "home" ? "shell-home" : ""}`}>
       <header>
-        <h1 onClick={() => setRoute({ name: "home" })}>LANA ROADS</h1>
-        <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="wordmark" onClick={() => setRoute({ name: "home" })}>
+          LANA ROADS
+        </button>
+        <span className="header-cluster">
           {identity.kind === "adapter" && (
-            <span className="wallet" title="identity derived from this wallet">
+            <span className="header-chip" title="identity derived from this wallet">
+              <Icon name="wallet" size={14} />
               {identity.parent.slice(0, 4)}…{identity.parent.slice(-4)}
             </span>
           )}
           {gameAddress && (
-            <span
-              className="wallet"
+            <button
+              className="header-chip"
               title="game key — click to copy"
               onClick={() => {
                 navigator.clipboard?.writeText(gameAddress);
@@ -134,13 +131,15 @@ function AppInner() {
                 setTimeout(() => setCopied(false), 1500);
               }}
             >
+              <Icon name={copied ? "check" : "copy"} size={14} />
               {copied ? "copied!" : `${gameAddress.slice(0, 8)}…`}
               {balance != null && ` · ${balance.toFixed(3)} SOL`}
-            </span>
+            </button>
           )}
-          <button
-            className="ghost"
-            style={{ minHeight: 34, padding: "6px 12px", fontSize: 13 }}
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="switch"
             title="switch identity"
             onClick={() => {
               clearIdentity();
@@ -150,23 +149,50 @@ function AppInner() {
             }}
           >
             Switch
-          </button>
+          </Button>
         </span>
       </header>
       {boot && balance != null && balance < 0.01 && (
-        <div className="banner floating">
-          Your game key needs devnet SOL to play (~0.02). Click the address above to copy
-          it, then fund it from{" "}
-          <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">
-            faucet.solana.com
-          </a>{" "}
-          or any devnet wallet: <code>{gameAddress}</code>
+        <div className="notice-float">
+          <Notice icon="drop">
+            Your game key needs devnet SOL to play (~0.02). Click the address above to
+            copy it, then fund it from{" "}
+            <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">
+              faucet.solana.com
+            </a>{" "}
+            or any devnet wallet: <code>{gameAddress}</code>
+          </Notice>
         </div>
       )}
       {route.name === "home" && <Home boot={boot} onPlay={(r) => setRoute(r)} />}
       {route.name === "play" && boot && (
         <GameScreen boot={boot} route={route} onExit={() => setRoute({ name: "home" })} />
       )}
+    </div>
+  );
+}
+
+const BOOT_STAGES = [
+  "loading world…",
+  "connecting…",
+  "syncing day…",
+  "waking up the agents…",
+];
+
+/** Branded boot screen: stamped wordmark, hopping block, named stages. */
+function BootSplash() {
+  const [stage, setStage] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setStage((s) => Math.min(s + 1, BOOT_STAGES.length - 1)),
+      1400,
+    );
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="splash">
+      <h1>LANA ROADS</h1>
+      <Loader label={BOOT_STAGES[stage]} />
     </div>
   );
 }

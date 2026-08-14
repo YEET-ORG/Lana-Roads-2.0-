@@ -34,3 +34,5 @@ notes/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 .superpowers/
+.scratch/
+.screenshot.cjs

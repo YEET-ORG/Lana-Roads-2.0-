@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { ReceiptKind, TransactionReview } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
+import { Button, Icon, Loader, Modal, Notice, Steps } from "../../design-system";
 
 type Stage =
   | {
@@ -111,72 +112,84 @@ export function EntryFlow({
           : 3;
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal card" onClick={(e) => e.stopPropagation()}>
-        <h2>Paid entry</h2>
-        {stage.name !== "failed" && (
-          <div className="steps">
-            {["Review", "Sign", "Spawn", "Play"].map((label, i) => (
-              <span
-                key={label}
-                className={`step ${i < stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`}
-              >
-                {label}
-              </span>
-            ))}
-          </div>
-        )}
-        {stage.name === "loading" && <p>Preparing review…</p>}
-        {stage.name === "review" && (
-          <>
-            <ul className="review">
-              <li>
+    <Modal
+      title="Paid entry"
+      ariaLabel="Paid entry"
+      onClose={stage.name === "signing" || stage.name === "spawn-pending" ? undefined : onCancel}
+    >
+      {stage.name !== "failed" && (
+        <div style={{ marginBottom: 12 }}>
+          <Steps steps={["Review", "Sign", "Spawn", "Play"]} current={stepIndex} />
+        </div>
+      )}
+      {stage.name === "loading" && <Loader label="Preparing review…" />}
+      {stage.name === "review" && (
+        <>
+          <ul className="ds-review">
+            <li>
+              <Icon name="vault" />
+              <span>
                 Pay <b>1.00 USDC</b> into today's prize vault
+              </span>
+            </li>
+            <li>
+              <Icon name="percent" />
+              <span>Winner takes 90%, team 10% — settled after the UTC cutoff</span>
+            </li>
+            <li>
+              <Icon name="lock" />
+              <span>Starter agent (Kick only) locked for the attempt</span>
+            </li>
+            <li>
+              <Icon name="key" />
+              <span>Session key signs gameplay; it can never spend USDC or NFTs</span>
+            </li>
+            {stage.review.warnings.map((w) => (
+              <li key={w} className="ds-review--warn">
+                <Icon name="alert" />
+                <span>{w}</span>
               </li>
-              <li>Winner takes 90%, team 10% — settled after the UTC cutoff</li>
-              <li>Starter agent (Kick only) locked for the attempt</li>
-              <li>Session key signs gameplay; it can never spend USDC or NFTs</li>
-              {stage.review.warnings.map((w) => (
-                <li key={w} className="warn">
-                  {w}
-                </li>
-              ))}
-            </ul>
-            <div className="row">
-              <button
-                onClick={() =>
-                  submit(stage.review, stage.attemptNonce, stage.receiptNonce)
-                }
-              >
-                Confirm & sign
-              </button>
-              <button className="ghost" onClick={onCancel}>
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
-        {stage.name === "signing" && <p>Signing & sending payment…</p>}
-        {stage.name === "payment-confirmed" && <p>Payment confirmed on Solana.</p>}
-        {stage.name === "spawn-pending" && (
-          <p>Payment confirmed — reserving your spawn tile…</p>
-        )}
-        {stage.name === "active" && <p>You're in!</p>}
-        {stage.name === "failed" && (
-          <>
-            <p className="error">{stage.message.slice(0, 300)}</p>
-            {stage.refundable && (
-              <p>
-                Spawning failed — your 1 USDC entry is refundable. Use the refund action
-                once reconciliation confirms the failure.
-              </p>
-            )}
-            <button className="ghost" onClick={onCancel}>
+            ))}
+          </ul>
+          <div className="row">
+            <Button
+              variant="primary"
+              onClick={() =>
+                submit(stage.review, stage.attemptNonce, stage.receiptNonce)
+              }
+            >
+              Confirm & sign
+            </Button>
+            <Button variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </>
+      )}
+      {stage.name === "signing" && <Loader label="Signing & sending payment…" />}
+      {stage.name === "payment-confirmed" && (
+        <Loader label="Payment confirmed on Solana." />
+      )}
+      {stage.name === "spawn-pending" && (
+        <Loader label="Payment confirmed — reserving your spawn tile…" />
+      )}
+      {stage.name === "active" && <Loader label="You're in!" />}
+      {stage.name === "failed" && (
+        <>
+          <Notice tone="error">{stage.message.slice(0, 300)}</Notice>
+          {stage.refundable && (
+            <p>
+              Spawning failed — your 1 USDC entry is refundable. Use the refund action
+              once reconciliation confirms the failure.
+            </p>
+          )}
+          <div className="row">
+            <Button variant="ghost" onClick={onCancel}>
               Close
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

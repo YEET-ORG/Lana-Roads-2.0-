@@ -4,7 +4,7 @@
  * the game key from a signature, so the identity is portable and tied to
  * the user's wallet while gameplay stays popup-free.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import {
@@ -13,6 +13,7 @@ import {
   deriveIdentityFromSignature,
   Identity,
 } from "../../lib/identity";
+import { Button, Icon, Loader, Modal, Notice } from "../../design-system";
 
 export function IdentityGate({ onReady }: { onReady: (identity: Identity) => void }) {
   const {
@@ -29,6 +30,7 @@ export function IdentityGate({ onReady }: { onReady: (identity: Identity) => voi
     "choose",
   );
   const [error, setError] = useState<string | null>(null);
+  const connectRequested = useRef(false);
 
   const detected = useMemo(
     () =>
@@ -59,112 +61,140 @@ export function IdentityGate({ onReady }: { onReady: (identity: Identity) => voi
     }
   }
 
-  async function pickWallet(name: string) {
+  function pickWallet(name: string) {
     setStage("connecting");
     setError(null);
-    try {
-      // select() is async under the hood; connect once the adapter flips.
-      select(name as never);
-      // The adapter connects on select in recent versions; if not, connect().
-      for (let i = 0; i < 50 && !connected; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        if (connected) break;
-        if (i === 5) await connect().catch(() => {});
-      }
-      await deriveFromConnected();
-    } catch (e) {
-      setError(`${(e as Error).message ?? e}`.slice(0, 160));
-      setStage("wallets");
-    }
+    connectRequested.current = false;
+    select(name as never);
   }
 
+  // Drive the connect → sign chain from adapter state, not a polling loop:
+  // useWallet() values are only valid per-render, and with autoConnect=false
+  // select() alone never opens the wallet — connect() must be requested
+  // explicitly once the chosen adapter is in place.
+  useEffect(() => {
+    if (stage !== "connecting") return;
+    if (connected && publicKey) {
+      connectRequested.current = false;
+      void deriveFromConnected();
+      return;
+    }
+    if (!connectRequested.current) {
+      connectRequested.current = true;
+      connect().catch((e) => {
+        connectRequested.current = false;
+        setError(`${(e as Error)?.message ?? e}`.slice(0, 160));
+        setStage("wallets");
+      });
+    }
+  }, [stage, connected, publicKey, connect]);
+
   return (
-    <div className="modal-backdrop">
-      <div className="modal card">
-        <h2>Who's hopping?</h2>
-        {stage === "choose" && (
+    <Modal title="Who's hopping?" ariaLabel="Choose how to play">
+      {stage === "choose" && (
+        <>
+          <div className="identity-brand">
+            <span className="identity-brand__cube" aria-hidden />
+            <span className="identity-brand__word">LANA ROADS</span>
+          </div>
+          <p className="ds-dim" style={{ marginTop: 0 }}>
+            One tap and you're in the world. No crypto knowledge needed.
+          </p>
           <div className="identity-options">
             <button
               className="identity-option"
               onClick={() => onReady(createBurnerIdentity())}
             >
-              <span className="identity-mark burner">G</span>
+              <span className="opt-mark opt-mark--grass">
+                <Icon name="user" size={24} />
+              </span>
               <span>
-                <span className="opt-title">Guest — burner wallet</span>
+                <span className="opt-title">Play as Guest</span>
                 <br />
                 <span className="opt-sub">
-                  Instant play. A local key is created on this device; you can top it up
+                  Instant play. A local game key is created on this device — top it up
                   or upgrade to a wallet later.
                 </span>
               </span>
             </button>
             <button className="identity-option" onClick={() => setStage("wallets")}>
-              <span className="identity-mark adapter">S</span>
+              <span className="opt-mark opt-mark--violet">
+                <Icon name="wallet" size={24} />
+              </span>
               <span>
                 <span className="opt-title">Connect Solana wallet</span>
                 <br />
                 <span className="opt-sub">
-                  One signature derives your game key — your identity, record and agents
+                  One signature derives your game key — identity, record and agents
                   stay tied to your wallet on any device.
                 </span>
               </span>
             </button>
           </div>
-        )}
+          <p className="ds-dim" style={{ fontSize: 12, marginBottom: 0 }}>
+            Your game key only signs moves. It can never spend USDC or touch NFTs.
+          </p>
+        </>
+      )}
 
-        {stage === "wallets" && (
-          <>
-            {detected.length === 0 ? (
-              <p className="dim">
-                No Solana wallets detected in this browser. Install Phantom, Solflare or
-                Backpack — or play as Guest.
-              </p>
-            ) : (
-              <div className="identity-options">
-                {detected.map((w) => (
-                  <button
-                    key={w.adapter.name}
-                    className="identity-option"
-                    onClick={() => pickWallet(w.adapter.name)}
-                  >
-                    <img
-                      src={w.adapter.icon}
-                      alt=""
-                      width={40}
-                      height={40}
-                      style={{ borderRadius: 10 }}
-                    />
-                    <span className="opt-title">{w.adapter.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {connected && publicKey && (
-              <div className="row">
-                <button className="primary" onClick={deriveFromConnected}>
-                  Use {publicKey.toBase58().slice(0, 6)}… — sign to derive game key
+      {stage === "wallets" && (
+        <>
+          {detected.length === 0 ? (
+            <Notice tone="info">
+              No Solana wallets detected in this browser. Install Phantom, Solflare or
+              Backpack — or play as Guest.
+            </Notice>
+          ) : (
+            <div className="identity-options">
+              {detected.map((w) => (
+                <button
+                  key={w.adapter.name}
+                  className="identity-option"
+                  onClick={() => pickWallet(w.adapter.name)}
+                >
+                  <img
+                    src={w.adapter.icon}
+                    alt=""
+                    width={40}
+                    height={40}
+                    style={{ borderRadius: 10 }}
+                  />
+                  <span className="opt-title">{w.adapter.name}</span>
                 </button>
-              </div>
-            )}
-            {error && <p className="error">{error}</p>}
-            <div className="row">
-              <button
-                className="ghost"
-                onClick={() => {
-                  setError(null);
-                  void disconnect().catch(() => {});
-                  setStage("choose");
-                }}
-              >
-                Back
-              </button>
+              ))}
             </div>
-          </>
-        )}
+          )}
+          {connected && publicKey && (
+            <div className="row">
+              <Button variant="primary" onClick={deriveFromConnected}>
+                Use {publicKey.toBase58().slice(0, 6)}… — sign to derive game key
+              </Button>
+            </div>
+          )}
+          {error && (
+            <div style={{ marginTop: 12 }}>
+              <Notice tone="error">{error}</Notice>
+            </div>
+          )}
+          <div className="row">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setError(null);
+                void disconnect().catch(() => {});
+                setStage("choose");
+              }}
+            >
+              Back
+            </Button>
+          </div>
+        </>
+      )}
 
-        {stage === "connecting" && <p>Connecting wallet…</p>}
-        {stage === "signing" && <p>Approve the signature request in your wallet…</p>}
-      </div>
-    </div>
+      {stage === "connecting" && <Loader label="Connecting wallet…" />}
+      {stage === "signing" && (
+        <Loader label="Approve the signature request in your wallet…" />
+      )}
+    </Modal>
   );
 }
