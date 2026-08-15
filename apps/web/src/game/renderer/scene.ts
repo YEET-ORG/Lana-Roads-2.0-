@@ -270,6 +270,32 @@ class PlayerRig {
     };
   }
 
+  /**
+   * Go to the newest known tile, animating only the last step of it.
+   *
+   * A remote player's position arrives as whatever the chain last said, which
+   * after any gap is several tiles ahead of where they are drawn. Hopping
+   * across that gap plays their movement back as a slide THROUGH the tiles
+   * they already left — the further behind the feed got, the longer the
+   * replay, and the player is never shown where they actually are.
+   *
+   * So close the gap instantly and hop the final tile. The rig lands on the
+   * authoritative tile with a real hop, and everything stale is skipped
+   * rather than performed.
+   */
+  catchUpTo(target: THREE.Vector3, facing?: number) {
+    if (this.state.name === "dead") return;
+    const gap = this.root.position.distanceTo(target);
+    if (gap > 1.05) {
+      // One tile short of the target, along the direction of travel.
+      const approach = target
+        .clone()
+        .sub(target.clone().sub(this.root.position).normalize());
+      this.root.position.copy(approach);
+    }
+    this.hopTo(target, facing);
+  }
+
   /** In-place hop for menu agent swaps. */
   flourish() {
     if (this.state.name === "dead") return;
@@ -1260,8 +1286,10 @@ export class WorldScene {
       const prev = this.remoteTargets.get(p.wallet);
       if (!prev || !prev.equals(target)) {
         this.remoteTargets.set(p.wallet, target);
-        if (prev && prev.distanceTo(target) <= 2.5)
-          rig.hopTo(target, yawFromDelta(target, prev));
+        // Always head for the LATEST tile. Anything more than one step away
+        // is caught up instantly rather than replayed.
+        if (prev && prev.distanceTo(target) <= 8)
+          rig.catchUpTo(target, yawFromDelta(target, prev));
         else rig.teleport(target);
       }
     }
