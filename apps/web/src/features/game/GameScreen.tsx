@@ -878,8 +878,21 @@ export function GameScreen({
    * advanced — and because gameplay is fire-and-forget, none of it reports
    * anything. The player just watches their hops rewind a second later.
    *
-   * One action is in flight at a time and the rest wait their turn. A lost
-   * one is RESENT WITH THE SAME SEQUENCE, which is idempotent by
+   * The queue therefore preserves ORDER, but it does not wait for a round
+   * trip between sends. It used to: each action was sent, then nothing else
+   * went out until the chain pushed back an accepted sequence, which is one
+   * action per ~200ms at best and per `ackWindowMs` at worst. The player's own
+   * screen hopped at input rate because prediction is local, so this was
+   * invisible to them — and everyone ELSE saw their hops arrive at the
+   * acknowledgement rate, falling further behind the longer a direction was
+   * held. "My hop is slow on my friend's screen" is exactly that gap.
+   *
+   * Sending one slot apart is enough. The program's two rules are an exact
+   * `action_seq` and at most one accepted action per rollup slot; consecutive
+   * sends from one client are already in sequence, so the only requirement is
+   * that they do not land inside the same 50ms slot.
+   *
+   * A lost action is RESENT WITH THE SAME SEQUENCE, which is idempotent by
    * construction: if the original did land, the retry is refused for the
    * sequence it claims, so a duplicate hop is impossible. Only after the
    * retries are exhausted does the prediction get rolled back.
@@ -894,6 +907,7 @@ export function GameScreen({
         direction: Direction;
         tries: number;
         sig?: string;
+        sent?: boolean;
       }
     | {
         kind: "kick";
@@ -905,6 +919,7 @@ export function GameScreen({
         target?: { wallet: PublicKey; x: number; y: number };
         tries: number;
         sig?: string;
+        sent?: boolean;
       };
 
   /**
@@ -924,15 +939,43 @@ export function GameScreen({
 
   const outboxRef = useRef<Outbound[]>([]);
   const ackTimerRef = useRef(0);
+  /** Pacing timer: when the next queued action may go out. */
+  const sendTimerRef = useRef(0);
+  /** Guards against two sends overlapping on the same queue entry. */
+  const sendingRef = useRef(false);
+  /** When the last action actually went out, for the one-slot floor. */
+  const lastSendAtRef = useRef(0);
+
+  /**
+   * One rollup slot. Two accepted actions cannot share one, so this is the
+   * floor on how fast the queue may drain — not a politeness delay.
+   */
+  const MIN_SEND_GAP_MS = MS_PER_SLOT + 10;
 
   function enqueueAction(action: Outbound) {
     outboxRef.current.push(action);
-    if (outboxRef.current.length === 1) void pumpOutbox();
+    void pumpOutbox();
   }
 
   async function pumpOutbox() {
-    const head = outboxRef.current[0];
-    if (!head) return;
+    if (sendingRef.current) return;
+    // The first action that has not gone out yet — not necessarily the head,
+    // because the head stays queued until the chain acknowledges it.
+    const next = outboxRef.current.find((a) => !a.sent);
+    if (!next) return;
+    const gap = performance.now() - lastSendAtRef.current;
+    if (gap < MIN_SEND_GAP_MS) {
+      window.clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = window.setTimeout(
+        () => void pumpOutbox(),
+        MIN_SEND_GAP_MS - gap,
+      );
+      return;
+    }
+    sendingRef.current = true;
+    lastSendAtRef.current = performance.now();
+    const head = next;
+    head.sent = true;
     head.tries += 1;
     const common = { day: route.day, mode: route.mode, session: boot.session };
     try {
@@ -962,21 +1005,46 @@ export function GameScreen({
         void renewSession();
       }
     }
+    sendingRef.current = false;
+    // The ack timer governs the HEAD only: it is the retry/rollback clock,
+    // not the pacing clock.
     window.clearTimeout(ackTimerRef.current);
     ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
+    // Anything else already queued goes out a slot later rather than waiting
+    // for this one to be acknowledged.
+    if (outboxRef.current.some((a) => !a.sent)) {
+      window.clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = window.setTimeout(
+        () => void pumpOutbox(),
+        MIN_SEND_GAP_MS,
+      );
+    }
   }
 
   function checkOutboxHead() {
     const head = outboxRef.current[0];
     if (!head) return;
     if (lastAuthSeqRef.current > head.seq) {
-      // Accepted. Move on to whatever the player queued behind it.
-      outboxRef.current.shift();
+      // Accepted — and possibly several behind it, since sends are pipelined
+      // and one push can carry the chain past a whole burst. Drop every entry
+      // the chain has moved past, not just the first.
+      while (
+        outboxRef.current.length &&
+        lastAuthSeqRef.current > outboxRef.current[0].seq
+      )
+        outboxRef.current.shift();
       rejectedRunRef.current = 0;
+      if (outboxRef.current.length) {
+        window.clearTimeout(ackTimerRef.current);
+        ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
+      }
       void pumpOutbox();
       return;
     }
     if (head.tries < ACTION_TRIES) {
+      // Resend this exact sequence. Everything queued behind it was numbered
+      // on top of it, so it has to land before they can.
+      head.sent = false;
       // Lost or refused for a reason that may not hold a slot later (the
       // one-action-per-slot rule, a dropped packet). Same sequence, so the
       // chain can apply it at most once however many copies arrive.
