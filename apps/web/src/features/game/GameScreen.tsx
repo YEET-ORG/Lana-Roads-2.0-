@@ -965,8 +965,6 @@ export function GameScreen({
 
   const outboxRef = useRef<Outbound[]>([]);
   const ackTimerRef = useRef(0);
-  /** Pacing timer: when the next queued action may go out. */
-  const sendTimerRef = useRef(0);
   /** When the last action actually went out, for the one-slot floor. */
   const lastSendAtRef = useRef(0);
 
@@ -992,41 +990,32 @@ export function GameScreen({
    * 120ms it is. Roughly eight actions a second is what this rollup takes.
    */
   /**
-   * The hard floor: one rollup slot.
+   * Strictly one action in flight.
    *
-   * This one is not a guess and not tunable. Two accepted actions cannot
-   * share a slot, so sending closer than this cannot make the second land —
-   * it can only produce a refusal to retry.
+   * `action_seq` must match at EXECUTION, so an action sent before its
+   * predecessor has been APPLIED is refused — measured on this machine, 60ms
+   * apart landed 1 of 10, 120ms apart landed 10 of 10. Every guess at a safe
+   * gap is a guess about somebody else's connection, and when it is wrong the
+   * cost is refusals, rollback, and a player who rubber-bands.
+   *
+   * So do not guess. Confirmation is the only thing that PROVES the previous
+   * action applied, and nothing goes out until it arrives. This cannot be
+   * refused for sequencing, on any connection, ever.
+   *
+   * The price is one action per round trip rather than per slot: about 185ms
+   * here against a 60ms floor. That is the trade — a slower ceiling for a
+   * cadence that is never wrong and never rewinds.
    */
-  const MIN_SEND_GAP_MS = MS_PER_SLOT + 10;
+  /** The action awaiting confirmation, if any. Exactly one, or none. */
+  const inFlightRef = useRef<Outbound | null>(null);
   /**
-   * Where the optimistic gap starts, and how far it may drift.
+   * Observed confirmation round trip, smoothed.
    *
-   * It starts at the hard floor: send as soon as the previous action is out,
-   * one slot behind it, and do not wait for anything. That is the fastest
-   * this can legally go and it is what movement should feel like when the
-   * connection is good.
-   *
-   * It is optimistic in the exact sense that it may be wrong. `action_seq`
-   * must match at EXECUTION, so an action sent before its predecessor has
-   * been applied is refused — measured at 120ms this machine took 10/10, at
-   * 60ms it took 1/10. Rather than pick one of those numbers for everybody,
-   * the gap responds to what actually happens: every unacknowledged action
-   * pushes it up 60ms, every six clean confirmations pull it back down 20ms.
-   *
-   * So a good connection sits near the floor and a bad one finds its own
-   * level within a few seconds, instead of either being throttled to a
-   * stranger's measurement or rubber-banding forever at a rate it cannot
-   * sustain. Confirmation still releases the next action immediately and
-   * bypasses the gap entirely, because at that point there is nothing left
-   * to guess.
+   * Held input repeats at this rate so it never outruns what the chain is
+   * actually confirming. Measured rather than configured, because it is the
+   * one number that already describes this player's connection.
    */
-  const GAP_START_MS = MIN_SEND_GAP_MS;
-  const GAP_MAX_MS = 500;
-  /** Consecutive clean confirmations before trying a shorter gap. */
-  const GAP_TIGHTEN_AFTER = 6;
-  const gapRef = useRef(GAP_START_MS);
-  const cleanRunRef = useRef(0);
+  const confirmMsRef = useRef(200);
 
   function enqueueAction(action: Outbound) {
     outboxRef.current.push(action);
@@ -1049,19 +1038,11 @@ export function GameScreen({
    * the gap below guarantees. A send that loses its race is retried with the
    * same sequence and is idempotent by construction.
    */
-  function pumpOutbox(confirmed = false) {
+  function pumpOutbox() {
+    if (inFlightRef.current) return; // one at a time, by design
     const next = outboxRef.current.find((a) => !a.sent);
     if (!next) return;
-    // A confirmed predecessor is proof, not a guess: the sequence it needed
-    // has already advanced, so this can go out now.
-    if (!confirmed) {
-      const since = performance.now() - lastSendAtRef.current;
-      if (since < gapRef.current) {
-        window.clearTimeout(sendTimerRef.current);
-        sendTimerRef.current = window.setTimeout(() => pumpOutbox(), gapRef.current - since);
-        return;
-      }
-    }
+    inFlightRef.current = next;
     lastSendAtRef.current = performance.now();
     next.sent = true;
     next.tries += 1;
@@ -1084,8 +1065,8 @@ export function GameScreen({
             facing: next.facing,
             target: next.target,
           });
-    // Deliberately not awaited: the signature and any failure are recorded
-    // when they arrive, and neither gates the next action.
+    // Not awaited: the signature is bookkeeping. What releases the next
+    // action is the chain confirming this one, never this promise.
     void sending
       .then((sig) => {
         next.sig = sig;
@@ -1100,14 +1081,8 @@ export function GameScreen({
         }
       });
 
-    // The ack timer governs the HEAD only: it is the retry and rollback
-    // clock, never the pacing clock.
     window.clearTimeout(ackTimerRef.current);
     ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
-    if (outboxRef.current.some((a) => !a.sent)) {
-      window.clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = window.setTimeout(() => pumpOutbox(), gapRef.current);
-    }
   }
 
   function checkOutboxHead() {
@@ -1123,32 +1098,22 @@ export function GameScreen({
       )
         outboxRef.current.shift();
       rejectedRunRef.current = 0;
-      // Nothing was refused, so the current gap is at least safe. Try a
-      // shorter one after a run of clean confirmations, never below the
-      // floor this rollup was measured at.
-      cleanRunRef.current += 1;
-      if (cleanRunRef.current >= GAP_TIGHTEN_AFTER) {
-        cleanRunRef.current = 0;
-        gapRef.current = Math.max(MIN_SEND_GAP_MS, gapRef.current - 20);
-      }
-      if (outboxRef.current.length) {
-        window.clearTimeout(ackTimerRef.current);
-        ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
-      }
-      // Confirmed: the sequence the next action needs has already advanced,
-      // so it goes out now rather than waiting out a gap that only exists to
-      // guess at this moment.
-      pumpOutbox(true);
+      // How long that actually took, smoothed. Held input paces itself off
+      // this so it never queues faster than the chain confirms.
+      const took = performance.now() - lastSendAtRef.current;
+      if (took > 0 && took < 3_000)
+        confirmMsRef.current = confirmMsRef.current * 0.7 + took * 0.3;
+      inFlightRef.current = null;
+      window.clearTimeout(ackTimerRef.current);
+      // Confirmed, so the sequence the next action needs has advanced. Go.
+      pumpOutbox();
       return;
     }
     if (head.tries < ACTION_TRIES) {
-      // No acknowledgement inside the window: this client is sending faster
-      // than the chain is applying. Back the gap off before retrying, or the
-      // retry races the same way and the player rubber-bands again.
-      cleanRunRef.current = 0;
-      gapRef.current = Math.min(GAP_MAX_MS, gapRef.current + 60);
-      // Resend this exact sequence. Everything queued behind it was numbered
-      // on top of it, so it has to land before they can.
+      // Never acknowledged: lost, or refused for something transient. Resend
+      // this exact sequence — the chain can apply it at most once however
+      // many copies arrive.
+      inFlightRef.current = null;
       head.sent = false;
       // Lost or refused for a reason that may not hold a slot later (the
       // one-action-per-slot rule, a dropped packet). Same sequence, so the
@@ -1161,6 +1126,7 @@ export function GameScreen({
     // predicted behind it was predicated on it, so the whole queue goes.
     if (head.sig) boot.client.markTx(head.sig, "failed", "refused by the world");
     outboxRef.current = [];
+    inFlightRef.current = null;
     reconcileNowRef.current();
     rejectedRunRef.current += 1;
     if (rejectedRunRef.current >= 3) {
@@ -1436,7 +1402,7 @@ export function GameScreen({
         // player faster — it fills a queue that then has to be dropped, and
         // the drop is what surfaces as "too fast" while a direction is merely
         // being held.
-        repeatMs: () => gapRef.current,
+        repeatMs: () => confirmMsRef.current,
       },
     );
     return detach;
