@@ -320,6 +320,8 @@ export function GameScreen({
      * one answered.
      */
     const identityInFlight = new Set<string>();
+    /** When the realtime feed last spoke about each wallet. */
+    const lastFeedAt = new Map<string, number>();
 
     /**
      * Learn who a player is the moment they appear, not on the next sweep.
@@ -476,6 +478,7 @@ export function GameScreen({
           );
         }
       } else {
+        lastFeedAt.set(wallet, Date.now());
         if (state === "active") {
           remotes.set(wallet, {
             x: run.x,
@@ -630,13 +633,23 @@ export function GameScreen({
         // Did the feed miss anything? Only counts other players: our own run
         // is written by us, so it is ahead of the feed by design.
         let missed = false;
-        remotes.clear();
+        const present = new Set<string>();
         for (const r of roster) {
           if (r.state !== "active") continue;
           const w = r.wallet.toBase58();
           if (w === me) continue;
+          present.add(w);
           const seen = runStateSequences.get(w);
           if (seen != null && r.stateSeq > seen) missed = true;
+          // The sweep is a SNAPSHOT and the feed is a stream, so a roster
+          // read can easily be older than the last push — this is a poll of
+          // the same rollup the notifications came from. Applying it blindly
+          // dragged every other player back to where they were a moment ago
+          // and then let the next push snap them forward: a visible hitch on
+          // everyone else's character, every five seconds, for the whole
+          // session. Membership comes from the roster; position only when it
+          // is genuinely newer than what the feed already showed.
+          if (seen != null && r.stateSeq < seen) continue;
           remotes.set(w, {
             x: r.x,
             y: r.y,
@@ -644,6 +657,18 @@ export function GameScreen({
             hazardNonce: r.hazardNonce,
           });
           runStateSequences.set(w, r.stateSeq);
+        }
+        // Anyone the roster no longer lists has died or left — unless the
+        // feed has heard from them since this snapshot could have been taken,
+        // which means they joined into the gap and the snapshot is simply
+        // older than they are. Dropping those would make a new player flicker
+        // out and back on the next push.
+        const staleAfter = Date.now() - 3000;
+        for (const w of [...remotes.keys()]) {
+          if (present.has(w)) continue;
+          if ((lastFeedAt.get(w) ?? 0) > staleAfter) continue;
+          remotes.delete(w);
+          lastFeedAt.delete(w);
         }
         feedMisses = missed ? feedMisses + 1 : 0;
         if (feedMisses >= 2) {
@@ -656,16 +681,16 @@ export function GameScreen({
         // caching only-on-first-sight meant that change never reached anyone
         // else — they kept drawing whatever that wallet was when it arrived.
         // It is one getMultipleAccounts for the whole roster either way.
-        const present = [...remotes.keys()];
-        if (present.length) {
+        const here = [...remotes.keys()];
+        if (here.length) {
           const found = await boot.client
-            .getIdentities(present.map((w) => new PublicKey(w)))
+            .getIdentities(here.map((w) => new PublicKey(w)))
             .catch(() => null);
           if (found) {
             for (const [w, id] of found) identities.set(w, id);
             // Someone who cleared their identity should stop being drawn
             // under the old one.
-            for (const w of present) if (!found.has(w)) identities.delete(w);
+            for (const w of here) if (!found.has(w)) identities.delete(w);
           }
         }
         drawRemotes();
