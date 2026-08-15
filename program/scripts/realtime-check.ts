@@ -41,6 +41,12 @@ const REGION_VALIDATOR = [
 const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
 const HOPS = Number(process.env.HOPS ?? 6);
 const GAP_MS = Number(process.env.GAP_MS ?? 900);
+/**
+ * Fire hops on a timer WITHOUT awaiting each send, exactly as the client's
+ * outbox now does. Awaiting made the real cadence a round trip plus the gap,
+ * which is what made fast movement trail on other people's screens.
+ */
+const PIPELINE = process.env.PIPELINE === "1";
 
 const le8 = (v: bigint | number) => {
   const b = Buffer.alloc(8);
@@ -227,6 +233,64 @@ async function main() {
   console.log(`spawned at (${run.x}, ${run.y})\n`);
 
   const sends: Hit[] = [];
+  if (PIPELINE) {
+    // One state read, then every hop numbered off it and fired on the clock.
+    const start: any = await er.account.playerRun.fetch(runPda);
+    let x = Number(start.x);
+    let y = Number(start.y);
+    let seq = Number(start.actionSeq);
+    let stateSeq = Number(start.stateSeq ?? start.actionSeq);
+    const inFlight: Promise<unknown>[] = [];
+    const firedAt = Date.now();
+    // Oscillate FORWARD/BACKWARD inside the spawn chunk. Rows 0-15 are
+    // hazard-free by invariant, so nothing here can die — and a run that dies
+    // refuses every later action, which looks exactly like a pacing failure
+    // and is not one. This measures pacing and only pacing.
+    for (let i = 0; i < HOPS; i++) {
+      const forward = i % 2 === 0;
+      const destY = forward ? y + 1 : y - 1;
+      const src = sectorPda(Math.floor(x / 8), Math.floor(y / 8));
+      const dst = sectorPda(Math.floor(x / 8), Math.floor(destY / 8));
+      const sentAt = Date.now();
+      inFlight.push(
+        er.methods
+          .moveAction(1, new BN(seq), forward ? 0 : 1, new BN(Date.now() * 8))
+          .accountsPartial({
+            world,
+            run: runPda,
+            sourceSector: src,
+            destSector: dst.equals(src) ? null : dst,
+            chunk: chunkPda(Math.floor(destY / 16)),
+            best: bestPda,
+            signer: session.publicKey,
+          })
+          .rpc({ skipPreflight: true, commitment: "processed" })
+          .catch(() => null),
+      );
+      sends.push({ at: sentAt, seq: stateSeq + 1 });
+      seq += 1;
+      stateSeq += 1;
+      y = destY;
+      await sleep(GAP_MS);
+    }
+    await Promise.all(inFlight);
+    console.log(
+      `  fired ${HOPS} hops in ${Date.now() - firedAt}ms ` +
+        `(${Math.round((Date.now() - firedAt) / HOPS)}ms per hop)`,
+    );
+    await sleep(2500);
+    const finalRun: any = await er.account.playerRun.fetch(runPda);
+    // Count ACCEPTED ACTIONS, not rows. A blocked destination is accepted as
+    // a turn in place: action_seq is consumed and the run is rewritten, but y
+    // does not change. Measuring rows scores those as rejections and makes
+    // the result non-monotonic in the send gap, which is how it reads as a
+    // pacing problem when it is terrain.
+    const accepted = Number(finalRun.actionSeq) - Number(start.actionSeq);
+    console.log(
+      `  chain ACCEPTED ${accepted} of ${HOPS} actions ` +
+        `(rows moved ${Number(finalRun.y) - Number(start.y)})\n`,
+    );
+  } else
   for (let i = 0; i < HOPS; i++) {
     run = await er.account.playerRun.fetch(runPda);
     const x = Number(run.x);

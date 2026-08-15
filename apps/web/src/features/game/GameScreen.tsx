@@ -941,83 +941,115 @@ export function GameScreen({
   const ackTimerRef = useRef(0);
   /** Pacing timer: when the next queued action may go out. */
   const sendTimerRef = useRef(0);
-  /** Guards against two sends overlapping on the same queue entry. */
-  const sendingRef = useRef(false);
   /** When the last action actually went out, for the one-slot floor. */
   const lastSendAtRef = useRef(0);
 
   /**
-   * One rollup slot. Two accepted actions cannot share one, so this is the
-   * floor on how fast the queue may drain — not a politeness delay.
+   * How closely two actions may be sent, MEASURED against devnet rather than
+   * derived from the slot time.
+   *
+   * The tempting number is one rollup slot (50ms), because that is the rule
+   * the program states. It is wrong. `action_seq` must match EXACTLY at
+   * execution, so each action has to observe the previous one already
+   * applied — dispatched is not enough. Sending faster than the rollup can
+   * execute means every action after the first reads a sequence that has not
+   * advanced and is refused, the local prediction rolls back, and the player
+   * rubber-bands while everyone else watches them stutter.
+   *
+   * scripts/realtime-check.ts PIPELINE=1, oscillating inside the hazard-free
+   * spawn zone so nothing dies and terrain cannot skew it, 10 actions per run:
+   *
+   *     60ms  ->  1/10 accepted
+   *     90ms  ->  4/10
+   *    120ms  -> 10/10, 10/10
+   *
+   * 120ms it is. Roughly eight actions a second is what this rollup takes.
    */
-  const MIN_SEND_GAP_MS = MS_PER_SLOT + 10;
+  const MIN_SEND_GAP_MS = 120;
+  /**
+   * How far prediction may run ahead of the chain.
+   *
+   * Input faster than the chain accepts cannot all land, so queueing it
+   * without limit only buys a longer rollback later. Two outstanding keeps
+   * the screen honest.
+   */
+  const MAX_PENDING_ACTIONS = 2;
 
   function enqueueAction(action: Outbound) {
     outboxRef.current.push(action);
-    void pumpOutbox();
+    pumpOutbox();
   }
 
-  async function pumpOutbox() {
-    if (sendingRef.current) return;
-    // The first action that has not gone out yet — not necessarily the head,
-    // because the head stays queued until the chain acknowledges it.
+  /**
+   * Send the next queued action, paced by the CLOCK rather than by the
+   * network.
+   *
+   * Holding the queue while awaiting the send made the real cadence a round
+   * trip plus the slot gap — about 137ms to the Singapore rollup, slower than
+   * a player holding a direction. Input then outran the outbox, the queue
+   * grew, and the drift landed entirely on other people's screens: the faster
+   * you moved, the further behind you appeared. Prediction hid it locally.
+   *
+   * Sends may overlap in flight. Ordering does not depend on them arriving
+   * one at a time — it depends on `action_seq`, which the program checks
+   * exactly, and on two accepted actions never sharing a rollup slot, which
+   * the gap below guarantees. A send that loses its race is retried with the
+   * same sequence and is idempotent by construction.
+   */
+  function pumpOutbox() {
     const next = outboxRef.current.find((a) => !a.sent);
     if (!next) return;
-    const gap = performance.now() - lastSendAtRef.current;
-    if (gap < MIN_SEND_GAP_MS) {
+    const since = performance.now() - lastSendAtRef.current;
+    if (since < MIN_SEND_GAP_MS) {
       window.clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = window.setTimeout(
-        () => void pumpOutbox(),
-        MIN_SEND_GAP_MS - gap,
-      );
+      sendTimerRef.current = window.setTimeout(pumpOutbox, MIN_SEND_GAP_MS - since);
       return;
     }
-    sendingRef.current = true;
     lastSendAtRef.current = performance.now();
-    const head = next;
-    head.sent = true;
-    head.tries += 1;
+    next.sent = true;
+    next.tries += 1;
+
     const common = { day: route.day, mode: route.mode, session: boot.session };
-    try {
-      head.sig =
-        head.kind === "move"
-          ? await boot.client.sendMove({
-              ...common,
-              direction: head.direction,
-              x: head.x,
-              y: head.y,
-              attemptNonce: head.attempt,
-              actionSeq: head.seq,
-            })
-          : await boot.client.sendKick({
-              ...common,
-              attemptNonce: head.attempt,
-              actionSeq: head.seq,
-              facing: head.facing,
-              target: head.target,
-            });
-    } catch (e) {
-      const why = errorText(e);
-      setHud((h) => ({ ...h, lastRejection: why }));
-      // A lapsed session refuses every action, which reads as a game that
-      // simply stopped responding. Renew and carry on with the same run.
-      if (why.includes("SessionExpired") || why.includes("BadSession")) {
-        void renewSession();
-      }
-    }
-    sendingRef.current = false;
-    // The ack timer governs the HEAD only: it is the retry/rollback clock,
-    // not the pacing clock.
+    const sending =
+      next.kind === "move"
+        ? boot.client.sendMove({
+            ...common,
+            direction: next.direction,
+            x: next.x,
+            y: next.y,
+            attemptNonce: next.attempt,
+            actionSeq: next.seq,
+          })
+        : boot.client.sendKick({
+            ...common,
+            attemptNonce: next.attempt,
+            actionSeq: next.seq,
+            facing: next.facing,
+            target: next.target,
+          });
+    // Deliberately not awaited: the signature and any failure are recorded
+    // when they arrive, and neither gates the next action.
+    void sending
+      .then((sig) => {
+        next.sig = sig;
+      })
+      .catch((e) => {
+        const why = errorText(e);
+        setHud((h) => ({ ...h, lastRejection: why }));
+        // A lapsed session refuses every action, which reads as a game that
+        // simply stopped responding. Renew and carry on with the same run.
+        if (why.includes("SessionExpired") || why.includes("BadSession")) {
+          void renewSession();
+        }
+      });
+
+    // The ack timer governs the HEAD only: it is the retry and rollback
+    // clock, never the pacing clock.
     window.clearTimeout(ackTimerRef.current);
     ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
-    // Anything else already queued goes out a slot later rather than waiting
-    // for this one to be acknowledged.
     if (outboxRef.current.some((a) => !a.sent)) {
       window.clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = window.setTimeout(
-        () => void pumpOutbox(),
-        MIN_SEND_GAP_MS,
-      );
+      sendTimerRef.current = window.setTimeout(pumpOutbox, MIN_SEND_GAP_MS);
     }
   }
 
@@ -1038,7 +1070,7 @@ export function GameScreen({
         window.clearTimeout(ackTimerRef.current);
         ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
       }
-      void pumpOutbox();
+      pumpOutbox();
       return;
     }
     if (head.tries < ACTION_TRIES) {
@@ -1049,7 +1081,7 @@ export function GameScreen({
       // one-action-per-slot rule, a dropped packet). Same sequence, so the
       // chain can apply it at most once however many copies arrive.
       if (head.sig) boot.client.markTx(head.sig, "failed", "lost — resending");
-      void pumpOutbox();
+      pumpOutbox();
       return;
     }
     // Out of tries: the chain genuinely will not take this. Everything
@@ -1249,6 +1281,16 @@ export function GameScreen({
               turnIntoBlockedTile("tile occupied");
               return;
             }
+          }
+          // Do not predict past what the chain can accept. At roughly eight
+          // actions a second, input beyond that cannot land, and predicting
+          // it only buys a bigger rollback — which is the rubber-band other
+          // players see as lag.
+          if (outboxRef.current.length >= MAX_PENDING_ACTIONS) {
+            setHud((h) =>
+              h.lastRejection === "too fast" ? h : { ...h, lastRejection: "too fast" },
+            );
+            return;
           }
           // Optimistic: advance the local mirror + visual immediately.
           liveRun.current = {
