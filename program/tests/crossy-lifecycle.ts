@@ -36,7 +36,7 @@ import idlJson from "../target/idl/crossy_world.json";
 
 process.env.BPF_OUT_DIR = process.env.BPF_OUT_DIR ?? `${process.cwd()}/target/deploy`;
 
-const PROGRAM_ID = new PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
+const PROGRAM_ID = new PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 const S = {
   config: Buffer.from("config"),
   season: Buffer.from("season"),

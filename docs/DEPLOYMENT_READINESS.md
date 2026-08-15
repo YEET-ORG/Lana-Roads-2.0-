@@ -1,63 +1,79 @@
 # Crossy World deployment readiness
 
 **Reviewed:** 2026-08-15
+**Deployed to devnet:** 2026-08-15
 **Scope:** `programs/crossy-world`, generated IDL/SDK, realtime map synchronization, keeper, settlement automation, and current web integration.
 
 ## Decision
 
-The current source is a **devnet release candidate**, not a mainnet release.
-It builds and its local verification suite passes, but it must not be deployed
-until the program identity is made consistent. After deployment, real
-MagicBlock VRF and ER lifecycle smoke tests are mandatory before enabling any
-paid entry, revival, gacha, or marketplace flow.
+The source is a **devnet release**, not a mainnet release. It is now deployed
+to devnet under a fresh program identity. Real MagicBlock VRF and ER lifecycle
+smoke tests remain mandatory before enabling any paid entry, revival, gacha,
+or marketplace flow.
 
-## Current deployment identity blocker
+## Deployment identity
 
-All compiled source/config/client identities currently declare:
-
-```text
-GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX
-```
-
-The local deployment keypair resolves to:
+The program was redeployed under a new identity because account layouts and
+PDA seeds changed incompatibly:
 
 ```text
-8F9VppM5M7JvoErFz2ucdGxo8YJzGZDdvdoenejru3sT
+AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha   (live)
+GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX   (closed 2026-08-15, ID burned)
 ```
 
-These identities are not interchangeable. Deploying the binary under the
-local keypair without synchronizing `declare_id!`, Anchor, IDL, and SDK would
-break PDA derivation and must not be attempted.
+The earlier review recorded a local deployment keypair of `8F9V...` and
+treated that as the blocker. That was an artifact of the reviewing
+environment: `program/target/` is gitignored, so `anchor build` mints a
+throwaway keypair there on any machine that has not deployed. The committed
+identities were self-consistent, and `CKU3...` held the upgrade authority.
 
-The existing devnet `Gmwq...` program currently has:
+The real obstacle to upgrading in place was **account collision**. `Gmwq...`
+owned 386 live accounts at PDAs the new code must create:
 
-- upgrade authority `CKU3bNrxCWm2kbKNWDdLXvJWuqBumAq8GscentVNFn7H`;
-- allocated data length `1,194,376` bytes;
-- current candidate binary size `1,311,520` bytes.
+```text
+AgentLock 180 · PlayerProfile 101 · ChunkDefinition 25 · OccupancySector 24
+VariantInventory 13 · WorldHeader 7 · PlayerIdentity 7 · ClassConfig 5
+PlayerRun 5 · DailyBest 4 · DailyCompetition 4 · … · GlobalConfig 1
+```
 
-Therefore choose exactly one path:
+Two of those are decisive:
 
-1. **Upgrade `Gmwq...`:** use the matching `CKU3...` authority and extend the
-   program account by at least `117,144` bytes before upgrade.
-2. **Fresh deployment (recommended during active development):** adopt
-   `8F9V...`, run `anchor keys sync`, regenerate IDL/types, update the SDK
-   constant and every environment manifest, then repeat all checks in this
-   document.
+- `GlobalConfig` existed at 278 bytes and `InitializeConfig` uses `init`, not
+  `init_if_needed`. An upgraded program could never initialize it.
+- `vrf_authority` → `validator` is a same-size field replaced at the same
+  offset. An in-place upgrade would not error; it would silently reinterpret
+  the retired randomness key as the ER validator identity and pass it to the
+  delegation program.
 
-Do not reuse any existing accounts after the fresh deployment. Account layouts
-and instruction surfaces changed intentionally and backward compatibility is
-not supported at this stage.
+Closing `Gmwq...` reclaimed `8.31406104` SOL, which funded the new deployment.
+Its 386 accounts, and any test USDC held in its vault PDAs, are permanently
+abandoned — intended, since no state is carried forward.
 
-## Candidate artifact
+## Deployed artifact
 
 ```text
 program/target/deploy/crossy_world.so
 size:   1,311,520 bytes
-sha256: 882dff63cdc756b95b5ff96c41fd18a1b5fac51d8ac89b6c60a4116b9697d866
+sha256: 9cf547e8bfe6f682641d0d4873aa3b5c2e0bee48d69a3db2e4c4d4d2e6a633c5
+
+program id:      AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha
+programdata:     HNiS8FeLmVY25LNRMCECSSk9ZpvJ8NU3ugRjNXg12Gg3
+upgrade auth:    CKU3bNrxCWm2kbKNWDdLXvJWuqBumAq8GscentVNFn7H
+allocated:       1,450,000 bytes (~138 KB upgrade headroom)
+deploy slot:     484032842
+deploy tx:       552Ujr19MmR8seDn73JKYCMKiWtWXr2oiev5voKLiHNGkdTsjzH5xySJKHmeHpSGEmy9XSA1juvEDaw6wyhH96Jx
 ```
 
-Recompute and record both values immediately before deployment. Any rebuild
-invalidates this checksum.
+Verified after deployment: the first 1,311,520 bytes of `solana program dump`
+hash to the same sha256 as the local artifact.
+
+The checksum differs from the pre-deployment candidate
+(`882dff63...`) only because `declare_id!` is compiled into the binary. Under
+the retired ID, the same source produced `882dff63...` on two independent
+machines, so the build is reproducible.
+
+Recompute size and sha256 immediately before any future deployment. Any
+rebuild invalidates this checksum.
 
 ## Security and correctness baseline
 
@@ -152,16 +168,24 @@ but it does not affect contract correctness.
 
 ## Mandatory fresh-deployment sequence
 
-1. Freeze the intended commit and ensure the worktree contains no unknown
-   generated or private files.
-2. Choose the program ID path above and make source, Anchor, generated IDL,
-   SDK, environment files, and deployment keypair agree.
-3. Re-run formatting, Rust tests, strict Clippy, Anchor SBF build, SDK tests,
-   program TypeScript check, and web production build.
-4. Record the candidate `.so` size and SHA-256.
-5. Deploy to devnet with a dedicated devnet authority and valueless/test USDC.
+1. ~~Freeze the intended commit and ensure the worktree contains no unknown
+   generated or private files.~~ **Done.**
+2. ~~Choose the program ID path above and make source, Anchor, generated IDL,
+   SDK, environment files, and deployment keypair agree.~~ **Done** — 20 files
+   carried the program ID; `.env.devnet` does not (the web app reads the SDK
+   constant).
+3. ~~Re-run formatting, Rust tests, strict Clippy, Anchor SBF build, SDK tests,
+   program TypeScript check, and web production build.~~ **Done, twice** —
+   before the ID change and again after.
+4. ~~Record the candidate `.so` size and SHA-256.~~ **Done.**
+5. ~~Deploy to devnet with a dedicated devnet authority and valueless/test
+   USDC.~~ **Done.**
 6. Initialize config with the exact USDC mint, treasury, collection, validator,
    and player caps. Verify every value by reading the account back.
+   **Outstanding, and blocking everything below.** There is no operator script
+   for `initialize_config` — only the integration tests call it. The chain
+   currently holds a deployed program and zero accounts, so nothing runs until
+   a bootstrap script exists.
 7. Seed and activate a future season; independently recompute the weights hash
    before activation.
 8. Prepare a fresh UTC day, delegate both worlds and sectors, mark spawn ready,
@@ -181,6 +205,15 @@ but it does not affect contract correctness.
 ## Mainnet gates still open
 
 - Independent Solana/Anchor security review of the final program ID and binary.
+- **Player-electable rerolls during an assignment outage.** Once VRF lands,
+  `pull.randomness` is public and the selection is fully derivable off chain,
+  yet `refund_pull` accepts a `RandomnessReady` pull after the 300 s timeout.
+  A player can therefore compute the outcome and refund only the bad ones.
+  This is closed in practice because `assign_pull` is permissionless and fires
+  immediately, so the exposure window is exactly an assigner outage — but the
+  timeout exists to survive that outage, which is when the hole opens. Either
+  restrict post-randomness refunds to an authority, or make an expired
+  `RandomnessReady` pull assignable by anyone before it becomes refundable.
 - Real MagicBlock VRF callback verification against the fresh deployed binary.
 - Sustained ER load and soak at the intended 500-player cap, including websocket
   reconnect storms and keeper failover.

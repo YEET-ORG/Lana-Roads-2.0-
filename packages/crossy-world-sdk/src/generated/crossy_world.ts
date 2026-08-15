@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/crossy_world.json`.
  */
 export type CrossyWorld = {
-  "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX",
+  "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha",
   "metadata": {
     "name": "crossyWorld",
     "version": "0.1.0",
@@ -242,7 +242,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pullNonce",
+                "path": "pull.pull_nonce",
                 "account": "gachaPull"
               }
             ]
@@ -292,7 +292,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "selectedVariant.variantId",
+                "path": "selected_variant.variant_id",
                 "account": "variantInventory"
               }
             ]
@@ -926,7 +926,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pullNonce",
+                "path": "pull.pull_nonce",
                 "account": "gachaPull"
               }
             ]
@@ -956,7 +956,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.assignedVariant",
+                "path": "pull.assigned_variant",
                 "account": "gachaPull"
               }
             ]
@@ -1512,7 +1512,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pullNonce",
+                "path": "pull.pull_nonce",
                 "account": "gachaPull"
               }
             ]
@@ -2167,38 +2167,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                234,
-                98,
-                221,
-                15,
-                197,
-                182,
-                184,
-                8,
-                152,
-                244,
-                14,
-                222,
-                148,
-                219,
-                207,
-                75,
-                57,
-                124,
-                197,
-                222,
-                247,
+                147,
+                24,
+                169,
+                188,
+                55,
                 225,
-                149,
-                44,
-                1,
-                60,
-                180,
-                0,
-                171,
-                148,
-                8,
-                66
+                28,
+                194,
+                33,
+                98,
+                42,
+                226,
+                221,
+                188,
+                200,
+                133,
+                2,
+                172,
+                87,
+                17,
+                167,
+                75,
+                18,
+                170,
+                184,
+                173,
+                151,
+                232,
+                93,
+                235,
+                88,
+                213
               ]
             }
           }
@@ -2280,7 +2280,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
         },
         {
           "name": "delegationProgram",
@@ -2361,38 +2361,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                234,
-                98,
-                221,
-                15,
-                197,
-                182,
-                184,
-                8,
-                152,
-                244,
-                14,
-                222,
-                148,
-                219,
-                207,
-                75,
-                57,
-                124,
-                197,
-                222,
-                247,
+                147,
+                24,
+                169,
+                188,
+                55,
                 225,
-                149,
-                44,
-                1,
-                60,
-                180,
-                0,
-                171,
-                148,
-                8,
-                66
+                28,
+                194,
+                33,
+                98,
+                42,
+                226,
+                221,
+                188,
+                200,
+                133,
+                2,
+                172,
+                87,
+                17,
+                167,
+                75,
+                18,
+                170,
+                184,
+                173,
+                151,
+                232,
+                93,
+                235,
+                88,
+                213
               ]
             }
           }
@@ -2474,7 +2474,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
         },
         {
           "name": "delegationProgram",
@@ -2555,38 +2555,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                234,
-                98,
-                221,
-                15,
-                197,
-                182,
-                184,
-                8,
-                152,
-                244,
-                14,
-                222,
-                148,
-                219,
-                207,
-                75,
-                57,
-                124,
-                197,
-                222,
-                247,
+                147,
+                24,
+                169,
+                188,
+                55,
                 225,
-                149,
-                44,
-                1,
-                60,
-                180,
-                0,
-                171,
-                148,
-                8,
-                66
+                28,
+                194,
+                33,
+                98,
+                42,
+                226,
+                221,
+                188,
+                200,
+                133,
+                2,
+                172,
+                87,
+                17,
+                167,
+                75,
+                18,
+                170,
+                184,
+                173,
+                151,
+                232,
+                93,
+                235,
+                88,
+                213
               ]
             }
           }
@@ -2668,7 +2668,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
         },
         {
           "name": "delegationProgram",
@@ -2749,38 +2749,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                234,
-                98,
-                221,
-                15,
-                197,
-                182,
-                184,
-                8,
-                152,
-                244,
-                14,
-                222,
-                148,
-                219,
-                207,
-                75,
-                57,
-                124,
-                197,
-                222,
-                247,
+                147,
+                24,
+                169,
+                188,
+                55,
                 225,
-                149,
-                44,
-                1,
-                60,
-                180,
-                0,
-                171,
-                148,
-                8,
-                66
+                28,
+                194,
+                33,
+                98,
+                42,
+                226,
+                221,
+                188,
+                200,
+                133,
+                2,
+                172,
+                87,
+                17,
+                167,
+                75,
+                18,
+                170,
+                184,
+                173,
+                151,
+                232,
+                93,
+                235,
+                88,
+                213
               ]
             }
           }
@@ -2862,7 +2862,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
         },
         {
           "name": "delegationProgram",
@@ -2947,38 +2947,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                234,
-                98,
-                221,
-                15,
-                197,
-                182,
-                184,
-                8,
-                152,
-                244,
-                14,
-                222,
-                148,
-                219,
-                207,
-                75,
-                57,
-                124,
-                197,
-                222,
-                247,
+                147,
+                24,
+                169,
+                188,
+                55,
                 225,
-                149,
-                44,
-                1,
-                60,
-                180,
-                0,
-                171,
-                148,
-                8,
-                66
+                28,
+                194,
+                33,
+                98,
+                42,
+                226,
+                221,
+                188,
+                200,
+                133,
+                2,
+                172,
+                87,
+                17,
+                167,
+                75,
+                18,
+                170,
+                184,
+                173,
+                151,
+                232,
+                93,
+                235,
+                88,
+                213
               ]
             }
           }
@@ -3060,7 +3060,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
         },
         {
           "name": "delegationProgram",
@@ -3403,7 +3403,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "world.nextChunkIndex",
+                "path": "world.next_chunk_index",
                 "account": "worldHeader"
               }
             ]
@@ -5095,7 +5095,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pullNonce",
+                "path": "pull.pull_nonce",
                 "account": "gachaPull"
               }
             ]
@@ -5469,7 +5469,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "season.seasonIndex",
+                "path": "season.season_index",
                 "account": "season"
               }
             ]
@@ -5534,7 +5534,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "profile.pullCount",
+                "path": "profile.pull_count",
                 "account": "playerProfile"
               }
             ]
@@ -6016,7 +6016,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "lock.attemptNonce",
+                "path": "lock.attempt_nonce",
                 "account": "agentLock"
               }
             ]
@@ -6146,12 +6146,12 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "caster.classId",
+                "path": "caster.class_id",
                 "account": "playerRun"
               },
               {
                 "kind": "account",
-                "path": "caster.classVersion",
+                "path": "caster.class_version",
                 "account": "playerRun"
               }
             ]

@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const PROGRAM_ID = new web3.PublicKey(
-  "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX",
+  "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha",
 );
 const DELEGATION_PROGRAM = new web3.PublicKey(
   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",

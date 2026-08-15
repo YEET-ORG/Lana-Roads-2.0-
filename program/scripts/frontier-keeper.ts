@@ -30,7 +30,7 @@ import { resolve } from "node:path";
 import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
 
-const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
+const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
 const VALIDATOR = new web3.PublicKey(
@@ -301,8 +301,8 @@ async function main() {
     );
     await checkpointWorld(world, Number(live.recordScore), Number(live.mapSeq));
     await publishChunk(day, world, index);
-    await ensureSectors(worldPda(0, day), index);
-    await ensureSectors(worldPda(1, day), index);
+    await ensureSectors(worldPda(0, day), day, index);
+    await ensureSectors(worldPda(1, day), day, index);
     await ensureChunkDelegated(day, index);
     await markChunkReady(world, day, index);
     await extendFrontier(world, index);
@@ -466,8 +466,11 @@ async function main() {
   }
 
   /** Create + delegate every sector covering the chunk's rows. */
-  async function ensureSectors(world: web3.PublicKey, index: number) {
-    const day = BigInt(Math.floor(Date.now() / 1000 / 86400));
+  // `day` is the WORLD's day, not today's. `init_sector` pins the chunk
+  // against the committed world's day, so re-deriving it from the wall clock
+  // fails BadChunkState for every world that is not today's — exactly at a
+  // UTC boundary, which is when the frontier must keep moving.
+  async function ensureSectors(world: web3.PublicKey, day: bigint, index: number) {
     const firstSectorY = (index * CHUNK_ROWS) / SECTOR_EDGE;
     const bands = CHUNK_ROWS / SECTOR_EDGE;
     const chunk = chunkPda(day, index);

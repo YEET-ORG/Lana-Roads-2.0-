@@ -24,7 +24,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
+declare_id!("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 
 #[ephemeral]
 #[program]

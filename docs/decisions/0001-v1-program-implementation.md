@@ -165,3 +165,24 @@ This retires the "real ER delegation/commit/undelegation untested" gap.
 Still open before mainnet: real MagicBlock VRF transport (callbacks still
 authenticated against the configured `vrf_authority` key), commit
 sponsorship/fee-vault wiring, load/soak gates, audits, and legal review.
+
+## 11. Program identity retired and redeployed (2026-08-15)
+
+`GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX` was **closed** and the program
+redeployed as `AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha`. Section 10 above
+is kept as the historical record of the retired deployment; that ID is burned
+and its 386 accounts are abandoned.
+
+An in-place upgrade was not available. Account layouts and PDA seeds changed
+incompatibly (`u16` → `u32` row/score counters, so `chunk` and `sector` seeds
+derive differently), `GlobalConfig` is created with `init` and already
+existed, and `vrf_authority` → `validator` is a same-size field swap that an
+upgrade would silently reinterpret as an ER validator identity. Closing the
+old program reclaimed 8.31 SOL, which paid for the new one.
+
+This also retires the VRF gap named at the end of section 10: chunk reveal and
+gacha assignment now use MagicBlock scoped VRF (`#[vrf]` request,
+`#[vrf_callback]` delivery) instead of a configured `vrf_authority` signer.
+No admin or caller supplies randomness any more. See
+`docs/DEPLOYMENT_READINESS.md` for the artifact record and the gates that
+remain.

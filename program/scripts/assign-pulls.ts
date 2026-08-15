@@ -20,7 +20,7 @@ import { Program, web3 } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
+const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 const TOKEN_PROGRAM = new web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 

@@ -18,7 +18,7 @@ import {
   type Lane,
 } from "../../packages/crossy-world-sdk/src/hazards.js";
 
-const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
+const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
 const KINDS = ["grass", "road", "river", "rail"];

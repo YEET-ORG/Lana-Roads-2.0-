@@ -7,11 +7,11 @@ skip-lint = false
 
 [programs.localnet]
 solsocket_engine = "CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh"
-crossy_world = "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+crossy_world = "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
 
 [programs.devnet]
 solsocket_engine = "CrLS1Ry58q59AgmqbNVrqbfs2bWGJtjk12PezXh4LeYh"
-crossy_world = "GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX"
+crossy_world = "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
 
 [registry]
 url = "https://api.apr.dev"
