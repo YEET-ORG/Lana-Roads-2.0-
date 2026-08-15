@@ -1239,3 +1239,315 @@
 .agent-sub--button {
   pointer-events: auto;
 }
+
+/* ---------- packs ----------
+   The box is the promise and the reveal is the payoff, so the box gets the
+   anticipation (a slow breathing glow, a shake while the chain decides) and
+   the reveal gets the colour. Rarity is a hue the player learns, applied to
+   exactly three things: the glow, the word, and the burst. */
+.pack-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px 0 14px;
+}
+
+.pack-box {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--ds-radius-l);
+  background: linear-gradient(180deg, var(--sun-400), var(--sun-700));
+  box-shadow:
+    0 var(--ds-edge-m) 0 #8a4a0c,
+    0 14px 28px rgba(8, 17, 31, 0.45);
+  color: var(--navy-950);
+  cursor: pointer;
+  animation: pack-breathe 2.6s var(--ease-out) infinite;
+}
+
+.pack-box__lid {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 26px;
+  border-radius: var(--ds-radius-l) var(--ds-radius-l) 0 0;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.pack-box__glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(255, 210, 63, 0.55),
+    transparent 65%
+  );
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+@keyframes pack-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.03);
+  }
+}
+
+.pack-box--shaking {
+  animation: pack-shake 420ms var(--ease-out) infinite;
+}
+
+@keyframes pack-shake {
+  0%,
+  100% {
+    transform: rotate(-3deg) scale(1.02);
+  }
+  25% {
+    transform: rotate(4deg) scale(1.05);
+  }
+  50% {
+    transform: rotate(-2deg) scale(1.03);
+  }
+  75% {
+    transform: rotate(3deg) scale(1.06);
+  }
+}
+
+.pack-price {
+  font-family: var(--font-display);
+  font-size: 26px;
+  color: var(--paper);
+  text-shadow: 0 3px 0 var(--navy-950);
+}
+
+.pack-price small {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ds-text-dim);
+  text-shadow: none;
+  margin-top: 2px;
+}
+
+.pack-note {
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
+/* Odds table: the bar IS the number, so the percentage is a caption. */
+.odds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.odds__row {
+  --tint: var(--slate-300);
+  display: grid;
+  grid-template-columns: 74px 1fr 40px 62px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.odds__row--rare {
+  --tint: var(--sky-400);
+}
+.odds__row--epic {
+  --tint: var(--violet-500);
+}
+.odds__row--legendary {
+  --tint: var(--sun-400);
+}
+
+.odds__name {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 800;
+  color: var(--tint);
+}
+
+.odds__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ds-surface-deep);
+  overflow: hidden;
+}
+
+.odds__bar span {
+  display: block;
+  height: 100%;
+  background: var(--tint);
+  border-radius: 999px;
+}
+
+.odds__pct,
+.odds__left {
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-dim);
+}
+
+.odds__left {
+  text-align: right;
+}
+
+.pack-opening {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0 6px;
+  text-align: center;
+}
+
+/* ---------- reveal ---------- */
+.reveal {
+  --tint: var(--slate-300);
+  position: relative;
+  text-align: center;
+  padding: 18px 12px 8px;
+  border-radius: var(--ds-radius-l);
+  background: var(--ds-surface-deep);
+  border: 1px solid var(--tint);
+  overflow: hidden;
+  animation: ds-pop-in var(--t-celebrate) var(--ease-pop) both;
+}
+
+.reveal--rare {
+  --tint: var(--sky-400);
+}
+.reveal--epic {
+  --tint: var(--violet-500);
+}
+.reveal--legendary {
+  --tint: var(--sun-400);
+}
+
+.reveal__burst {
+  position: absolute;
+  inset: -40% -10% auto -10%;
+  height: 220px;
+  background: radial-gradient(circle at 50% 100%, var(--tint), transparent 62%);
+  opacity: 0.35;
+  pointer-events: none;
+  animation: reveal-burst 900ms var(--ease-out) both;
+}
+
+@keyframes reveal-burst {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+}
+
+.reveal__rarity {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--tint);
+}
+
+.reveal__name {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 8vw, 42px);
+  color: var(--paper);
+  text-shadow: 0 4px 0 var(--navy-950);
+  margin: 2px 0 8px;
+  animation: ds-stamp-in var(--t-screen) var(--ease-pop) both;
+}
+
+.reveal__meta {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--ds-text-dim);
+}
+
+.reveal__asset {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--navy-900);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--slate-300);
+}
+
+.pack-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pack-history__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: var(--ds-radius-s);
+  background: var(--ds-surface-deep);
+  font-size: 12px;
+}
+
+.pack-history__name {
+  font-weight: 800;
+  color: var(--ds-text);
+  flex: 1 1 auto;
+}
+
+.pack-history__state {
+  color: var(--ds-text-dim);
+  font-size: 11px;
+}
+
+.rarity-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--slate-300);
+  flex: 0 0 auto;
+}
+
+.rarity-dot--rare {
+  background: var(--sky-400);
+}
+.rarity-dot--epic {
+  background: var(--violet-500);
+}
+.rarity-dot--legendary {
+  background: var(--sun-400);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pack-box,
+  .pack-box--shaking,
+  .reveal__burst {
+    animation: none;
+  }
+}

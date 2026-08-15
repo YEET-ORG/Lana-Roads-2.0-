@@ -12,6 +12,7 @@ import idl from "./generated/crossy_world.json" with { type: "json" };
 import {
   type SessionClaim,
   MAX_SESSION_SECONDS,
+  MPL_CORE_PROGRAM_ID,
   Direction,
   ENTRY_PRICE,
   ReceiptKind,
@@ -106,6 +107,41 @@ export interface TxActivity {
    */
   durationMs?: number;
 }
+
+/** Where a pack is in its life. */
+export type PullState = "pending" | "assigned" | "claimed" | "refundable" | "refunded";
+
+/** One variant of a season's roster, with what is left of it. */
+export interface VariantSummary {
+  address: PublicKey;
+  variantId: number;
+  classId: number;
+  rarity: number;
+  /** Agent index the client draws for this variant. */
+  modelId: number;
+  supplyCap: number;
+  reserved: number;
+  minted: number;
+  active: boolean;
+  remaining: number;
+}
+
+/** One pack a wallet has bought. */
+export interface PullSummary {
+  address: PublicKey;
+  pullNonce: number;
+  season: number;
+  tier: number;
+  price: bigint;
+  state: PullState;
+  assignedRarity: number;
+  assignedVariant: number;
+  mintedAsset: PublicKey;
+  requestedAt: number;
+}
+
+/** Banner tiers, in the order the program numbers them. */
+export const TIER_NAMES = ["standard", "enhanced", "premium"] as const;
 
 /** A player's chosen, on-chain display identity. */
 export interface PlayerIdentity {
@@ -618,6 +654,201 @@ export class CrossyClient {
   async getSector(world: PublicKey, sx: number, sy: number) {
     return this.erProgram.account.occupancySector.fetchNullable(
       pda.sector(world, sx, sy),
+    );
+  }
+
+  // ---- gacha ------------------------------------------------------------
+
+  async getSeason(seasonIndex: number) {
+    return this.program.account.season.fetchNullable(pda.season(seasonIndex));
+  }
+
+  async getBanner(seasonIndex: number, tier: number) {
+    return this.program.account.banner.fetchNullable(pda.banner(seasonIndex, tier));
+  }
+
+  /**
+   * Every variant of a season, in `variant_id` order.
+   *
+   * The order is not cosmetic: `request_pull` and `assign_pull` both demand
+   * the FULL inventory in ascending id, so nobody can improve their odds by
+   * presenting a favourable subset.
+   */
+  async listVariants(seasonIndex: number): Promise<VariantSummary[]> {
+    const rows = await this.program.account.variantInventory.all();
+    return rows
+      .filter(({ account }: any) => account.season === seasonIndex)
+      .map(({ publicKey, account }: any) => ({
+        address: publicKey as PublicKey,
+        variantId: account.variantId as number,
+        classId: account.classId as number,
+        rarity: account.rarity as number,
+        modelId: account.modelId as number,
+        supplyCap: account.supplyCap as number,
+        reserved: account.reserved as number,
+        minted: account.minted as number,
+        active: account.active as boolean,
+        remaining: (account.supplyCap - account.reserved - account.minted) as number,
+      }))
+      .sort((a, b) => a.variantId - b.variantId);
+  }
+
+  /** Every pull this wallet has ever made, newest first. */
+  async listPulls(wallet = this.wallet.publicKey): Promise<PullSummary[]> {
+    const rows = await this.program.account.gachaPull.all([
+      { memcmp: { offset: 8, bytes: wallet.toBase58() } },
+    ]);
+    return rows
+      .map(({ publicKey, account }: any) => ({
+        address: publicKey as PublicKey,
+        pullNonce: account.pullNonce as number,
+        season: account.season as number,
+        tier: account.tier as number,
+        price: BigInt(account.price.toString()),
+        state: (Object.keys(account.state)[0] ?? "?") as PullState,
+        assignedRarity: account.assignedRarity as number,
+        assignedVariant: account.assignedVariant as number,
+        mintedAsset: account.mintedAsset as PublicKey,
+        requestedAt: Number(account.requestedAt.toString()),
+      }))
+      .sort((a, b) => b.pullNonce - a.pullNonce);
+  }
+
+  /**
+   * Build the reviewable "open a pack" transaction.
+   *
+   * Money leaves the wallet here, so it follows the same rule as paid
+   * entry: the player sees exactly what will move before anything is
+   * signed. The pull is NOT decided by this transaction — it only pays and
+   * snapshots the odds; the VRF authority assigns afterwards.
+   */
+  async reviewPull(params: {
+    seasonIndex: number;
+    tier: number;
+    payerToken: PublicKey;
+  }): Promise<TransactionReview & { pullNonce: number }> {
+    const wallet = this.wallet.publicKey;
+    const config: any = await this.getConfig();
+    const banner: any = await this.getBanner(params.seasonIndex, params.tier);
+    if (!banner) throw new Error("banner not configured");
+    const variants = await this.listVariants(params.seasonIndex);
+    if (!variants.length) throw new Error("season has no variants");
+
+    const instructions: TransactionInstruction[] = [];
+    const profile: any = await this.getProfile();
+    if (!profile) {
+      instructions.push(
+        await this.program.methods
+          .ensureProfile()
+          .accountsPartial({ profile: pda.profile(wallet), wallet })
+          .instruction(),
+      );
+    }
+    const pullNonce = profile?.pullCount ?? 0;
+
+    instructions.push(
+      await this.program.methods
+        .requestPull()
+        .accountsPartial({
+          config: pda.config(),
+          season: pda.season(params.seasonIndex),
+          banner: pda.banner(params.seasonIndex, params.tier),
+          profile: pda.profile(wallet),
+          pull: pda.pull(wallet, pullNonce),
+          gachaVaultAuthority: pda.gachaVaultAuthority(),
+          gachaVault: pda.gachaVault(),
+          payerToken: params.payerToken,
+          usdcMint: config.usdcMint,
+          wallet,
+          tokenProgram: config.tokenProgram,
+        })
+        .remainingAccounts(
+          variants.map((v) => ({
+            pubkey: v.address,
+            isSigner: false,
+            isWritable: false,
+          })),
+        )
+        .instruction(),
+    );
+
+    const price = BigInt(banner.price.toString());
+    return {
+      action: `Open a ${TIER_NAMES[params.tier] ?? "standard"} pack`,
+      usdcTransfers: [
+        {
+          from: params.payerToken.toBase58(),
+          to: pda.gachaVault().toBase58(),
+          amount: price,
+        },
+      ],
+      assets: [],
+      warnings: [
+        "The pack is decided after payment, by the season's published odds.",
+        "If the rarity it lands on has sold out, the pull becomes refundable.",
+      ],
+      instructions,
+      pullNonce,
+    };
+  }
+
+  /**
+   * Mint the assigned agent.
+   *
+   * The asset keypair is generated here and signs its own creation; the
+   * owner is fixed to the pull's player by the program, so it cannot be
+   * redirected by whoever pays.
+   */
+  async claimPull(params: {
+    pullNonce: number;
+    name: string;
+    uri: string;
+  }): Promise<{ signature: string; asset: PublicKey }> {
+    const wallet = this.wallet.publicKey;
+    const config: any = await this.getConfig();
+    const pullAddress = pda.pull(wallet, params.pullNonce);
+    const pull: any = await this.program.account.gachaPull.fetch(pullAddress);
+    const asset = Keypair.generate();
+    const signature = await this.track("Minting your agent", "base", () =>
+      this.program.methods
+        .claimPull(params.name, params.uri)
+        .accountsPartial({
+          config: pda.config(),
+          pull: pullAddress,
+          variant: pda.variant(pull.season, pull.assignedVariant),
+          asset: asset.publicKey,
+          assetMap: pda.assetMap(asset.publicKey),
+          collection: config.collection,
+          mintAuthority: pda.mintAuthority(),
+          owner: wallet,
+          payer: wallet,
+          coreProgram: MPL_CORE_PROGRAM_ID,
+        })
+        .signers([asset])
+        .rpc(),
+    );
+    return { signature, asset: asset.publicKey };
+  }
+
+  /** Take the money back when a pull landed on sold-out inventory. */
+  async refundPull(params: {
+    pullNonce: number;
+    walletToken: PublicKey;
+  }): Promise<string> {
+    const config: any = await this.getConfig();
+    return this.track("Refunding the pack", "base", () =>
+      this.program.methods
+        .refundPull()
+        .accountsPartial({
+          config: pda.config(),
+          pull: pda.pull(this.wallet.publicKey, params.pullNonce),
+          gachaVaultAuthority: pda.gachaVaultAuthority(),
+          gachaVault: pda.gachaVault(),
+          walletToken: params.walletToken,
+          usdcMint: config.usdcMint,
+          tokenProgram: config.tokenProgram,
+        })
+        .rpc(),
     );
   }
 

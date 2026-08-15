@@ -17,6 +17,7 @@ import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
 import { EntryFlow } from "../entry/EntryFlow";
 import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
+import { PackSheet } from "../packs/PackSheet";
 import { MenuBackdrop } from "./MenuBackdrop";
 import {
   Button,
@@ -71,6 +72,7 @@ export function Home({
   const [entering, setEntering] = useState(false);
   const [paidOpen, setPaidOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState<WorldMode | null>(null);
+  const [packsOpen, setPacksOpen] = useState(false);
   const wallet = boot?.wallet.publicKey.toBase58() ?? "offline";
   const [agentIdx, setAgentIdx] = useState(
     () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
@@ -424,6 +426,18 @@ export function Home({
                 Standings
               </Button>
             )}
+            {boot && (
+              <Button
+                variant="link"
+                icon="spark"
+                onClick={() => {
+                  sfx.click();
+                  setPacksOpen(true);
+                }}
+              >
+                Packs
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -532,6 +546,20 @@ export function Home({
             </Button>
           </div>
         </Modal>
+      )}
+
+      {packsOpen && boot && (
+        <PackSheet
+          boot={boot}
+          // The world behind the sheet becomes the agent you just pulled —
+          // the reveal happens in the game, not only on a card.
+          onAgentRevealed={(modelId) => menuSceneRef.current?.setLocalModel(modelId)}
+          onClose={() => {
+            setPacksOpen(false);
+            // Put the player's own agent back.
+            menuSceneRef.current?.setLocalModel(agentId(agentIdx));
+          }}
+        />
       )}
 
       {boardOpen != null && boot && info && (

@@ -100,3 +100,11 @@ export interface SessionClaim {
   /** Whether the session authority is this client's key. */
   mine: boolean;
 }
+
+/**
+ * Metaplex Core. Agents are Core assets, so claiming a pack CPIs into this
+ * program; the address is fixed by Metaplex, not by our config.
+ */
+export const MPL_CORE_PROGRAM_ID = new PublicKey(
+  "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d",
+);
