@@ -28,9 +28,9 @@ const le8 = (v: bigint | number) => {
   b.writeBigUInt64LE(BigInt(v));
   return b;
 };
-const le2 = (v: number) => {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
+const le4 = (v: number) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
   return b;
 };
 const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM_ID)[0];
@@ -60,7 +60,7 @@ async function main() {
 
   const chunkIndex = Number(process.env.CHUNK ?? 1);
   const chunk = await base.account.chunkDefinition.fetch(
-    pda(Buffer.from("chunk"), le8(day), le2(chunkIndex)),
+    pda(Buffer.from("chunk"), le8(day), le4(chunkIndex)),
   );
   const seed = Uint8Array.from(chunk.randomnessHash as number[]);
 

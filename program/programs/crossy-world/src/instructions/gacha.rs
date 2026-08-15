@@ -3,15 +3,22 @@
 //! bias; inventory reservation and pity updates are atomic with assignment;
 //! a valid assigned result is never rerolled or refunded on preference.
 //!
-//! Variant eligibility snapshot: the callback receives the candidate variant
-//! accounts as remaining accounts in variant_id order; the program filters
-//! eligibility deterministically (active, in-stock, matching rarity) and
-//! selects uniformly among them. The pull's inventory_revision guards
-//! against concurrent-assignment races: mismatch => refundable, never
-//! silently newer odds.
+//! Variant selection is over the season's immutable per-rarity catalog.
+//! A selected entry that sold out concurrently refunds instead of rerolling;
+//! another player's assignment can therefore never change a random result.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TransferChecked};
+use ephemeral_rollups_sdk::{
+    anchor::{vrf, vrf_callback},
+    vrf::{
+        self,
+        instructions::{create_request_scoped_randomness_ix, RequestRandomnessParams},
+        types::SerializableAccountMeta,
+    },
+};
+use solana_keccak_hasher as keccak;
+use solana_sha256_hasher as sha256;
 
 use crate::constants::{seeds, GACHA_TIMEOUT_SECONDS, USDC_DECIMALS};
 use crate::errors::CrossyError;
@@ -32,6 +39,7 @@ pub const GACHA_VAULT_AUTHORITY_SEED: &[u8] = b"gacha_vault_authority";
 // request_pull
 // ---------------------------------------------------------------------------
 
+#[vrf]
 #[derive(Accounts)]
 pub struct RequestPull<'info> {
     #[account(
@@ -43,6 +51,7 @@ pub struct RequestPull<'info> {
     #[account(
         seeds = [seeds::SEASON, &season.season_index.to_le_bytes()],
         bump = season.bump,
+        constraint = season.status == SeasonStatus::Active @ CrossyError::DayNotOpen,
     )]
     pub season: Box<Account<'info, Season>>,
     #[account(
@@ -59,6 +68,30 @@ pub struct RequestPull<'info> {
         constraint = profile.wallet == wallet.key() @ CrossyError::NotWallet
     )]
     pub profile: Box<Account<'info, PlayerProfile>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season.season_index.to_le_bytes(), &[0u8]],
+        bump = common_pool.bump,
+        constraint = common_pool.initialized @ CrossyError::StaleInventory
+    )]
+    pub common_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season.season_index.to_le_bytes(), &[1u8]],
+        bump = rare_pool.bump,
+        constraint = rare_pool.initialized @ CrossyError::StaleInventory
+    )]
+    pub rare_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season.season_index.to_le_bytes(), &[2u8]],
+        bump = epic_pool.bump,
+        constraint = epic_pool.initialized @ CrossyError::StaleInventory
+    )]
+    pub epic_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season.season_index.to_le_bytes(), &[3u8]],
+        bump = legendary_pool.bump,
+        constraint = legendary_pool.initialized @ CrossyError::StaleInventory
+    )]
+    pub legendary_pool: Box<Account<'info, RarityPool>>,
     #[account(
         init,
         payer = wallet,
@@ -91,6 +124,14 @@ pub struct RequestPull<'info> {
     #[account(mut)]
     pub wallet: Signer<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: official MagicBlock base queue, or local test queue.
+    #[account(
+        mut,
+        constraint = oracle_queue.key() == vrf::consts::DEFAULT_QUEUE
+            || oracle_queue.key() == vrf::consts::DEFAULT_TEST_QUEUE
+            @ CrossyError::BadVrfAuthority
+    )]
+    pub oracle_queue: UncheckedAccount<'info>,
     /// CHECK: configured token program.
     #[account(address = config.token_program @ CrossyError::WrongTokenProgram)]
     pub token_program: UncheckedAccount<'info>,
@@ -104,6 +145,10 @@ pub fn request_pull<'info>(ctx: Context<'info, RequestPull<'info>>) -> Result<()
     let today = time::utc_day_from_unix(now).ok_or(CrossyError::Overflow)?;
     let season = &ctx.accounts.season;
     require!(
+        ctx.accounts.profile.pending_pull == Pubkey::default(),
+        CrossyError::AttemptStillActive
+    );
+    require!(
         today >= season.start_day && today < season.end_day,
         CrossyError::DayNotOpen
     );
@@ -115,22 +160,20 @@ pub fn request_pull<'info>(ctx: Context<'info, RequestPull<'info>>) -> Result<()
         legendary_misses: ctx.accounts.profile.pity[tier].legendary_misses,
     };
 
-    // Availability per rarity across the season's variants (remaining accts).
+    let pools = [
+        &*ctx.accounts.common_pool,
+        &*ctx.accounts.rare_pool,
+        &*ctx.accounts.epic_pool,
+        &*ctx.accounts.legendary_pool,
+    ];
     let mut available = [false; 4];
-    let mut seen: u16 = 0;
-    for info in ctx.remaining_accounts.iter() {
-        let variant: Account<VariantInventory> = Account::try_from(info)?;
+    for (rarity, pool) in pools.iter().enumerate() {
         require!(
-            variant.season == season.season_index,
+            pool.season == season.season_index && pool.rarity == rarity as u8,
             CrossyError::StaleInventory
         );
-        seen = seen.checked_add(1).ok_or(CrossyError::Overflow)?;
-        if variant.active && variant.available() > 0 {
-            available[variant.rarity as usize] = true;
-        }
+        available[rarity] = pool.has_available();
     }
-    // The full season inventory must be presented (no cherry-picking).
-    require!(seen == season.variant_count, CrossyError::StaleInventory);
 
     // Pity guarantee must be satisfiable: if the pity floor's inventory is
     // unavailable, the banner rejects payment instead of violating pity.
@@ -169,33 +212,89 @@ pub fn request_pull<'info>(ctx: Context<'info, RequestPull<'info>>) -> Result<()
     pull.effective_weights = effective;
     pull.epic_misses_snapshot = counters.epic_misses;
     pull.legendary_misses_snapshot = counters.legendary_misses;
-    pull.inventory_revision = banner.inventory_revision;
     pull.requested_at = now;
     pull.request_generation = 1;
+    pull.randomness = [0u8; 32];
     pull.state = PullState::Pending;
     pull.bump = ctx.bumps.pull;
 
+    let pull_key = pull.key();
     let profile = &mut ctx.accounts.profile;
+    profile.pending_pull = pull_key;
     profile.pull_count = profile
         .pull_count
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
 
+    let generation = pull.request_generation;
     emit!(PullRequested {
-        pull: pull.key(),
+        pull: pull_key,
         wallet: pull.player,
         season: pull.season,
         tier: pull.tier,
         pull_nonce: pull.pull_nonce,
         price: pull.price,
-        inventory_revision: pull.inventory_revision,
     });
+
+    let mut callback_args = Vec::with_capacity(2);
+    generation.serialize(&mut callback_args)?;
+    let nonce_bytes = pull.pull_nonce.to_le_bytes();
+    let generation_bytes = generation.to_le_bytes();
+    let caller_seed = keccak::hashv(&[
+        b"lana-roads-gacha-vrf-v1",
+        pull_key.as_ref(),
+        &nonce_bytes,
+        &generation_bytes,
+    ])
+    .to_bytes();
+    let ix = create_request_scoped_randomness_ix(RequestRandomnessParams {
+        payer: ctx.accounts.wallet.key(),
+        oracle_queue: ctx.accounts.oracle_queue.key(),
+        callback_program_id: crate::ID,
+        callback_discriminator: crate::instruction::ConsumePullRandomness::DISCRIMINATOR.to_vec(),
+        accounts_metas: Some(vec![SerializableAccountMeta {
+            pubkey: pull_key,
+            is_signer: false,
+            is_writable: true,
+        }]),
+        caller_seed,
+        callback_args: Some(callback_args),
+    });
+    ctx.accounts
+        .invoke_signed_vrf(&ctx.accounts.wallet.to_account_info(), &ix)?;
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // assign_pull — authenticated randomness callback
 // ---------------------------------------------------------------------------
+
+#[vrf_callback]
+#[derive(Accounts)]
+pub struct ConsumePullRandomness<'info> {
+    #[account(
+        mut,
+        seeds = [seeds::PULL, pull.player.as_ref(), &pull.pull_nonce.to_le_bytes()],
+        bump = pull.bump,
+        constraint = pull.state == PullState::Pending @ CrossyError::AlreadyTerminal
+    )]
+    pub pull: Box<Account<'info, GachaPull>>,
+}
+
+pub fn consume_pull_randomness(
+    ctx: Context<ConsumePullRandomness>,
+    randomness: [u8; 32],
+    generation: u16,
+) -> Result<()> {
+    let pull = &mut ctx.accounts.pull;
+    require!(
+        pull.request_generation == generation,
+        CrossyError::BadGeneration
+    );
+    pull.randomness = randomness;
+    pull.state = PullState::RandomnessReady;
+    Ok(())
+}
 
 #[derive(Accounts)]
 pub struct AssignPull<'info> {
@@ -222,9 +321,33 @@ pub struct AssignPull<'info> {
         mut,
         seeds = [seeds::PULL, pull.player.as_ref(), &pull.pull_nonce.to_le_bytes()],
         bump = pull.bump,
-        constraint = pull.state == PullState::Pending @ CrossyError::AlreadyTerminal
+        constraint = pull.state == PullState::RandomnessReady @ CrossyError::AlreadyTerminal
     )]
     pub pull: Box<Account<'info, GachaPull>>,
+    #[account(
+        mut,
+        seeds = [seeds::RARITY_POOL, &pull.season.to_le_bytes(), &[0u8]],
+        bump = common_pool.bump
+    )]
+    pub common_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        mut,
+        seeds = [seeds::RARITY_POOL, &pull.season.to_le_bytes(), &[1u8]],
+        bump = rare_pool.bump
+    )]
+    pub rare_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        mut,
+        seeds = [seeds::RARITY_POOL, &pull.season.to_le_bytes(), &[2u8]],
+        bump = epic_pool.bump
+    )]
+    pub epic_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        mut,
+        seeds = [seeds::RARITY_POOL, &pull.season.to_le_bytes(), &[3u8]],
+        bump = legendary_pool.bump
+    )]
+    pub legendary_pool: Box<Account<'info, RarityPool>>,
     /// The variant that will be reserved (selected deterministically; the
     /// handler re-derives the selection and requires this account to match).
     #[account(
@@ -243,44 +366,18 @@ pub struct AssignPull<'info> {
     pub gacha_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(address = config.usdc_mint @ CrossyError::WrongMint)]
     pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
-    /// The authenticated randomness identity fixed in config.
-    #[account(address = config.vrf_authority @ CrossyError::BadVrfAuthority)]
-    pub vrf_authority: Signer<'info>,
     /// CHECK: configured token program.
     #[account(address = config.token_program @ CrossyError::WrongTokenProgram)]
     pub token_program: UncheckedAccount<'info>,
-    // remaining_accounts: every active VariantInventory of the season in
-    // variant_id order (same set as request), for deterministic selection.
 }
 
-pub fn assign_pull<'info>(
-    ctx: Context<'info, AssignPull<'info>>,
-    generation: u16,
-    randomness: [u8; 32],
-) -> Result<()> {
+pub fn assign_pull(ctx: Context<AssignPull>) -> Result<()> {
     let pull_key = ctx.accounts.pull.key();
     let pull = &mut ctx.accounts.pull;
-    // Bind to the exact live generation (refund invalidates it; a late
-    // callback from an older generation must fail).
-    require!(
-        pull.request_generation == generation,
-        CrossyError::BadGeneration
-    );
-    // Concurrent-assignment protection: the snapshot revision must still
-    // hold, otherwise the pull becomes refundable instead of silently using
-    // newer odds.
-    if ctx.accounts.banner.inventory_revision != pull.inventory_revision {
-        pull.state = PullState::Refundable;
-        emit!(PaymentRefundable {
-            receipt: pull_key,
-            amount: pull.price
-        });
-        return Ok(());
-    }
 
     // Deterministic selection domain-separated by the pull identity.
     let domain = (pull.player.to_bytes()[0] as u64) << 32 | pull.pull_nonce as u64;
-    let mut rng = SelectionRng::new(&randomness, domain);
+    let mut rng = SelectionRng::new(&pull.randomness, domain);
 
     let counters = PityCounters {
         epic_misses: pull.epic_misses_snapshot,
@@ -290,29 +387,18 @@ pub fn assign_pull<'info>(
     let rolled = sampling::select_rarity(&mut rng, pull.effective_weights);
     let rarity = pity::enforce_floor(rolled, floor);
 
-    // Deterministic eligible set: active, in-stock variants of `rarity` in
-    // variant_id order from the remaining accounts (full season set).
-    let season = &ctx.accounts.season;
-    let mut eligible: Vec<(u16, Pubkey, u32)> = Vec::new();
-    let mut seen: u16 = 0;
-    let mut last_id: Option<u16> = None;
-    for info in ctx.remaining_accounts.iter() {
-        let variant: Account<VariantInventory> = Account::try_from(info)?;
-        require!(variant.season == pull.season, CrossyError::StaleInventory);
-        // Enforce strict ordering so the eligible list is canonical.
-        if let Some(prev) = last_id {
-            require!(variant.variant_id > prev, CrossyError::StaleInventory);
-        }
-        last_id = Some(variant.variant_id);
-        seen = seen.checked_add(1).ok_or(CrossyError::Overflow)?;
-        if variant.active && variant.available() > 0 && variant.rarity == rarity as u8 {
-            eligible.push((variant.variant_id, info.key(), variant.available()));
-        }
-    }
-    require!(seen == season.variant_count, CrossyError::StaleInventory);
-
-    if eligible.is_empty() {
-        // Sold-out race since the snapshot: refundable, never downgraded.
+    let pool: &mut RarityPool = match rarity {
+        Rarity::Common => &mut ctx.accounts.common_pool,
+        Rarity::Rare => &mut ctx.accounts.rare_pool,
+        Rarity::Epic => &mut ctx.accounts.epic_pool,
+        Rarity::Legendary => &mut ctx.accounts.legendary_pool,
+    };
+    require!(
+        pool.initialized && pool.season == pull.season && pool.rarity == rarity as u8,
+        CrossyError::StaleInventory
+    );
+    let catalog_count = pool.count as u32;
+    if catalog_count == 0 {
         pull.state = PullState::Refundable;
         emit!(PaymentRefundable {
             receipt: pull_key,
@@ -320,37 +406,51 @@ pub fn assign_pull<'info>(
         });
         return Ok(());
     }
+    let selected = sampling::select_variant_index(&mut rng, catalog_count);
+    let (pool_index, entry) = pool.entry(selected)?;
+    if entry.available == 0 {
+        pull.state = PullState::Refundable;
+        emit!(PaymentRefundable {
+            receipt: pull_key,
+            amount: pull.price
+        });
+        return Ok(());
+    }
+    let variant_id = entry.variant_id;
 
-    let idx = sampling::select_variant_index(&mut rng, eligible.len() as u32) as usize;
-    let (variant_id, variant_key, _) = eligible[idx];
-    // The mutable selected_variant account must be exactly the derived one.
-    require_keys_eq!(
-        ctx.accounts.selected_variant.key(),
-        variant_key,
+    let variant = &mut ctx.accounts.selected_variant;
+    require!(
+        variant.season == pull.season
+            && variant.variant_id == variant_id
+            && variant.rarity == rarity as u8
+            && variant.active,
         CrossyError::StaleInventory
     );
-
-    // Atomically: reserve inventory + update pity + finalize team revenue.
-    let variant = &mut ctx.accounts.selected_variant;
-    require!(variant.available() > 0, CrossyError::SoldOut);
+    require!(
+        variant.available()? == entry.available,
+        CrossyError::LiabilityMismatch
+    );
+    pool.entries[pool_index].available = pool.entries[pool_index]
+        .available
+        .checked_sub(1)
+        .ok_or(CrossyError::SoldOut)?;
     variant.reserved = variant
         .reserved
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
-    if variant.available() == 0 {
-        // Sold out: bump the banner revision so newer pulls resnapshot.
-        let banner = &mut ctx.accounts.banner;
-        banner.inventory_revision = banner
-            .inventory_revision
-            .checked_add(1)
-            .ok_or(CrossyError::Overflow)?;
-    }
+    require!(
+        variant.available()? == pool.entries[pool_index].available,
+        CrossyError::LiabilityMismatch
+    );
+    pool.revision = pool.revision.checked_add(1).ok_or(CrossyError::Overflow)?;
 
     let after = pity::apply_assignment(counters, rarity);
     let tier = pull.tier as usize;
     let profile = &mut ctx.accounts.profile;
+    require_keys_eq!(profile.pending_pull, pull_key, CrossyError::BadReceiptState);
     profile.pity[tier].epic_misses = after.epic_misses;
     profile.pity[tier].legendary_misses = after.legendary_misses;
+    profile.pending_pull = Pubkey::default();
 
     // Team revenue becomes final on assignment.
     let signer_seeds: &[&[&[u8]]] = &[&[
@@ -439,11 +539,17 @@ pub struct ClaimPull<'info> {
     pub core_program: UncheckedAccount<'info>,
 }
 
-pub fn claim_pull(ctx: Context<ClaimPull>, name: String, uri: String) -> Result<()> {
+pub fn claim_pull(ctx: Context<ClaimPull>, uri: String) -> Result<()> {
     require!(
-        name.len() <= 32 && uri.len() <= 200,
-        CrossyError::CapacityExceeded
+        ctx.accounts.pull.inventory_reserved,
+        CrossyError::BadReceiptState
     );
+    require!(uri.len() <= 200, CrossyError::CapacityExceeded);
+    require!(
+        sha256::hash(uri.as_bytes()).to_bytes() == ctx.accounts.variant.metadata_uri_hash,
+        CrossyError::MetadataMismatch
+    );
+    let name = format!("Lana Agent #{}", ctx.accounts.variant.variant_id);
 
     let signer_seeds: &[&[&[u8]]] = &[&[MINT_AUTHORITY_SEED, &[ctx.bumps.mint_authority]]];
     mpl_core::create_asset(
@@ -503,6 +609,13 @@ pub struct RefundPull<'info> {
         bump = pull.bump,
     )]
     pub pull: Box<Account<'info, GachaPull>>,
+    #[account(
+        mut,
+        seeds = [seeds::PLAYER, pull.player.as_ref()],
+        bump = profile.bump,
+        constraint = profile.pending_pull == pull.key() @ CrossyError::BadReceiptState
+    )]
+    pub profile: Box<Account<'info, PlayerProfile>>,
     /// CHECK: gacha vault authority PDA.
     #[account(seeds = [GACHA_VAULT_AUTHORITY_SEED], bump)]
     pub gacha_vault_authority: UncheckedAccount<'info>,
@@ -522,7 +635,7 @@ pub struct RefundPull<'info> {
     pub token_program: UncheckedAccount<'info>,
 }
 
-/// Refund a pull that is Refundable, or Pending past the objective timeout.
+/// Refund a pull that is Refundable, or unassigned past the objective timeout.
 /// Refund invalidates the request generation so a late callback fails, and
 /// never advances pity or supply.
 pub fn refund_pull(ctx: Context<RefundPull>) -> Result<()> {
@@ -530,7 +643,7 @@ pub fn refund_pull(ctx: Context<RefundPull>) -> Result<()> {
     let pull = &mut ctx.accounts.pull;
     match pull.state {
         PullState::Refundable => {}
-        PullState::Pending => {
+        PullState::Pending | PullState::RandomnessReady => {
             require!(
                 now >= pull
                     .requested_at
@@ -568,6 +681,7 @@ pub fn refund_pull(ctx: Context<RefundPull>) -> Result<()> {
     )?;
 
     pull.state = PullState::Refunded;
+    ctx.accounts.profile.pending_pull = Pubkey::default();
     emit!(PullRefunded {
         pull: pull.key(),
         wallet: pull.player,

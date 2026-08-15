@@ -144,7 +144,7 @@ For each daily vault:
 
 ```text
 vault token balance
-= pending payments
+>= pending payments
  + active prize pool
  + rollover held
  + refund liability
@@ -152,7 +152,7 @@ vault token balance
  + unpaid team amount
 ```
 
-Transitions move value between categories; they do not create or destroy accounting value except an actual token transfer into or out of the vault.
+Tracked liabilities must never exceed the vault balance. Transitions move value between categories; they do not create or destroy accounting value except an actual token transfer into or out of the vault. SPL token accounts can receive unsolicited deposits, so an unexplained surplus is recorded and investigated but cannot be used by a third party to block settlement. Any deficit blocks financial transitions.
 
 ### 7.2 Required counters
 
@@ -192,7 +192,7 @@ No other transitions are legal.
 `begin_paid_attempt`:
 
 - Requires wallet signer.
-- Requires day Prepared/Open and before cutoff.
+- Requires day Open and before cutoff.
 - Validates no active or revive-pending run for wallet.
 - Validates exactly 1 USDC.
 - Transfers USDC to daily vault.
@@ -204,6 +204,7 @@ After ER spawn is committed, `reconcile_entry` is permissionless:
 
 - Success: subtract pending, add active pool, add wallet contribution, mark Consumed.
 - Failure: subtract pending, add refund liability, mark Refundable.
+- If a receipt is still unresolved after the final world commit, or the day is voided, it becomes Refundable because no later gameplay action can consume it.
 
 `refund_receipt` transfers only a Refundable receipt to its wallet’s canonical USDC account and marks Refunded.
 
@@ -268,10 +269,11 @@ Admin supplies accounts needed to execute but supplies no winner, score, split, 
 Effects:
 
 - Stops admission and gameplay.
-- Converts active pool into refund liability based on contribution accounts.
+- Converts same-day consumed player contributions into refund liability.
+- Preserves inherited `rollover_in` as `rollover_out` for the successor day; it is not attributed to today's players.
 - Keeps pending receipts independently refundable through their receipt state.
 - Sets winner/team amounts to zero.
-- Prohibits rollover and settlement.
+- Prohibits winner/team settlement.
 
 `claim_void_refund`:
 

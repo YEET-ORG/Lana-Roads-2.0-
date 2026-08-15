@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import {
   Direction,
+  loadContiguousChunks,
   pda,
   ReceiptKind,
   revivePrice,
@@ -140,8 +141,41 @@ export function GameScreen({
   const [boardOpen, setBoardOpen] = useState(false);
   /** Where this run left the player on today's board, once it is over. */
   const [rank, setRank] = useState<{ place: number; of: number } | null>(null);
+  /** No gameplay listener may attach until the router has selected one ER. */
+  const [erReady, setErReady] = useState(!boot.client.routerUrl);
   const settings = useSettings();
   const world = pda.world(route.mode, route.day);
+
+  // Resolve the authoritative ER before subscribing, reading a run, or
+  // sending an action. This used to race the live-state effect: that effect
+  // subscribed to the old connection, then resolution replaced the
+  // connection underneath it and the map kept listening to the wrong server.
+  useEffect(() => {
+    let live = true;
+    if (!boot.client.routerUrl) {
+      setErReady(true);
+      return () => {
+        live = false;
+      };
+    }
+    setErReady(false);
+    setHud((h) => ({ ...h, state: "resolving ER…" }));
+    boot.client
+      .resolveErForWorld(world)
+      .then((status) => {
+        if (!live) return;
+        if (!status.isDelegated || !status.fqdn)
+          throw new Error("world is not delegated to a live rollup");
+        console.log("world ER (router-resolved):", status.fqdn);
+        setErReady(true);
+      })
+      .catch((e) => {
+        if (live) setHud((h) => ({ ...h, state: `error: ${errorText(e)}` }));
+      });
+    return () => {
+      live = false;
+    };
+  }, [boot.client, world.toBase58()]);
 
   // Casual: solsocket-style join — ONE base tx (profile + starter + run +
   // lock + delegate run/best to the pinned ER validator), wait for the ER
@@ -149,15 +183,8 @@ export function GameScreen({
   useEffect(() => {
     let live = true;
     (async () => {
-      if (route.mode !== WorldMode.Casual) return;
+      if (!erReady || route.mode !== WorldMode.Casual) return;
       try {
-        setHud((h) => ({ ...h, state: "resolving ER…" }));
-        // Magic Router resolves which ER holds the delegated world; the
-        // client re-targets its ER connection + subscriptions to that FQDN.
-        if (boot.client.routerUrl) {
-          const status = await boot.client.resolveErForWorld(world).catch(() => null);
-          if (status?.fqdn) console.log("world ER (router-resolved):", status.fqdn);
-        }
         setHud((h) => ({ ...h, state: "joining…" }));
         const { attemptNonce } = await boot.client.joinCasual({
           day: route.day,
@@ -187,7 +214,7 @@ export function GameScreen({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [erReady, route.day, route.mode]);
 
   // Live state (solsocket-style): authoritative pushes from ONE ER
   // websocket subscription; the local run mirror also advances optimistically
@@ -246,10 +273,16 @@ export function GameScreen({
   const scoreDecadeRef = useRef(0);
 
   useEffect(() => {
+    if (!erReady) return;
     const canvas = canvasRef.current!;
     let scene: WorldScene | null = null;
     let live = true;
     let loadedChunks = 0;
+    let wantedChunks = 0;
+    let chunkLoadRunning = false;
+    let chunkRetryMs = 150;
+    let chunkRetryTimer = 0;
+    let stopChunkWait: (() => void) | null = null;
     const me = boot.wallet.publicKey.toBase58();
     // Assets resolve before first paint of the world; missing models fall
     // back to footprint-correct primitives inside the scene.
@@ -260,6 +293,7 @@ export function GameScreen({
       scene.resize();
       // Everything that arrived before the scene existed heals here.
       loadedChunks = 0;
+      void pumpChunks();
       reconcileNowRef.current();
     });
     const onResize = () => sceneRef.current?.resize();
@@ -277,6 +311,7 @@ export function GameScreen({
      * remote push would otherwise want it. Refreshed with the roster.
      */
     const identities = new Map<string, { name: string; agent: number }>();
+    const runStateSequences = new Map<string, bigint>();
     const drawRemotes = () =>
       scene?.setRemotes(
         [...remotes.entries()].map(([w, r]) => ({
@@ -299,7 +334,19 @@ export function GameScreen({
 
     const applyRun = (run: any, force = false) => {
       const wallet = run.wallet.toBase58();
+      const stateSequence = BigInt(run.stateSeq?.toString() ?? run.actionSeq.toString());
+      const previousStateSequence = runStateSequences.get(wallet);
+      if (!force && previousStateSequence != null && stateSequence < previousStateSequence) {
+        return;
+      }
+      runStateSequences.set(wallet, stateSequence);
       const state = Object.keys(run.state)[0] ?? "?";
+      // A subscription does not replay existing world-header state. During a
+      // cold reload the run read can succeed while the independent header
+      // read is temporarily unavailable, which previously rendered exactly
+      // one thing: this player. A valid run proves every chunk through its
+      // current row is revealed, so it safely seeds the minimum map range.
+      loadChunks(run.y + 1);
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
         // A new attempt restarts the sequence at zero. Carrying the old
@@ -411,36 +458,84 @@ export function GameScreen({
       syncPresence();
     };
 
-    // Chunk/lane loading (repeats when the frontier grows).
-    const loadChunks = async (revealedRows: number) => {
-      if (!scene) return; // heals via reconcile once the scene exists
-      const worldAcc = { revealedRows };
-      const chunks = Math.ceil(worldAcc.revealedRows / 16);
-      for (let c = loadedChunks; c < chunks; c++) {
-        const chunk = await boot.client.getChunk(route.day, c).catch(() => null);
-        if (!chunk || !live || !scene) continue;
-        chunk.lanes.forEach((lane: any, i: number) => {
-          scene!.setLane(
-            chunk.rowStart + i,
-            {
-              kind: lane.kind,
-              dirPositive: lane.dirPositive,
-              footprint: lane.footprint,
-              gapTiles: lane.gapTiles,
-              speedMtps: lane.speedMtps,
-              phaseMt: lane.phaseMt,
-              warningMs: lane.warningMs,
-              periodMs: lane.periodMs,
-              blockerMask: BigInt(lane.blockerMask.toString()),
-              sinking: lane.sinking,
-            },
-            // The chunk's committed randomness names every car on the row, so
-            // all clients draw the same traffic.
-            Uint8Array.from(chunk.randomnessHash as number[]),
-          );
+    const clearChunkWait = () => {
+      stopChunkWait?.();
+      stopChunkWait = null;
+      window.clearTimeout(chunkRetryTimer);
+      chunkRetryTimer = 0;
+    };
+
+    // Retry is only a reconnect/propagation safety net. The normal path is
+    // the ER world-header push followed immediately by a confirmed base read;
+    // if that RPC is lagging, its base websocket wakes this exact chunk.
+    const waitForChunk = (index: number) => {
+      clearChunkWait();
+      stopChunkWait = boot.client.subscribeChunk(route.day, index, () => {
+        clearChunkWait();
+        void pumpChunks();
+      });
+      chunkRetryTimer = window.setTimeout(() => {
+        clearChunkWait();
+        void pumpChunks();
+      }, chunkRetryMs);
+      chunkRetryMs = Math.min(2_000, chunkRetryMs * 2);
+    };
+
+    // Drain the map in strict chunk order. A temporary hole must never move
+    // `loadedChunks` forward, otherwise those sixteen rows stay wrong until
+    // the player reloads the entire game.
+    const pumpChunks = async () => {
+      if (!live || !scene || chunkLoadRunning || loadedChunks >= wantedChunks) return;
+      chunkLoadRunning = true;
+      const throughIndex = wantedChunks;
+      try {
+        const snapshotStart = loadedChunks;
+        const snapshot = await boot.client
+          .getChunks(route.day, snapshotStart, throughIndex - snapshotStart)
+          .catch(() => [] as Array<any | null>);
+        loadedChunks = await loadContiguousChunks({
+          fromIndex: loadedChunks,
+          throughIndex,
+          fetchChunk: async (index) => snapshot[index - snapshotStart] ?? null,
+          applyChunk: (chunk: any) => {
+            if (!live || !scene) return;
+            chunk.lanes.forEach((lane: any, i: number) => {
+              scene!.setLane(
+                chunk.rowStart + i,
+                {
+                  kind: lane.kind,
+                  dirPositive: lane.dirPositive,
+                  footprint: lane.footprint,
+                  gapTiles: lane.gapTiles,
+                  speedMtps: lane.speedMtps,
+                  phaseMt: lane.phaseMt,
+                  warningMs: lane.warningMs,
+                  periodMs: lane.periodMs,
+                  blockerMask: BigInt(lane.blockerMask.toString()),
+                  sinking: lane.sinking,
+                },
+                // Every client resolves the same model from committed bytes.
+                Uint8Array.from(chunk.randomnessHash as number[]),
+              );
+            });
+          },
         });
-        loadedChunks = c + 1;
+      } finally {
+        chunkLoadRunning = false;
       }
+      if (!live) return;
+      if (loadedChunks < throughIndex) waitForChunk(loadedChunks);
+      else if (loadedChunks < wantedChunks) void pumpChunks();
+      else {
+        clearChunkWait();
+        chunkRetryMs = 150;
+      }
+    };
+
+    // Chunk/lane loading repeats immediately whenever the frontier grows.
+    const loadChunks = (revealedRows: number) => {
+      wantedChunks = Math.max(wantedChunks, Math.ceil(revealedRows / 16));
+      void pumpChunks();
     };
 
     // The realtime feed: every run/sector of this world + the world header.
@@ -451,7 +546,7 @@ export function GameScreen({
         if (!live) return;
         hudRecordRef.current = w.recordScore;
         setHud((h) => (h.record === w.recordScore ? h : { ...h, record: w.recordScore }));
-        void loadChunks(w.revealedRows);
+        loadChunks(w.revealedRows);
       },
     });
 
@@ -506,9 +601,7 @@ export function GameScreen({
         setHud((h) =>
           h.record === worldAcc.recordScore ? h : { ...h, record: worldAcc.recordScore },
         );
-        await loadChunks(worldAcc.revealedRows).catch((e) =>
-          console.error("chunk load failed:", e),
-        );
+        loadChunks(worldAcc.revealedRows);
       }
     };
     void reconcile();
@@ -602,7 +695,10 @@ export function GameScreen({
     let lastSlot = 0;
     let lastSlotAt = 0;
     let msPerSlot = 53; // measured on devnet; converges to the truth
-    const stopSlots = boot.client.subscribeSlot((slot) => {
+    const acceptSlot = (slot: number) => {
+      // The initial HTTP seed races the websocket. Never let an older seed
+      // or delayed notification rewind every moving obstacle on the map.
+      if (slot <= lastSlot) return;
       const at = performance.now();
       if (lastSlot && slot > lastSlot) {
         const observed = (at - lastSlotAt) / (slot - lastSlot);
@@ -628,11 +724,12 @@ export function GameScreen({
         Math.abs(error) > 300 ? target : scene.worldTimeMs() + nudge,
         rate,
       );
-    });
+    };
+    const stopSlots = boot.client.subscribeSlot(acceptSlot);
     // The subscription only speaks on the NEXT slot, so seed it once.
     void boot.client.erConnection
       .getSlot("processed")
-      .then((slot) => sceneRef.current?.setWorldClock(slotTimeMs(slot)))
+      .then(acceptSlot)
       .catch(() => {});
 
     // Hot-path prewarm: persistent HTTP connection + background blockhash.
@@ -660,6 +757,7 @@ export function GameScreen({
       clearInterval(sweep);
       clearInterval(pingTimer);
       clearInterval(hazardTimer);
+      clearChunkWait();
       window.clearTimeout(deathTimerRef.current);
       stopPrewarm?.();
       stopSlots();
@@ -670,7 +768,7 @@ export function GameScreen({
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.day, route.mode]);
+  }, [erReady, route.day, route.mode]);
 
   /**
    * The outbound action queue.

@@ -96,7 +96,7 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
   const lockPda = (w: web3.PublicKey) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(1));
   const sectorPda = (sx: number, sy: number) =>
-    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le16(sy));
+    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le32(sy));
   const spawnSectorMetas = () => {
     const out = [];
     for (let sy = 0; sy < 2; sy++)
@@ -164,6 +164,7 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
         collection: web3.Keypair.generate().publicKey,
         collectionAuthority: admin.publicKey,
         vrfAuthority: vrfAuthority.publicKey,
+        validator: admin.publicKey,
         admin: admin.publicKey,
       } as any)
       .rpc();
@@ -171,7 +172,7 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
     const slot = await conn.getSlot("confirmed");
     day = Math.floor((await conn.getBlockTime(slot))! / 86400);
     world = pda(S.world, Buffer.from([1]), le64(day));
-    spawnChunk = pda(S.chunk, le64(day), le16(0));
+    spawnChunk = pda(S.chunk, le64(day), le32(0));
     await program.methods
       .prepareDay(new BN(day))
       .accountsPartial({

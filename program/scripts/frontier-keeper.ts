@@ -6,7 +6,8 @@
  * create the accounts a new band of rows needs. This crank bridges the two
  * planes, in the only order that is safe:
  *
- *   1. base: `publish_chunk`   — authenticated layout for chunk N
+ *   1. ER→base: checkpoint the live record/frontier
+ *   2. base: `request_chunk`   — request authenticated VRF for chunk N
  *   2. base: `init_sector` x16 — occupancy for the 16 rows it covers
  *   3. base: `delegate_sector` — hand those sectors to the ER
  *   4. ER:   `extend_frontier` — publish the new frontier to live players
@@ -19,15 +20,11 @@
  *
  * Sectors exist and are delegated *before* the frontier moves, so a player
  * can never reach a row whose accounts are missing. Run it alongside the
- * game; it keeps `LOOKAHEAD_CHUNKS` of revealed map ahead of the leader.
- *
- * Until MagicBlock VRF transport is wired, randomness is drawn locally by the
- * configured `vrf_authority`. The on-chain binding (day, chunk index,
- * continuity, layout validation, no-reroll) is enforced regardless.
+ * game. A new chunk is requested exactly when `leader + 8 >= revealed_rows`;
+ * authenticated MagicBlock VRF then fixes its immutable layout.
  */
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3, BN } from "@coral-xyz/anchor";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDayReady } from "./open-day";
@@ -39,14 +36,10 @@ const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
 const VALIDATOR = new web3.PublicKey(
   process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
 );
-/**
- * Keep this many chunks of revealed rows beyond the frontier leader.
- * Players cross a 16-row chunk in seconds, and a player who catches up to
- * the frontier is stopped dead by it, so the buffer is deliberately deep.
- */
-const LOOKAHEAD_CHUNKS = Number(process.env.LOOKAHEAD_CHUNKS ?? 5);
-/** Most chunks to publish in a single pass, so catching up cannot run away. */
-const MAX_CHUNKS_PER_TICK = Number(process.env.MAX_CHUNKS_PER_TICK ?? 6);
+const VRF_BASE_QUEUE = new web3.PublicKey(
+  process.env.VRF_BASE_QUEUE ?? "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
+);
+const CHUNK_REQUEST_MARGIN = 8;
 const POLL_MS = Number(process.env.POLL_MS ?? 3_000);
 const CHUNK_ROWS = 16;
 const SECTOR_EDGE = 8;
@@ -70,9 +63,9 @@ const le8 = (v: bigint | number) => {
   b.writeBigUInt64LE(BigInt(v));
   return b;
 };
-const le2 = (v: number) => {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
+const le4 = (v: number) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
   return b;
 };
 const pda = (...seeds: Buffer[]) =>
@@ -81,9 +74,9 @@ const pda = (...seeds: Buffer[]) =>
 const configPda = () => pda(S.config);
 const worldPda = (mode: number, day: bigint) =>
   pda(S.world, Buffer.from([mode]), le8(day));
-const chunkPda = (day: bigint, index: number) => pda(S.chunk, le8(day), le2(index));
+const chunkPda = (day: bigint, index: number) => pda(S.chunk, le8(day), le4(index));
 const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
-  pda(S.sector, world.toBuffer(), Buffer.from([sx]), le2(sy));
+  pda(S.sector, world.toBuffer(), Buffer.from([sx]), le4(sy));
 
 const log = (...a: unknown[]) =>
   console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -154,16 +147,16 @@ async function main() {
 
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
   log("keeper", keeper.publicKey.toBase58());
-  log("vrf_authority", cfg.vrfAuthority.toBase58());
-  if (!cfg.vrfAuthority.equals(keeper.publicKey)) {
+  log("vrf_queue", VRF_BASE_QUEUE.toBase58());
+  if (!cfg.validator.equals(VALIDATOR)) {
     throw new Error(
-      `config.vrf_authority is ${cfg.vrfAuthority.toBase58()} but the keeper is ` +
-        `${keeper.publicKey.toBase58()}; rotate it with set_vrf_authority first`,
+      `config.validator is ${cfg.validator.toBase58()} but keeper targets ` +
+        VALIDATOR.toBase58(),
     );
   }
 
   // Modes are keyed by the world PDA discriminant: 0 = paid, 1 = casual.
-  const modes = (process.env.MODES ?? "1").split(",").map(Number);
+  const modes = (process.env.MODES ?? "0,1").split(",").map(Number);
 
   /**
    * State the hoisted helpers below close over. It has to be initialised
@@ -291,26 +284,31 @@ async function main() {
     }
 
     const leader = await frontierLeader(world, live.recordScore);
-    const target = (Math.floor(leader / CHUNK_ROWS) + LOOKAHEAD_CHUNKS) * CHUNK_ROWS;
-    if (live.revealedRows >= target) return;
-
-    // Catch the whole gap up in one pass. Publishing a single chunk per poll
-    // loses ground against a fast player, and against a cold start it would
-    // take a minute to build the buffer at all.
-    let revealed: number = live.revealedRows;
-    let index: number = live.nextChunkIndex;
-    log(
-      `mode ${mode} day ${day}: leader row ${leader}, revealed ${revealed} ` +
-        `-> building out to ${target}`,
-    );
-    for (let n = 0; n < MAX_CHUNKS_PER_TICK && revealed < target; n++) {
-      await publishChunk(day, world, index);
-      await ensureSectors(world, index);
-      await extendFrontier(world, index);
-      revealed = (index + 1) * CHUNK_ROWS;
-      index += 1;
-      log(`mode ${mode}: frontier now ${revealed} rows`);
+    if (leader.score > live.recordScore && leader.best) {
+      await erProgram.methods
+        .claimRecord()
+        .accountsPartial({ world, best: leader.best })
+        .rpc({ skipPreflight: true, commitment: "processed" });
+      live = await erProgram.account.worldHeader.fetch(world);
     }
+    if (leader.score + CHUNK_REQUEST_MARGIN < live.revealedRows) return;
+
+    const revealed: number = live.revealedRows;
+    const index: number = live.nextChunkIndex;
+    log(
+      `mode ${mode} day ${day}: leader row ${leader.score}, revealed ${revealed} ` +
+        `-> requesting chunk ${index}`,
+    );
+    await checkpointWorld(world, Number(live.recordScore), Number(live.mapSeq));
+    await publishChunk(day, world, index);
+    await ensureSectors(worldPda(0, day), index);
+    await ensureSectors(worldPda(1, day), index);
+    await ensureChunkDelegated(day, index);
+    await markChunkReady(world, day, index);
+    await extendFrontier(world, index);
+    const after: any = await erProgram.account.worldHeader.fetch(world);
+    await checkpointWorld(world, Number(after.recordScore), Number(after.mapSeq));
+    log(`mode ${mode}: frontier now ${after.revealedRows} rows`);
   }
 
   /**
@@ -330,10 +328,11 @@ async function main() {
     try {
       const out = await ensureDayReady({
         baseProgram,
+        erProgram,
         admin: keeper,
         validator: VALIDATOR,
         day,
-        modes: [mode],
+        modes: [0, 1],
         log: (...a: any[]) => log(" ", ...a),
       });
       log(
@@ -387,18 +386,43 @@ async function main() {
   /** Furthest row any live run has reached, floored by the claimed record. */
   async function frontierLeader(world: web3.PublicKey, recordScore: number) {
     try {
-      const runs = await erProgram.account.playerRun.all([
+      const bests = await erProgram.account.dailyBest.all([
         { memcmp: { offset: 8, bytes: world.toBase58() } },
       ]);
       let best = recordScore;
-      for (const { account } of runs as any[]) {
-        if (Object.keys(account.state)[0] !== "active") continue;
-        best = Math.max(best, account.y, account.score);
+      let bestAccount: web3.PublicKey | null = null;
+      for (const { publicKey, account } of bests as any[]) {
+        if (account.bestScore > best) {
+          best = account.bestScore;
+          bestAccount = publicKey;
+        }
       }
-      return best;
+      return { score: best, best: bestAccount };
     } catch {
-      return recordScore;
+      return { score: recordScore, best: null };
     }
+  }
+
+  /** Commit the ER world and wait until the exact checkpoint is visible on base. */
+  async function checkpointWorld(world: web3.PublicKey, recordScore: number, mapSeq: number) {
+    await withRetry("commit world checkpoint", () =>
+      erProgram.methods
+        .commitState()
+        .accountsPartial({ payer: keeper.publicKey })
+        .remainingAccounts([{ pubkey: world, isSigner: false, isWritable: true }])
+        .rpc({ commitment: "processed" }),
+    );
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const committed: any = await baseProgram.account.worldHeader.fetchNullable(world);
+      if (
+        committed &&
+        Number(committed.recordScore) >= recordScore &&
+        Number(committed.mapSeq) >= mapSeq
+      )
+        return;
+      await sleep(500);
+    }
+    throw new Error(`world checkpoint did not reach base (record=${recordScore}, map=${mapSeq})`);
   }
 
   async function publishChunk(day: bigint, world: web3.PublicKey, index: number) {
@@ -410,20 +434,35 @@ async function main() {
       log(`  chunk ${index} already revealed`);
       return;
     }
-    const randomness = Array.from(randomBytes(32));
-    const sig = await withRetry(`publish chunk ${index}`, () =>
-      baseProgram.methods
-        .publishChunk(new BN(day.toString()), index, randomness)
-        .accountsPartial({
-          config: configPda(),
-          world,
-          prevChunk: chunkPda(day, index - 1),
-          chunk: addr,
-          vrfAuthority: keeper.publicKey,
-        })
-        .rpc(),
-    );
-    log(`  published chunk ${index} (${sig.slice(0, 8)})`);
+    const requestedAt = existing ? Number(existing.requestedAt?.toString?.() ?? 0) : 0;
+    const retryDue = !existing || Math.floor(Date.now() / 1000) >= requestedAt + 90;
+    if (retryDue) {
+      const sig = await withRetry(`request chunk ${index}`, () =>
+        baseProgram.methods
+          .requestChunk(new BN(day.toString()), index)
+          .accountsPartial({
+            config: configPda(),
+            world,
+            prevChunk: chunkPda(day, index - 1),
+            chunk: addr,
+            payer: keeper.publicKey,
+            oracleQueue: VRF_BASE_QUEUE,
+          })
+          .rpc(),
+      );
+      log(`  requested VRF chunk ${index} (${sig.slice(0, 8)})`);
+    }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const current: any = await baseProgram.account.chunkDefinition
+        .fetchNullable(addr)
+        .catch(() => null);
+      if (current && "revealed" in (current.status as object)) {
+        log(`  VRF revealed chunk ${index}`);
+        return;
+      }
+      await sleep(1_000);
+    }
+    throw new Error(`VRF callback for chunk ${index} was not observed within 30s`);
   }
 
   /** Create + delegate every sector covering the chunk's rows. */
@@ -481,10 +520,11 @@ async function main() {
           tx.add(
             await baseProgram.methods
               .delegateSector(world, sx, sy)
-              .accountsPartial({ payer: keeper.publicKey, pda: sectorPda(world, sx, sy) })
-              .remainingAccounts([
-                { pubkey: VALIDATOR, isSigner: false, isWritable: false },
-              ])
+              .accountsPartial({
+                config: configPda(),
+                payer: keeper.publicKey,
+                pda: sectorPda(world, sx, sy),
+              })
               .instruction(),
           );
         }
@@ -495,6 +535,50 @@ async function main() {
       if (toDelegate.length)
         log(`  delegated sectors y=${sy} x=[${toDelegate.join(",")}]`);
     }
+  }
+
+  async function ensureChunkDelegated(day: bigint, index: number) {
+    const chunk = chunkPda(day, index);
+    const info = await withRetry(`read chunk owner ${index}`, () =>
+      baseConn.getAccountInfo(chunk),
+    );
+    if (!info) throw new Error(`chunk ${index} disappeared before delegation`);
+    if (info.owner.equals(PROGRAM_ID)) {
+      await withRetry(`delegate chunk ${index}`, () =>
+        baseProgram.methods
+          .delegateChunk(new BN(day.toString()), index)
+          .accountsPartial({ config: configPda(), payer: keeper.publicKey, pda: chunk })
+          .rpc(),
+      );
+      log(`  delegated chunk ${index}`);
+    }
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const erInfo = await erConn.getAccountInfo(chunk, "processed").catch(() => null);
+      if (erInfo) return;
+      await sleep(500);
+    }
+    throw new Error(`chunk ${index} was not available on the ER after delegation`);
+  }
+
+  async function markChunkReady(world: web3.PublicKey, day: bigint, index: number) {
+    const firstSectorY = (index * CHUNK_ROWS) / SECTOR_EDGE;
+    const sectors = Array.from({ length: CHUNK_ROWS / SECTOR_EDGE }, (_, band) =>
+      Array.from({ length: 8 }, (_, sx) => ({
+        pubkey: sectorPda(world, sx, firstSectorY + band),
+        isSigner: false,
+        isWritable: false,
+      })),
+    ).flat();
+    const signature = await erProgram.methods
+      .markChunkReady(index)
+      .accountsPartial({
+        world,
+        chunk: chunkPda(day, index),
+        signer: keeper.publicKey,
+      })
+      .remainingAccounts(sectors)
+      .rpc({ skipPreflight: true, commitment: "processed" });
+    log(`  chunk ${index} ready (${signature.slice(0, 8)})`);
   }
 
   async function extendFrontier(world: web3.PublicKey, index: number) {

@@ -19,9 +19,9 @@ const le8 = (v: bigint | number) => {
   b.writeBigUInt64LE(BigInt(v));
   return b;
 };
-const le2 = (v: number) => {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
+const le4 = (v: number) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
   return b;
 };
 const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM_ID)[0];
@@ -54,7 +54,7 @@ async function main() {
 
   for (let c = 0; c < live.nextChunkIndex; c++) {
     const chunk = await base.account.chunkDefinition.fetchNullable(
-      pda(Buffer.from("chunk"), le8(day), le2(c)),
+      pda(Buffer.from("chunk"), le8(day), le4(c)),
     );
     if (!chunk) {
       console.log(`  chunk ${c}: MISSING`);
@@ -79,7 +79,7 @@ async function main() {
   const bands = live.revealedRows / 8;
   for (let sy = 0; sy < bands; sy++) {
     const addrs = Array.from({ length: 8 }, (_, sx) =>
-      pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le2(sy)),
+      pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy)),
     );
     const infos = await base.provider.connection.getMultipleAccountsInfo(addrs);
     const marks = infos.map((i) => (!i ? "-" : i.owner.equals(PROGRAM_ID) ? "P" : "D"));

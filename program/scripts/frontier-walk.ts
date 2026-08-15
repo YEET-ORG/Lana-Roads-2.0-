@@ -88,8 +88,8 @@ async function main() {
   const bestPda = () =>
     pda(Buffer.from("best"), world.toBuffer(), player.publicKey.toBuffer());
   const sectorPda = (sx: number, sy: number) =>
-    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le2(sy));
-  const chunkPda = (i: number) => pda(Buffer.from("chunk"), le8(day), le2(i));
+    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy));
+  const chunkPda = (i: number) => pda(Buffer.from("chunk"), le8(day), le4(i));
 
   console.log(`player ${player.publicKey.toBase58()}`);
   const fund = new web3.Transaction().add(

@@ -5,11 +5,11 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{seeds, CHUNK_ROWS, MS_PER_SLOT, WORLD_WIDTH};
+use crate::constants::{seeds, CHUNK_ROWS, ENTRY_PRICE, MS_PER_SLOT, WORLD_WIDTH};
 use crate::errors::CrossyError;
 use crate::events::*;
 use crate::kernel::grid::{self, Direction};
-use crate::kernel::hazard;
+use crate::kernel::{economy, hazard};
 use crate::state::*;
 
 // ---------------------------------------------------------------------------
@@ -57,6 +57,7 @@ pub fn validate_action(
     now: i64,
 ) -> Result<()> {
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
+    require!(world.spawn_ready, CrossyError::FrontierClosed);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
     // Session OR wallet may sign (wallet always retains authority).
     if *signer != run.wallet {
@@ -77,7 +78,7 @@ pub fn validate_action(
 }
 
 /// Effects on the tile the run currently occupies (stun/slow zones).
-pub fn tile_effects(sector: &OccupancySector, x: u8, y: u16, now: i64) -> (bool, bool) {
+pub fn tile_effects(sector: &OccupancySector, x: u8, y: u32, now: i64) -> (bool, bool) {
     let mut stunned = false;
     let mut slowed = false;
     for e in sector.effects.iter() {
@@ -95,9 +96,13 @@ pub fn tile_effects(sector: &OccupancySector, x: u8, y: u16, now: i64) -> (bool,
 }
 
 /// Lane descriptor for absolute row `y` out of the chunk covering it.
-pub fn lane_for_row(chunk: &ChunkDefinition, y: u16) -> Result<&Lane> {
+pub fn lane_for_row(chunk: &ChunkDefinition, y: u32) -> Result<&Lane> {
+    let row_end = chunk
+        .row_start
+        .checked_add(CHUNK_ROWS as u32)
+        .ok_or(CrossyError::Overflow)?;
     require!(
-        y >= chunk.row_start && y < chunk.row_start + CHUNK_ROWS as u16,
+        y >= chunk.row_start && y < row_end,
         CrossyError::BadChunkState
     );
     require!(
@@ -108,13 +113,20 @@ pub fn lane_for_row(chunk: &ChunkDefinition, y: u16) -> Result<&Lane> {
 }
 
 /// Verify a sector account matches the derived coordinates for a tile.
-pub fn assert_sector(sector: &OccupancySector, world: &Pubkey, x: u8, y: u16) -> Result<()> {
+pub fn assert_sector(sector: &OccupancySector, world: &Pubkey, x: u8, y: u32) -> Result<()> {
     let (sx, sy) = grid::sector_of(x, y);
     require!(
         sector.world == *world && sector.sector_x == sx && sector.sector_y == sy,
         CrossyError::WrongSector
     );
     Ok(())
+}
+
+fn accept_turn_in_place(run: &mut PlayerRun, direction: u8, slot: u64) -> Result<()> {
+    run.facing = direction;
+    run.last_move_slot = slot;
+    run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+    run.touch()
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +205,7 @@ pub fn init_run(
     run.session_expiry = session_expiry;
     run.session_scope = session_scope::ALL_GAMEPLAY;
     run.state = RunState::Idle;
+    run.state_seq = 0;
     run.bump = ctx.bumps.run;
 
     let best = &mut ctx.accounts.best;
@@ -237,6 +250,7 @@ pub fn rotate_session(
         .session_rotation
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
+    run.touch()?;
     Ok(())
 }
 
@@ -259,6 +273,7 @@ pub fn end_session(ctx: Context<RotateSession>) -> Result<()> {
         .session_rotation
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
+    run.touch()?;
     Ok(())
 }
 
@@ -310,6 +325,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
     }
 
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
+    require!(world.spawn_ready, CrossyError::FrontierClosed);
     require!(now >= world.start_ts, CrossyError::DayNotStarted);
     require!(run.is_terminal(), CrossyError::AttemptStillActive);
     let next_attempt = run
@@ -337,6 +353,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
     );
     let (class_id, agent_asset) = {
         let info = ctx.accounts.agent_lock.to_account_info();
+        require_keys_eq!(*info.owner, crate::ID, CrossyError::BadClassMapping);
         let data = info.try_borrow_data()?;
         require!(data.len() > 8, CrossyError::BadClassMapping);
         use anchor_lang::Discriminator;
@@ -347,6 +364,11 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
         let lock = AgentLock::try_deserialize(&mut &data[..])
             .map_err(|_| error!(CrossyError::BadClassMapping))?;
         require!(lock.owner == run.wallet, CrossyError::WrongAssetOwner);
+        require!(lock.world == world_key, CrossyError::BadClassMapping);
+        require!(
+            lock.attempt_nonce == attempt_nonce,
+            CrossyError::BadAttemptNonce
+        );
         require!(!lock.unlocked, CrossyError::AgentLocked);
         (lock.class_id, lock.asset)
     };
@@ -355,6 +377,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
     // receipt PDA for this run/attempt, in Pending state, exact entry amount.
     if world.mode == WorldMode::Paid {
         let receipt_info = ctx.accounts.receipt.to_account_info();
+        require_keys_eq!(*receipt_info.owner, crate::ID, CrossyError::ReceiptMismatch);
         let data = receipt_info.try_borrow_data()?;
         require!(data.len() > 8, CrossyError::ReceiptMismatch);
         use anchor_lang::Discriminator;
@@ -370,8 +393,26 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
         );
         require!(receipt.day == world.day, CrossyError::ReceiptMismatch);
         require!(receipt.wallet == run.wallet, CrossyError::ReceiptMismatch);
+        require!(receipt.run == run.key(), CrossyError::ReceiptMismatch);
+        require!(receipt.amount == ENTRY_PRICE, CrossyError::WrongAmount);
         require!(
             receipt.attempt_nonce == attempt_nonce,
+            CrossyError::ReceiptMismatch
+        );
+        let receipt_nonce = receipt.receipt_nonce.to_le_bytes();
+        let (expected_receipt, _) = Pubkey::find_program_address(
+            &[
+                seeds::PAYMENT,
+                &[ReceiptKind::Entry as u8],
+                &world.day.to_le_bytes(),
+                run.wallet.as_ref(),
+                &receipt_nonce,
+            ],
+            &crate::ID,
+        );
+        require_keys_eq!(
+            ctx.accounts.receipt.key(),
+            expected_receipt,
             CrossyError::ReceiptMismatch
         );
         require!(
@@ -389,6 +430,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
         run.attempt_nonce = attempt_nonce;
         run.state = RunState::EntryFailed;
         run.last_committed_state = RunState::EntryFailed as u8;
+        run.touch()?;
         emit!(AttemptEnded {
             world: world_key,
             wallet: run.wallet,
@@ -409,7 +451,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
     require!(sectors.len() == expected_sectors, CrossyError::WrongSector);
 
     // Find the first free tile scanning from `start`, wrapping.
-    let mut chosen: Option<(u8, u16, usize, u8)> = None;
+    let mut chosen: Option<(u8, u32, usize, u8)> = None;
     for i in 0..tile_count {
         let idx = (start + i) % tile_count;
         let (x, y) = grid::scan_index_to_tile(idx);
@@ -429,7 +471,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
         Some((x, y, sector_index, bit)) => {
             let info = &sectors[sector_index];
             let mut sector: Account<OccupancySector> = Account::try_from(info)?;
-            sector.set_occupied(bit);
+            sector.set_occupied(bit)?;
             sector.exit(&crate::ID)?;
 
             run.attempt_nonce = attempt_nonce;
@@ -458,7 +500,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
             run.death_nonce = 0;
             run.revive_deadline = 0;
             run.revive_receipt = Pubkey::default();
-            run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+            run.bump_hazard_nonce()?;
             run.hazard_deadline_ms = 0;
             run.last_committed_state = RunState::Active as u8;
 
@@ -490,6 +532,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
             });
         }
     }
+    run.touch()?;
     Ok(())
 }
 
@@ -533,8 +576,8 @@ pub struct MoveAction<'info> {
 
 /// One-tile cardinal movement. The program derives the destination, checks
 /// bounds/frontier/terrain/occupancy, and writes run + sectors atomically.
-/// The sequencer resolves contested tiles: first valid claim wins,
-/// later transactions fail `TileOccupied` without moving.
+/// A blocked destination consumes the action as a turn-in-place, allowing
+/// the next Kick to target that direction without moving through the blocker.
 pub fn move_action(
     ctx: Context<MoveAction>,
     attempt_nonce: u32,
@@ -570,7 +613,12 @@ pub fn move_action(
         1
     };
     require!(
-        run.last_move_slot == 0 || clock.slot >= run.last_move_slot + min_gap,
+        run.last_move_slot == 0
+            || clock.slot
+                >= run
+                    .last_move_slot
+                    .checked_add(min_gap)
+                    .ok_or(CrossyError::Overflow)?,
         CrossyError::TooFast
     );
 
@@ -601,7 +649,10 @@ pub fn move_action(
     // trains and open water are entered and are fatal. Only the fatal case
     // needs to be carried past the occupancy transfer below.
     let fatal = match hazard::evaluate_tile(&descriptor, nx, t_ms) {
-        hazard::TileState::Blocked => return Err(error!(CrossyError::Blocked)),
+        hazard::TileState::Blocked => {
+            accept_turn_in_place(run, direction, clock.slot)?;
+            return Ok(());
+        }
         hazard::TileState::Lethal => true,
         hazard::TileState::Safe | hazard::TileState::Supported => false,
     };
@@ -613,8 +664,10 @@ pub fn move_action(
             .dest_sector
             .as_deref()
             .unwrap_or(&ctx.accounts.source_sector);
-        require!(!dest_view.is_blocked(dest_bit), CrossyError::Blocked);
-        require!(!dest_view.is_occupied(dest_bit), CrossyError::TileOccupied);
+        if dest_view.is_blocked(dest_bit) || dest_view.is_occupied(dest_bit) {
+            accept_turn_in_place(run, direction, clock.slot)?;
+            return Ok(());
+        }
     }
 
     // Atomic occupancy transfer.
@@ -622,12 +675,12 @@ pub fn move_action(
     match ctx.accounts.dest_sector.as_deref_mut() {
         None => {
             let sector = &mut ctx.accounts.source_sector;
-            sector.clear_occupied(src_bit);
-            sector.set_occupied(dest_bit);
+            sector.clear_occupied(src_bit)?;
+            sector.set_occupied(dest_bit)?;
         }
         Some(dest) => {
-            ctx.accounts.source_sector.clear_occupied(src_bit);
-            dest.set_occupied(dest_bit);
+            ctx.accounts.source_sector.clear_occupied(src_bit)?;
+            dest.set_occupied(dest_bit)?;
         }
     }
 
@@ -642,9 +695,10 @@ pub fn move_action(
         // as it does for a hazard that arrives while standing still.
         if run.shield_charges > 0 && now < run.shield_until {
             run.shield_charges -= 1;
-            run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+            run.bump_hazard_nonce()?;
             run.hazard_deadline_ms =
                 hazard::next_hazard_deadline_ms(&descriptor, nx, t_ms).unwrap_or(0);
+            run.touch()?;
             return Ok(());
         }
         // Walking into traffic scores nothing: the row is not survived.
@@ -682,8 +736,9 @@ pub fn move_action(
     }
 
     // Hazard scheduling for the entered tile.
-    run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+    run.bump_hazard_nonce()?;
     run.hazard_deadline_ms = hazard::next_hazard_deadline_ms(&descriptor, nx, t_ms).unwrap_or(0);
+    run.touch()?;
 
     Ok(())
 }
@@ -701,40 +756,40 @@ pub struct ClaimRecord<'info> {
     )]
     pub world: Box<Account<'info, WorldHeader>>,
     #[account(
-        seeds = [seeds::RUN, world.key().as_ref(), run.wallet.as_ref()],
-        bump = run.bump,
+        seeds = [seeds::BEST, world.key().as_ref(), best.wallet.as_ref()],
+        bump = best.bump,
+        constraint = best.world == world.key() @ CrossyError::NotReconcilable
     )]
-    pub run: Box<Account<'info, PlayerRun>>,
+    pub best: Box<Account<'info, DailyBest>>,
 }
 
-/// Permissionless: propagate a run's score into the world record when it
-/// STRICTLY exceeds the incumbent. Equal scores never replace the record.
+/// Permissionless: propagate a wallet's permanent daily best into the world
+/// record when it STRICTLY exceeds the incumbent. Equal scores never replace
+/// the record. This remains claimable after death or a new attempt resets the
+/// high-frequency `PlayerRun` account.
 /// Writing `WorldHeader` on every movement would serialize 500 players on
 /// one account (explicitly prohibited); the client/crank calls this whenever
 /// its run's score beats the observed record.
 pub fn claim_record(ctx: Context<ClaimRecord>) -> Result<()> {
     let world = &mut ctx.accounts.world;
-    let run = &ctx.accounts.run;
+    let best = &ctx.accounts.best;
     require!(
-        matches!(
-            run.state,
-            RunState::Active | RunState::DeadAwaitingRevive | RunState::Ended
-        ),
-        CrossyError::BadRunState
-    );
-    require!(
-        run.score > world.record_score,
+        world.status == WorldStatus::Open,
         CrossyError::InvalidTransition
     );
-    world.record_score = run.score;
-    world.record_holder = run.wallet;
-    world.record_attempt = run.attempt_nonce;
+    require!(
+        best.best_score > world.record_score,
+        CrossyError::InvalidTransition
+    );
+    world.record_score = best.best_score;
+    world.record_holder = best.wallet;
+    world.record_attempt = best.attempt_nonce;
     world.record_slot = Clock::get()?.slot;
     emit!(RecordChanged {
         world: world.key(),
-        wallet: run.wallet,
-        attempt_nonce: run.attempt_nonce,
-        score: run.score,
+        wallet: best.wallet,
+        attempt_nonce: best.attempt_nonce,
+        score: best.best_score,
         slot: world.record_slot,
     });
     Ok(())
@@ -780,6 +835,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
     let signer = ctx.accounts.signer.key();
     if signer != run.wallet {
         require_keys_eq!(signer, run.session_authority, CrossyError::BadSession);
+        require!(now < run.session_expiry, CrossyError::SessionExpired);
     }
     require!(
         run.state == RunState::DeadAwaitingRevive,
@@ -790,6 +846,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
 
     // Authenticated durable payment evidence.
     let receipt_info = ctx.accounts.receipt.to_account_info();
+    require_keys_eq!(*receipt_info.owner, crate::ID, CrossyError::ReceiptMismatch);
     let data = receipt_info.try_borrow_data()?;
     require!(data.len() > 8, CrossyError::ReceiptMismatch);
     use anchor_lang::Discriminator;
@@ -805,6 +862,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
     );
     require!(receipt.day == world.day, CrossyError::ReceiptMismatch);
     require!(receipt.wallet == run.wallet, CrossyError::ReceiptMismatch);
+    require!(receipt.run == run.key(), CrossyError::ReceiptMismatch);
     require!(
         receipt.attempt_nonce == run.attempt_nonce,
         CrossyError::ReceiptMismatch
@@ -815,6 +873,25 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
     );
     require!(
         receipt.revive_index == run.successful_revives,
+        CrossyError::ReceiptMismatch
+    );
+    let expected_amount =
+        economy::revive_price(run.successful_revives).ok_or(CrossyError::Overflow)?;
+    require!(receipt.amount == expected_amount, CrossyError::WrongAmount);
+    let receipt_nonce = receipt.receipt_nonce.to_le_bytes();
+    let (expected_receipt, _) = Pubkey::find_program_address(
+        &[
+            seeds::PAYMENT,
+            &[ReceiptKind::Revival as u8],
+            &world.day.to_le_bytes(),
+            run.wallet.as_ref(),
+            &receipt_nonce,
+        ],
+        &crate::ID,
+    );
+    require_keys_eq!(
+        ctx.accounts.receipt.key(),
+        expected_receipt,
         CrossyError::ReceiptMismatch
     );
     require!(
@@ -861,7 +938,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
         }
     }
     let (bit, world_x) = placed.ok_or(CrossyError::TileOccupied)?;
-    sector.set_occupied(bit);
+    sector.set_occupied(bit)?;
 
     run.state = RunState::Active;
     run.x = world_x;
@@ -874,9 +951,10 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
     run.revive_deadline = 0;
     // Score, cooldown deadlines, agent selection, and attempt identity are
     // preserved (per the non-negotiable invariants). Cooldowns are NOT reset.
-    run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+    run.bump_hazard_nonce()?;
     run.hazard_deadline_ms = 0;
     run.last_committed_state = RunState::Active as u8;
+    run.touch()?;
 
     world.active_players = world
         .active_players
@@ -930,6 +1008,7 @@ pub fn expire_revival(ctx: Context<ExpireRevival>) -> Result<()> {
     );
     run.state = RunState::Ended;
     run.last_committed_state = RunState::Ended as u8;
+    run.touch()?;
     emit!(AttemptEnded {
         world: world.key(),
         wallet: run.wallet,
@@ -967,22 +1046,28 @@ pub struct EndAttempt<'info> {
 /// Voluntary end of an active attempt (paid "give up" or casual restart).
 /// Releases occupancy and decrements population.
 pub fn end_attempt(ctx: Context<EndAttempt>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
     let world_key = ctx.accounts.world.key();
     let world = &mut ctx.accounts.world;
     let run = &mut ctx.accounts.run;
     let signer = ctx.accounts.signer.key();
     if signer != run.wallet {
         require_keys_eq!(signer, run.session_authority, CrossyError::BadSession);
+        require!(now < run.session_expiry, CrossyError::SessionExpired);
     }
     require!(run.state == RunState::Active, CrossyError::BadRunState);
 
     assert_sector(&ctx.accounts.sector, &world_key, run.x, run.y)?;
     let bit = grid::sector_bit(run.x, run.y);
-    ctx.accounts.sector.clear_occupied(bit);
+    ctx.accounts.sector.clear_occupied(bit)?;
 
-    world.active_players = world.active_players.saturating_sub(1);
+    world.active_players = world
+        .active_players
+        .checked_sub(1)
+        .ok_or(CrossyError::LiabilityMismatch)?;
     run.state = RunState::Ended;
     run.last_committed_state = RunState::Ended as u8;
+    run.touch()?;
     emit!(AttemptEnded {
         world: world_key,
         wallet: run.wallet,
@@ -991,4 +1076,60 @@ pub fn end_attempt(ctx: Context<EndAttempt>) -> Result<()> {
         reason: 2, // voluntary
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocked_move_turns_without_moving_or_resetting_cooldowns() {
+        let mut run = PlayerRun {
+            world: Pubkey::default(),
+            wallet: Pubkey::default(),
+            session_authority: Pubkey::default(),
+            session_expiry: 0,
+            session_scope: 0,
+            session_rotation: 0,
+            attempt_nonce: 1,
+            state: RunState::Active,
+            agent_asset: Pubkey::default(),
+            class_id: 0,
+            class_version: 1,
+            x: 7,
+            y: 9,
+            facing: Direction::Forward as u8,
+            score: 9,
+            safe_x: 7,
+            safe_y: 8,
+            last_move_slot: 40,
+            action_seq: 12,
+            state_seq: 20,
+            kick_ready_ts: 500,
+            ability_ready_ts: 700,
+            stunned_until: 0,
+            slowed_until: 0,
+            shield_until: 0,
+            shield_charges: 0,
+            anchor_until: 0,
+            successful_revives: 0,
+            death_nonce: 0,
+            revive_deadline: 0,
+            entry_receipt: Pubkey::default(),
+            revive_receipt: Pubkey::default(),
+            hazard_nonce: 3,
+            hazard_deadline_ms: 1_000,
+            last_committed_state: RunState::Active as u8,
+            bump: 1,
+        };
+
+        accept_turn_in_place(&mut run, Direction::Right as u8, 41).unwrap();
+
+        assert_eq!((run.x, run.y, run.score), (7, 9, 9));
+        assert_eq!(run.facing, Direction::Right as u8);
+        assert_eq!(run.last_move_slot, 41);
+        assert_eq!((run.action_seq, run.state_seq), (13, 21));
+        assert_eq!((run.kick_ready_ts, run.ability_ready_ts), (500, 700));
+        assert_eq!((run.hazard_nonce, run.hazard_deadline_ms), (3, 1_000));
+    }
 }

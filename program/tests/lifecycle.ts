@@ -159,7 +159,8 @@ describe("solsocket-engine lifecycle", () => {
       await new Promise((r) => setTimeout(r, 100));
     await erConnection.removeAccountChangeListener(subId);
     assert.ok(notified, "processed-commitment WS notification should fire");
-    console.log(`WS notification after ${notified!.ms}ms, seq=${notified!.seq}`);
+    const observed = notified as unknown as { seq: number; ms: number };
+    console.log(`WS notification after ${observed.ms}ms, seq=${observed.seq}`);
 
     const info = await erConnection.getAccountInfo(roomPda);
     const room = program.coder.accounts.decode("room", info!.data);

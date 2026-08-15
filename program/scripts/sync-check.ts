@@ -42,9 +42,9 @@ const le8 = (v: bigint | number) => {
   b.writeBigUInt64LE(BigInt(v));
   return b;
 };
-const le2 = (v: number) => {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
+const le4 = (v: number) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
   return b;
 };
 const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM_ID)[0];
@@ -84,7 +84,7 @@ async function main() {
   const randomness: Uint8Array[] = [];
   for (let c = 0; c < chunks; c++) {
     const chunk: any = await base.account.chunkDefinition.fetch(
-      pda(Buffer.from("chunk"), le8(day), le2(c)),
+      pda(Buffer.from("chunk"), le8(day), le4(c)),
     );
     for (const l of chunk.lanes) {
       lanes.push(l);

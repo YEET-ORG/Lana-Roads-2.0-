@@ -32,8 +32,7 @@ pub struct BeginPaidAttempt<'info> {
         mut,
         seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
         bump = daily.bump,
-        constraint = matches!(daily.status, DayStatus::Prepared | DayStatus::Open)
-            @ CrossyError::DayNotOpen
+        constraint = daily.status == DayStatus::Open @ CrossyError::DayNotOpen
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     #[account(mut, address = daily.vault @ CrossyError::WrongVault)]
@@ -368,7 +367,7 @@ pub fn reconcile_receipt(ctx: Context<ReconcileReceipt>) -> Result<()> {
 
     // The committed run must have caught up to (or passed) the receipt's
     // attempt before any judgment is possible.
-    let (consumed, failed) = match receipt.kind {
+    let (consumed, mut failed) = match receipt.kind {
         ReceiptKind::Entry => {
             if committed.attempt_nonce == receipt.attempt_nonce
                 && committed.entry_receipt == receipt.key()
@@ -380,6 +379,13 @@ pub fn reconcile_receipt(ctx: Context<ReconcileReceipt>) -> Result<()> {
                     RunState::EntryFailed => (false, true),
                     _ => (false, false),
                 }
+            } else if committed.attempt_nonce == receipt.attempt_nonce
+                && committed.entry_receipt != Pubkey::default()
+            {
+                // Another receipt won the spawn race for this exact attempt.
+                // This payment can never be consumed and must not strand the
+                // day's pending liability.
+                (false, true)
             } else if committed.attempt_nonce > receipt.attempt_nonce {
                 // The run moved on without ever activating this receipt.
                 (false, true)
@@ -393,6 +399,9 @@ pub fn reconcile_receipt(ctx: Context<ReconcileReceipt>) -> Result<()> {
                     && committed.successful_revives > receipt.revive_index
                 {
                     (true, false)
+                } else if committed.successful_revives > receipt.revive_index {
+                    // A different receipt revived this same death.
+                    (false, true)
                 } else if committed.death_nonce > receipt.death_nonce
                     || committed.state == RunState::Ended
                     || committed.state == RunState::Idle
@@ -410,6 +419,13 @@ pub fn reconcile_receipt(ctx: Context<ReconcileReceipt>) -> Result<()> {
             }
         }
     };
+    // Once the final world has been committed, or the day has been voided,
+    // gameplay can no longer consume an unresolved receipt. This terminal
+    // fallback prevents abandoned pre-spawn payments from stranding the day's
+    // pending liability forever.
+    if !consumed && !failed && matches!(daily.status, DayStatus::Committed | DayStatus::Voided) {
+        failed = true;
+    }
     require!(consumed || failed, CrossyError::NotReconcilable);
 
     daily.pending_total = daily

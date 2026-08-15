@@ -32,7 +32,10 @@ pub mod solsocket_engine {
         max_players: u16,
         initial_state: Vec<u8>,
     ) -> Result<()> {
-        require!(initial_state.len() <= MAX_ROOM_STATE, SolsocketError::StateTooLarge);
+        require!(
+            initial_state.len() <= MAX_ROOM_STATE,
+            SolsocketError::StateTooLarge
+        );
         let room = &mut ctx.accounts.room;
         room.creator = ctx.accounts.creator.key();
         room.room_id = room_id;
@@ -74,7 +77,10 @@ pub mod solsocket_engine {
     /// Write the caller's own presence blob (cursor position, status, …).
     /// Per-player slots mean concurrent players never contend on one account.
     pub fn set_presence(ctx: Context<SetPresence>, data: Vec<u8>) -> Result<()> {
-        require!(data.len() <= MAX_PRESENCE_DATA, SolsocketError::StateTooLarge);
+        require!(
+            data.len() <= MAX_PRESENCE_DATA,
+            SolsocketError::StateTooLarge
+        );
         let presence = &mut ctx.accounts.presence;
         presence.seq += 1;
         presence.data = data;

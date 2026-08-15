@@ -26,6 +26,9 @@ export const SAFE_ZONE_ROWS = 16;
 export const SECTOR_EDGE = 8;
 export const SECTORS_PER_ROW = 8;
 export const CHUNK_REQUEST_MARGIN = 8;
+export const DEFAULT_VRF_BASE_QUEUE = new PublicKey(
+  "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
+);
 
 export const KICK_COOLDOWN_SECONDS = 5;
 export const GACHA_TIMEOUT_SECONDS = 300;
@@ -38,6 +41,7 @@ export const SEEDS = {
   season: Buffer.from("season"),
   banner: Buffer.from("banner"),
   variant: Buffer.from("variant"),
+  rarityPool: Buffer.from("rarity_pool"),
   class: Buffer.from("class"),
   player: Buffer.from("player"),
   identity: Buffer.from("identity"),

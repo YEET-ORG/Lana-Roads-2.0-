@@ -6,6 +6,8 @@ Frontend work starts with the consolidated [`docs/FRONTEND.md`](docs/FRONTEND.md
 
 Art and asset work starts with [`docs/ASSETS.md`](docs/ASSETS.md), which records every supplied source pack, licensing status, curation rule, and runtime conversion requirement.
 
+Contract deployment starts with [`docs/DEPLOYMENT_READINESS.md`](docs/DEPLOYMENT_READINESS.md). It records the current verification evidence, program-ID mismatch, artifact checksum, required devnet VRF/ER smoke tests, and remaining mainnet gates.
+
 It is bootstrapped from the open-source solsocket starter so its MagicBlock connection, session, delegation, and subscription patterns can be selectively adapted. The generic solsocket engine is reference code, not the authoritative Crossy World game contract. Read [`AGENTS.md`](AGENTS.md) before making changes.
 
 `VoxelAnimals/` contains the privately purchased Unity Asset Store source pack approved for conversion into optimized Three.js game assets. Other supplied source packs are under `SourceAssets/`. Binary art payloads use Git LFS. Keep this repository private and do not redistribute raw packs.
@@ -28,18 +30,20 @@ DRY_RUN=1 npx tsx scripts/settle-day.ts  # what settling yesterday would do
 npx tsx scripts/settle-day.ts            # actually settle it
 ```
 
-Settlement is the other half of the day: `close_world` on both planes,
-`close_day`, reconciling every pending payment, `record_final_commit`,
-`finalize_day` (90% winner / 10% team, or the whole pool rolled forward when
-nobody scored), and handing a rollover to the next day. Every stage is
-idempotent, so a half-finished settlement resumes where it stopped. The
-keeper runs it for yesterday every five minutes; `SETTLE=0` leaves the
-payout to an operator.
+Settlement is the other half of the day: audit every permanent `DailyBest`,
+claim the strict maximum, close and commit the worlds, reconcile pending
+payments, record the final base commit, then `finalize_day` (90% winner / 10%
+team, or the whole pool rolled forward when nobody scored). Every stage is
+idempotent, so a half-finished settlement resumes where it stopped. The keeper
+runs it for yesterday every five minutes; `SETTLE=0` leaves the payout to an
+operator.
 
 `open-day.ts` is idempotent — it only does what is still missing — and the
 keeper calls the same routine itself when it finds no world on the rollup, so
-a UTC boundary rolls over without an operator. Both need the admin/vrf
-keypair (`ADMIN_KEYPAIR` / `KEEPER_KEYPAIR`, default `~/.config/solana/id.json`).
+a UTC boundary rolls over without an operator. Both need the admin/keeper
+keypair (`ADMIN_KEYPAIR` / `KEEPER_KEYPAIR`, default
+`~/.config/solana/id.json`). Randomness comes only from authenticated
+MagicBlock scoped-VRF callbacks; there is no VRF signer keypair.
 
 ## Starter reference documentation
 

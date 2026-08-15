@@ -4,6 +4,7 @@
  * Opening a day is one transaction; closing one is a pipeline across both
  * planes, and every stage is blocked by the one before it:
  *
+ *   ER   claim_record          sweep every DailyBest before closure
  *   ER   close_world           mark Closed, commit + undelegate to base
  *   ER   commit_state          runs behind unreconciled payments
  *   base close_day             Open -> Closed (permissionless, after cutoff)
@@ -139,7 +140,7 @@ export async function ensureDaySettled(opts: {
     return out;
   }
 
-  // ---- stage A: close both worlds and get them back onto base ----------
+  // ---- stage A: sweep final DailyBest records, then close worlds --------
   // Which plane a world lives on is decided by OWNERSHIP, not by which RPC
   // can read it: the rollup happily serves an undelegated account it has
   // cloned, and writing to it there fails with "modified data of a
@@ -162,6 +163,41 @@ export async function ensureDaySettled(opts: {
         continue;
       }
       if (statusOf(live.status) === "closed") continue;
+      let bests: any[];
+      try {
+        bests = await erProgram.account.dailyBest.all([
+          { memcmp: { offset: 8, bytes: world.toBase58() } },
+        ]);
+      } catch (e) {
+        out.blocked.push(`mode ${mode}: cannot audit DailyBest accounts: ${errText(e)}`);
+        continue;
+      }
+      let winner = null as null | { publicKey: web3.PublicKey; account: any };
+      for (const candidate of bests) {
+        if (
+          candidate.account.bestScore > Number(live.recordScore) &&
+          (!winner || candidate.account.bestScore > winner.account.bestScore)
+        )
+          winner = candidate;
+      }
+      if (winner) {
+        if (dry) {
+          out.did.push(`would claim final record ${winner.account.bestScore} (mode ${mode})`);
+        } else {
+          try {
+            await withRetry(`claim final record mode ${mode}`, () =>
+              erProgram.methods
+                .claimRecord()
+                .accountsPartial({ world, best: winner!.publicKey })
+                .rpc({ commitment: "processed" }),
+            );
+            out.did.push(`claimed final record ${winner.account.bestScore} (mode ${mode})`);
+          } catch (e) {
+            out.blocked.push(`claim_record mode ${mode}: ${errText(e)}`);
+            continue;
+          }
+        }
+      }
       if (dry) {
         out.did.push(`would close world (mode ${mode}) on the ER`);
         continue;
@@ -188,7 +224,10 @@ export async function ensureDaySettled(opts: {
       }
       try {
         await withRetry(`close_world_base mode ${mode}`, () =>
-          baseProgram.methods.closeWorldBase().accountsPartial({ world }).rpc(),
+          baseProgram.methods
+            .closeWorldBase()
+            .accountsPartial({ world, closer: admin.publicKey })
+            .rpc(),
         );
         out.did.push(`closed world (mode ${mode}) on base`);
       } catch (e) {

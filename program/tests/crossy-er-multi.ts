@@ -101,7 +101,7 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
   const lockPda = (w: web3.PublicKey, attempt: number) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(attempt));
   const sectorPda = (sx: number, sy: number) =>
-    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le16(sy));
+    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le32(sy));
   const spawnSectors = () => {
     const out = [];
     for (let sy = 0; sy < 2; sy++)
@@ -134,7 +134,7 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     const now = await chainNow();
     day = Math.floor(now / 86400) + (now % 86400 > 82_000 ? 1 : 0);
     world = pda(S.world, Buffer.from([1]), le64(day));
-    spawnChunk = pda(S.chunk, le64(day), le16(0));
+    spawnChunk = pda(S.chunk, le64(day), le32(0));
   });
 
   it("prepares the day and both players (base), then delegates everything", async function () {

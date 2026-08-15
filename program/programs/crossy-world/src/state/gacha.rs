@@ -7,6 +7,7 @@ use anchor_lang::prelude::*;
 #[repr(u8)]
 pub enum PullState {
     Pending,
+    RandomnessReady,
     Assigned,
     Claimed,
     Refundable,
@@ -28,14 +29,12 @@ pub struct GachaPull {
     /// Snapshot of pity counters at request time.
     pub epic_misses_snapshot: u16,
     pub legendary_misses_snapshot: u16,
-    /// Banner inventory revision at request; a callback whose required
-    /// selection was invalidated by concurrent assignment refunds instead of
-    /// silently using newer odds.
-    pub inventory_revision: u32,
     pub requested_at: i64,
     /// VRF request generation; a refund invalidates the generation and a
     /// late callback from an older generation must fail.
     pub request_generation: u16,
+    /// Set only by an authenticated MagicBlock VRF callback.
+    pub randomness: [u8; 32],
     pub state: PullState,
     pub assigned_rarity: u8,
     pub assigned_variant: u16,

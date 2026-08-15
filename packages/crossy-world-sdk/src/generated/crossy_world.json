@@ -47,6 +47,93 @@
       "args": []
     },
     {
+      "name": "activate_season",
+      "discriminator": [
+        65,
+        12,
+        62,
+        60,
+        29,
+        166,
+        239,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "season",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  115,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "season_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "standard_banner"
+        },
+        {
+          "name": "enhanced_banner"
+        },
+        {
+          "name": "premium_banner"
+        },
+        {
+          "name": "common_pool"
+        },
+        {
+          "name": "rare_pool"
+        },
+        {
+          "name": "epic_pool"
+        },
+        {
+          "name": "legendary_pool"
+        },
+        {
+          "name": "admin",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "season_index",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "assign_pull",
       "discriminator": [
         230,
@@ -156,6 +243,22 @@
           }
         },
         {
+          "name": "common_pool",
+          "writable": true
+        },
+        {
+          "name": "rare_pool",
+          "writable": true
+        },
+        {
+          "name": "epic_pool",
+          "writable": true
+        },
+        {
+          "name": "legendary_pool",
+          "writable": true
+        },
+        {
           "name": "selected_variant",
           "docs": [
             "The variant that will be reserved (selected deterministically; the",
@@ -257,31 +360,10 @@
           "name": "usdc_mint"
         },
         {
-          "name": "vrf_authority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "signer": true
-        },
-        {
           "name": "token_program"
         }
       ],
-      "args": [
-        {
-          "name": "generation",
-          "type": "u16"
-        },
-        {
-          "name": "randomness",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
-      ]
+      "args": []
     },
     {
       "name": "begin_paid_attempt",
@@ -963,10 +1045,6 @@
       ],
       "args": [
         {
-          "name": "name",
-          "type": "string"
-        },
-        {
           "name": "uri",
           "type": "string"
         }
@@ -990,15 +1068,16 @@
           "writable": true
         },
         {
-          "name": "run",
+          "name": "best",
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  114,
-                  117,
-                  110
+                  98,
+                  101,
+                  115,
+                  116
                 ]
               },
               {
@@ -1007,8 +1086,8 @@
               },
               {
                 "kind": "account",
-                "path": "run.wallet",
-                "account": "PlayerRun"
+                "path": "best.wallet",
+                "account": "DailyBest"
               }
             ]
           }
@@ -1285,6 +1364,10 @@
         {
           "name": "world",
           "writable": true
+        },
+        {
+          "name": "closer",
+          "signer": true
         }
       ],
       "args": []
@@ -1380,6 +1463,71 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "consume_pull_randomness",
+      "discriminator": [
+        83,
+        66,
+        163,
+        210,
+        208,
+        1,
+        5,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "docs": [
+            "Scoped VRF identity PDA, bound to this program. Its presence as a signer proves",
+            "the callback was issued by the VRF program for this program."
+          ],
+          "signer": true
+        },
+        {
+          "name": "pull",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pull.player",
+                "account": "GachaPull"
+              },
+              {
+                "kind": "account",
+                "path": "pull.pull_nonce",
+                "account": "GachaPull"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "generation",
+          "type": "u16"
+        }
+      ]
     },
     {
       "name": "consume_rollover",
@@ -1763,6 +1911,22 @@
           }
         },
         {
+          "name": "common_pool",
+          "writable": true
+        },
+        {
+          "name": "rare_pool",
+          "writable": true
+        },
+        {
+          "name": "epic_pool",
+          "writable": true
+        },
+        {
+          "name": "legendary_pool",
+          "writable": true
+        },
+        {
           "name": "admin",
           "writable": true,
           "signer": true
@@ -1861,6 +2025,10 @@
           ]
         },
         {
+          "name": "rarity_pool",
+          "writable": true
+        },
+        {
           "name": "variant",
           "writable": true,
           "pda": {
@@ -1947,6 +2115,24 @@
         144
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -2124,6 +2310,24 @@
       ],
       "accounts": [
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2282,7 +2486,7 @@
         },
         {
           "name": "chunk_index",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -2299,6 +2503,24 @@
         131
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -2476,6 +2698,24 @@
       ],
       "accounts": [
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2638,7 +2878,7 @@
         },
         {
           "name": "sector_y",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -2655,6 +2895,24 @@
         79
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -3410,7 +3668,7 @@
         },
         {
           "name": "sector_y",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -3468,7 +3726,7 @@
           "name": "collection_authority"
         },
         {
-          "name": "vrf_authority"
+          "name": "validator"
         },
         {
           "name": "admin",
@@ -4010,6 +4268,61 @@
       ]
     },
     {
+      "name": "mark_chunk_ready",
+      "discriminator": [
+        54,
+        96,
+        115,
+        15,
+        128,
+        90,
+        245,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "world",
+          "writable": true
+        },
+        {
+          "name": "chunk",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  117,
+                  110,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world.day",
+                "account": "WorldHeader"
+              },
+              {
+                "kind": "arg",
+                "path": "chunk_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "chunk_index",
+          "type": "u32"
+        }
+      ]
+    },
+    {
       "name": "move_action",
       "discriminator": [
         108,
@@ -4344,6 +4657,8 @@
                 "kind": "const",
                 "value": [
                   0,
+                  0,
+                  0,
                   0
                 ]
               }
@@ -4536,58 +4851,12 @@
       ],
       "accounts": [
         {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "world",
+          "name": "vrf_program_identity",
           "docs": [
-            "typed account would reject it. The handler validates it by committed",
-            "read + mode/day PDA derivation."
-          ]
-        },
-        {
-          "name": "prev_chunk",
-          "docs": [
-            "Continuity anchor: the preceding chunk must already be revealed, so",
-            "the revealed range can never gain a hole."
+            "Scoped VRF identity PDA, bound to this program. Its presence as a signer proves",
+            "the callback was issued by the VRF program for this program."
           ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunk_index.saturating_sub(1)"
-              }
-            ]
-          }
+          "signer": true
         },
         {
           "name": "chunk",
@@ -4614,29 +4883,9 @@
               }
             ]
           }
-        },
-        {
-          "name": "vrf_authority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
-        {
-          "name": "day",
-          "type": "u64"
-        },
-        {
-          "name": "chunk_index",
-          "type": "u16"
-        },
         {
           "name": "randomness",
           "type": {
@@ -4645,6 +4894,18 @@
               32
             ]
           }
+        },
+        {
+          "name": "day",
+          "type": "u64"
+        },
+        {
+          "name": "chunk_index",
+          "type": "u32"
+        },
+        {
+          "name": "generation",
+          "type": "u16"
         }
       ]
     },
@@ -4829,6 +5090,30 @@
               {
                 "kind": "account",
                 "path": "pull.pull_nonce",
+                "account": "GachaPull"
+              }
+            ]
+          }
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pull.player",
                 "account": "GachaPull"
               }
             ]
@@ -5028,8 +5313,28 @@
       ],
       "accounts": [
         {
-          "name": "world",
-          "writable": true
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "world"
+        },
+        {
+          "name": "prev_chunk"
         },
         {
           "name": "chunk",
@@ -5047,9 +5352,8 @@
                 ]
               },
               {
-                "kind": "account",
-                "path": "world.day",
-                "account": "WorldHeader"
+                "kind": "arg",
+                "path": "day"
               },
               {
                 "kind": "arg",
@@ -5064,14 +5368,50 @@
           "signer": true
         },
         {
+          "name": "oracle_queue",
+          "writable": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
+          "name": "day",
+          "type": "u64"
+        },
+        {
           "name": "chunk_index",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -5155,6 +5495,18 @@
               }
             ]
           }
+        },
+        {
+          "name": "common_pool"
+        },
+        {
+          "name": "rare_pool"
+        },
+        {
+          "name": "epic_pool"
+        },
+        {
+          "name": "legendary_pool"
         },
         {
           "name": "pull",
@@ -5259,97 +5611,42 @@
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "reveal_chunk",
-      "discriminator": [
-        71,
-        169,
-        11,
-        194,
-        226,
-        62,
-        17,
-        52
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "world",
+          "name": "oracle_queue",
           "writable": true
         },
         {
-          "name": "chunk",
-          "writable": true,
+          "name": "token_program"
+        },
+        {
+          "name": "program_identity",
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  99,
-                  104,
-                  117,
+                  105,
+                  100,
+                  101,
                   110,
-                  107
+                  116,
+                  105,
+                  116,
+                  121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "WorldHeader"
-              },
-              {
-                "kind": "account",
-                "path": "chunk.chunk_index",
-                "account": "ChunkDefinition"
               }
             ]
           }
         },
         {
-          "name": "vrf_authority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "generation",
-          "type": "u16"
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
         },
         {
-          "name": "randomness",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
         }
-      ]
+      ],
+      "args": []
     },
     {
       "name": "rotate_session",
@@ -5492,16 +5789,16 @@
       ]
     },
     {
-      "name": "set_vrf_authority",
+      "name": "set_validator",
       "discriminator": [
-        219,
-        49,
-        136,
-        166,
-        71,
-        6,
-        51,
-        74
+        150,
+        135,
+        78,
+        171,
+        156,
+        91,
+        161,
+        221
       ],
       "accounts": [
         {
@@ -5530,7 +5827,7 @@
       ],
       "args": [
         {
-          "name": "new_authority",
+          "name": "new_validator",
           "type": "pubkey"
         }
       ]
@@ -5615,6 +5912,24 @@
         171
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "writable": true,
@@ -6166,6 +6481,19 @@
       ]
     },
     {
+      "name": "RarityPool",
+      "discriminator": [
+        58,
+        216,
+        129,
+        198,
+        222,
+        247,
+        236,
+        254
+      ]
+    },
+    {
       "name": "Season",
       "discriminator": [
         76,
@@ -6337,6 +6665,19 @@
       ]
     },
     {
+      "name": "ChunkReady",
+      "discriminator": [
+        151,
+        190,
+        133,
+        179,
+        104,
+        128,
+        179,
+        32
+      ]
+    },
+    {
       "name": "ChunkRequested",
       "discriminator": [
         182,
@@ -6464,6 +6805,19 @@
         252,
         136,
         107
+      ]
+    },
+    {
+      "name": "FrontierExtended",
+      "discriminator": [
+        182,
+        49,
+        74,
+        133,
+        2,
+        83,
+        34,
+        158
       ]
     },
     {
@@ -6675,6 +7029,19 @@
       ]
     },
     {
+      "name": "SeasonActivated",
+      "discriminator": [
+        15,
+        222,
+        137,
+        105,
+        208,
+        146,
+        188,
+        6
+      ]
+    },
+    {
       "name": "SeasonConfigured",
       "discriminator": [
         60,
@@ -6698,6 +7065,19 @@
         91,
         205,
         115
+      ]
+    },
+    {
+      "name": "ValidatorChanged",
+      "discriminator": [
+        59,
+        121,
+        4,
+        77,
+        62,
+        29,
+        214,
+        54
       ]
     },
     {
@@ -6820,236 +7200,241 @@
     },
     {
       "code": 6018,
+      "name": "MetadataMismatch",
+      "msg": "asset metadata URI does not match the configured variant"
+    },
+    {
+      "code": 6019,
       "name": "AgentLocked",
       "msg": "agent is locked for an active attempt"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "AgentListed",
       "msg": "agent is listed on the marketplace"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "StarterAlreadyClaimed",
       "msg": "starter entitlement already claimed"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "StarterNotClaimed",
       "msg": "starter entitlement not claimed"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "WrongAmount",
       "msg": "payment amount does not match program-derived amount"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "BadReceiptState",
       "msg": "receipt is not in the required state"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "ReceiptMismatch",
       "msg": "receipt does not match this run/attempt/death nonce"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "WrongVault",
       "msg": "wrong vault account"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "WrongTreasury",
       "msg": "wrong treasury account"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "Overflow",
       "msg": "checked arithmetic overflow"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "LiabilityMismatch",
       "msg": "vault liability invariant violated"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "BadBasisPoints",
       "msg": "basis points must sum to 10000"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "SoldOut",
       "msg": "variant is sold out"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "StaleInventory",
       "msg": "inventory revision is stale"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "PityInventoryUnavailable",
       "msg": "required pity inventory unavailable; banner paused"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "SupplyExceeded",
       "msg": "supply cap exceeded"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "InvalidTransition",
       "msg": "invalid state transition"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "AlreadyTerminal",
       "msg": "already consumed, refunded, claimed, or settled"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "DayNotOpen",
       "msg": "day is not prepared/open for this operation"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "DayVoided",
       "msg": "day is voided"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "Paused",
       "msg": "subsystem is paused"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "BadActionSequence",
       "msg": "duplicate or out-of-order action sequence"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "BadAttemptNonce",
       "msg": "attempt nonce mismatch"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "BadRunState",
       "msg": "run is not in the required state"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "WorldNotOpen",
       "msg": "world is not open"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "AttemptStillActive",
       "msg": "another attempt is still active for this wallet"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "TileOccupied",
       "msg": "destination tile is occupied"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "OutOfBounds",
       "msg": "destination is out of bounds"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "Blocked",
       "msg": "destination terrain is not traversable"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "WorldFull",
       "msg": "world is full"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "Cooldown",
       "msg": "cooldown has not elapsed"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "NoTarget",
       "msg": "no valid target"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "Immobilized",
       "msg": "player is stunned or immobilized"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "TooFast",
       "msg": "movement cadence exceeded for this slot"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "InvalidName",
       "msg": "Display name is empty, too long, or contains characters that cannot be shown"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "StaleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "LethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "EffectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "BadAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "FrontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "FrontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "WrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "BadGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "BadChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "NotReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "BadVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6064,
+      "code": 6065,
       "name": "CapacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -7076,7 +7461,7 @@
           },
           {
             "name": "target_y",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -7415,7 +7800,7 @@
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -7439,7 +7824,7 @@
           },
           {
             "name": "final_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "reason",
@@ -7561,14 +7946,14 @@
           },
           {
             "name": "chunk_index",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "row_start",
             "docs": [
               "First absolute row of this chunk (chunk_index * 16)."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "row_count",
@@ -7636,6 +8021,31 @@
       }
     },
     {
+      "name": "ChunkReady",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "world",
+            "type": "pubkey"
+          },
+          {
+            "name": "chunk_index",
+            "type": "u32"
+          },
+          {
+            "name": "randomness_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "ChunkRequestState",
       "repr": {
         "kind": "rust"
@@ -7663,7 +8073,7 @@
           },
           {
             "name": "chunk_index",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "generation",
@@ -7683,7 +8093,7 @@
           },
           {
             "name": "chunk_index",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "generation",
@@ -7709,6 +8119,9 @@
       "type": {
         "kind": "enum",
         "variants": [
+          {
+            "name": "Uninitialized"
+          },
           {
             "name": "Requested"
           },
@@ -7846,6 +8259,10 @@
           {
             "name": "collection",
             "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
           }
         ]
       }
@@ -7870,7 +8287,7 @@
           },
           {
             "name": "best_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "attempt_nonce",
@@ -8008,7 +8425,7 @@
           },
           {
             "name": "settled_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "winner_amount",
@@ -8116,7 +8533,7 @@
           },
           {
             "name": "record_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "record_holder",
@@ -8223,6 +8640,55 @@
       }
     },
     {
+      "name": "FrontierExtended",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "world",
+            "type": "pubkey"
+          },
+          {
+            "name": "day",
+            "type": "u64"
+          },
+          {
+            "name": "mode",
+            "type": {
+              "defined": {
+                "name": "WorldMode"
+              }
+            }
+          },
+          {
+            "name": "map_seq",
+            "type": "u64"
+          },
+          {
+            "name": "chunk_index",
+            "type": "u32"
+          },
+          {
+            "name": "generation",
+            "type": "u16"
+          },
+          {
+            "name": "revealed_rows",
+            "type": "u32"
+          },
+          {
+            "name": "randomness_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "GachaPull",
       "docs": [
         "PDA: [\"pull\", player, pull_nonce_le]"
@@ -8277,15 +8743,6 @@
             "type": "u16"
           },
           {
-            "name": "inventory_revision",
-            "docs": [
-              "Banner inventory revision at request; a callback whose required",
-              "selection was invalidated by concurrent assignment refunds instead of",
-              "silently using newer odds."
-            ],
-            "type": "u32"
-          },
-          {
             "name": "requested_at",
             "type": "i64"
           },
@@ -8296,6 +8753,18 @@
               "late callback from an older generation must fail."
             ],
             "type": "u16"
+          },
+          {
+            "name": "randomness",
+            "docs": [
+              "Set only by an authenticated MagicBlock VRF callback."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "state",
@@ -8391,11 +8860,9 @@
             "type": "pubkey"
           },
           {
-            "name": "vrf_authority",
+            "name": "validator",
             "docs": [
-              "Authenticated randomness callback identity. Only this signer may",
-              "deliver chunk/gacha randomness (the MagicBlock VRF integration point;",
-              "binding, generation, and idempotency rules live in the handlers)."
+              "MagicBlock validator that must host every delegated gameplay account."
             ],
             "type": "pubkey"
           },
@@ -8610,7 +9077,7 @@
           },
           {
             "name": "sector_y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "occupancy",
@@ -8911,7 +9378,7 @@
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "revive_deadline",
@@ -9018,6 +9485,15 @@
             "type": "u32"
           },
           {
+            "name": "pending_pull",
+            "docs": [
+              "The only unresolved pull for this wallet. Serializing pulls is what",
+              "makes pity snapshots exact instead of allowing parallel requests to",
+              "reuse the same counters."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "receipt_count",
             "docs": [
               "Sequential nonce for payment receipt PDAs."
@@ -9044,11 +9520,11 @@
           },
           {
             "name": "highest_paid_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "highest_casual_score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "completed_attempts",
@@ -9100,7 +9576,7 @@
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -9178,7 +9654,7 @@
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "facing",
@@ -9192,7 +9668,7 @@
             "docs": [
               "Furthest forward row = authoritative score for this attempt."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "safe_x",
@@ -9203,7 +9679,7 @@
           },
           {
             "name": "safe_y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "last_move_slot",
@@ -9216,6 +9692,14 @@
             "name": "action_seq",
             "docs": [
               "Exact-next action sequence; consumed by successfully executed actions."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "state_seq",
+            "docs": [
+              "Monotonic sequence for every authoritative run mutation, including",
+              "changes that do not consume a player action."
             ],
             "type": "u64"
           },
@@ -9408,10 +9892,6 @@
           {
             "name": "price",
             "type": "u64"
-          },
-          {
-            "name": "inventory_revision",
-            "type": "u32"
           }
         ]
       }
@@ -9428,6 +9908,9 @@
             "name": "Pending"
           },
           {
+            "name": "RandomnessReady"
+          },
+          {
             "name": "Assigned"
           },
           {
@@ -9438,6 +9921,79 @@
           },
           {
             "name": "Refunded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RarityPool",
+      "docs": [
+        "PDA: [\"rarity_pool\", season_le, rarity]. A compact canonical catalog",
+        "lets a gacha assignment select from one bounded account after VRF",
+        "fulfillment; callback transactions never need hundreds of variant keys."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "season",
+            "type": "u16"
+          },
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "count",
+            "type": "u16"
+          },
+          {
+            "name": "revision",
+            "docs": [
+              "Monotonic reservation counter for auditing and indexer cache busting."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "initialized",
+            "type": "bool"
+          },
+          {
+            "name": "entries",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "RarityPoolEntry"
+                  }
+                },
+                64
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RarityPoolEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "variant_id",
+            "type": "u16"
+          },
+          {
+            "name": "available",
+            "docs": [
+              "Units not yet assigned. Reservations are removed here atomically with",
+              "the corresponding `VariantInventory.reserved` increment."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -9505,7 +10061,7 @@
           },
           {
             "name": "score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "slot",
@@ -9650,6 +10206,31 @@
       }
     },
     {
+      "name": "SeasonActivated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "season",
+            "type": "u16"
+          },
+          {
+            "name": "weights_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "variant_count",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "SeasonConfigured",
       "type": {
         "kind": "struct",
@@ -9726,7 +10307,7 @@
           },
           {
             "name": "center_y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "radius",
@@ -9757,6 +10338,22 @@
           {
             "name": "nonce",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ValidatorChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
           }
         ]
       }
@@ -9964,14 +10561,67 @@
               "Number of revealed rows; the frontier. Movement at/above this row is",
               "rejected (fail closed at an unrevealed boundary)."
             ],
+            "type": "u32"
+          },
+          {
+            "name": "map_seq",
+            "docs": [
+              "Monotonic sequence for visible map changes. Clients use this to",
+              "detect dropped frontier notifications and refetch a snapshot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "latest_chunk_index",
+            "docs": [
+              "Exact immutable chunk currently terminating the visible frontier."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "latest_chunk_generation",
             "type": "u16"
+          },
+          {
+            "name": "latest_chunk_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "ready_chunk_index",
+            "docs": [
+              "A non-zero index means all sectors for that next chunk were observed",
+              "together on this ER and the frontier may advance over it."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "ready_chunk_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "spawn_ready",
+            "docs": [
+              "The spawn chunk and all of its sectors have been observed together on",
+              "this world's ER. No attempt may activate before this barrier is set."
+            ],
+            "type": "bool"
           },
           {
             "name": "record_score",
             "docs": [
               "Current record: score, holder, attempt, slot. The ONLY prize authority."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "record_holder",
@@ -9990,7 +10640,7 @@
             "docs": [
               "Chunk pipeline: index the next request will target and its state."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "chunk_request_state",

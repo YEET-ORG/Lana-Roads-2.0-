@@ -52,8 +52,8 @@ pub mod crossy_world {
         instructions::admin::accept_admin(ctx)
     }
 
-    pub fn set_vrf_authority(ctx: Context<AdminOnly>, new_authority: Pubkey) -> Result<()> {
-        instructions::admin::set_vrf_authority(ctx, new_authority)
+    pub fn set_validator(ctx: Context<AdminOnly>, new_validator: Pubkey) -> Result<()> {
+        instructions::admin::set_validator(ctx, new_validator)
     }
 
     pub fn set_pause(ctx: Context<AdminOnly>, scope: u16, paused: bool) -> Result<()> {
@@ -85,6 +85,10 @@ pub mod crossy_world {
         base_weights: [u16; 4],
     ) -> Result<()> {
         instructions::admin::create_banner(ctx, season_index, tier, base_weights)
+    }
+
+    pub fn activate_season(ctx: Context<ActivateSeason>, season_index: u16) -> Result<()> {
+        instructions::admin::activate_season(ctx, season_index)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -293,32 +297,32 @@ pub mod crossy_world {
     }
 
     // ---- chunks (ER) ----------------------------------------------------
-    pub fn request_chunk(ctx: Context<RequestChunk>, chunk_index: u16) -> Result<()> {
-        instructions::chunks::request_chunk(ctx, chunk_index)
-    }
-
-    pub fn reveal_chunk(
-        ctx: Context<RevealChunk>,
-        generation: u16,
-        randomness: [u8; 32],
-    ) -> Result<()> {
-        instructions::chunks::reveal_chunk(ctx, generation, randomness)
+    pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> Result<()> {
+        instructions::chunks::request_chunk(ctx, day, chunk_index)
     }
 
     pub fn publish_chunk(
         ctx: Context<PublishChunk>,
-        day: u64,
-        chunk_index: u16,
         randomness: [u8; 32],
+        day: u64,
+        chunk_index: u32,
+        generation: u16,
     ) -> Result<()> {
-        instructions::chunks::publish_chunk(ctx, day, chunk_index, randomness)
+        instructions::chunks::publish_chunk(ctx, randomness, day, chunk_index, generation)
     }
 
     pub fn extend_frontier(ctx: Context<ExtendFrontier>) -> Result<()> {
         instructions::chunks::extend_frontier(ctx)
     }
 
-    pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u16) -> Result<()> {
+    pub fn mark_chunk_ready<'info>(
+        ctx: Context<'info, MarkChunkReady<'info>>,
+        chunk_index: u32,
+    ) -> Result<()> {
+        instructions::chunks::mark_chunk_ready(ctx, chunk_index)
+    }
+
+    pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u32) -> Result<()> {
         instructions::chunks::init_sector(ctx, sector_x, sector_y)
     }
 
@@ -327,16 +331,20 @@ pub mod crossy_world {
         instructions::gacha::request_pull(ctx)
     }
 
-    pub fn assign_pull<'info>(
-        ctx: Context<'info, AssignPull<'info>>,
-        generation: u16,
+    pub fn consume_pull_randomness(
+        ctx: Context<ConsumePullRandomness>,
         randomness: [u8; 32],
+        generation: u16,
     ) -> Result<()> {
-        instructions::gacha::assign_pull(ctx, generation, randomness)
+        instructions::gacha::consume_pull_randomness(ctx, randomness, generation)
     }
 
-    pub fn claim_pull(ctx: Context<ClaimPull>, name: String, uri: String) -> Result<()> {
-        instructions::gacha::claim_pull(ctx, name, uri)
+    pub fn assign_pull(ctx: Context<AssignPull>) -> Result<()> {
+        instructions::gacha::assign_pull(ctx)
+    }
+
+    pub fn claim_pull(ctx: Context<ClaimPull>, uri: String) -> Result<()> {
+        instructions::gacha::claim_pull(ctx, uri)
     }
 
     pub fn refund_pull(ctx: Context<RefundPull>) -> Result<()> {
@@ -365,7 +373,7 @@ pub mod crossy_world {
         ctx: Context<DelegateSector>,
         world: Pubkey,
         sector_x: u8,
-        sector_y: u16,
+        sector_y: u32,
     ) -> Result<()> {
         instructions::delegation::delegate_sector(ctx, world, sector_x, sector_y)
     }
@@ -378,7 +386,7 @@ pub mod crossy_world {
         instructions::delegation::delegate_best(ctx, world, wallet)
     }
 
-    pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u16) -> Result<()> {
+    pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u32) -> Result<()> {
         instructions::delegation::delegate_chunk(ctx, day, chunk_index)
     }
 

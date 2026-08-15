@@ -38,9 +38,9 @@ const le8 = (v: bigint | number) => {
   b.writeBigUInt64LE(BigInt(v));
   return b;
 };
-const le2 = (v: number) => {
-  const b = Buffer.alloc(2);
-  b.writeUInt16LE(v);
+const le4 = (v: number) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32LE(v);
   return b;
 };
 const pda = (...s: (Buffer | Uint8Array)[]) =>
@@ -50,9 +50,9 @@ export const worldPda = (mode: number, day: bigint) =>
   pda(Buffer.from("world"), Buffer.from([mode]), le8(day));
 export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), le8(day));
 export const chunkPda = (day: bigint, index: number) =>
-  pda(Buffer.from("chunk"), le8(day), le2(index));
+  pda(Buffer.from("chunk"), le8(day), le4(index));
 export const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
-  pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le2(sy));
+  pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -94,14 +94,18 @@ export interface DaySetupResult {
  */
 export async function ensureDayReady(opts: {
   baseProgram: Program<any>;
+  erProgram: Program<any>;
   admin: web3.Keypair;
   validator: web3.PublicKey;
   day: bigint;
   modes?: number[];
   log?: (...args: any[]) => void;
 }): Promise<DaySetupResult> {
-  const { baseProgram, admin, validator, day } = opts;
-  const modes = opts.modes ?? [1];
+  const { baseProgram, erProgram, admin, validator, day } = opts;
+  const modes = opts.modes ?? [0, 1];
+  if (modes.length !== 2 || !modes.includes(0) || !modes.includes(1)) {
+    throw new Error("day setup must prepare paid and casual worlds together");
+  }
   const log = opts.log ?? (() => {});
   const conn = baseProgram.provider.connection;
   const result: DaySetupResult = {
@@ -120,6 +124,12 @@ export async function ensureDayReady(opts: {
     throw new Error(
       `config.admin is ${config.admin.toBase58()} but this keypair is ` +
         `${admin.publicKey.toBase58()}; day setup is admin-only`,
+    );
+  }
+  if (!config.validator.equals(validator)) {
+    throw new Error(
+      `config.validator is ${config.validator.toBase58()} but setup targets ` +
+        validator.toBase58(),
     );
   }
 
@@ -147,7 +157,6 @@ export async function ensureDayReady(opts: {
     result.prepared = true;
   }
 
-  const validatorMeta = { pubkey: validator, isSigner: false, isWritable: false };
   for (const mode of modes) {
     const world = worldPda(mode, day);
 
@@ -193,8 +202,11 @@ export async function ensureDayReady(opts: {
       await withRetry("delegate_world", () =>
         baseProgram.methods
           .delegateWorld(mode, new BN(day.toString()))
-          .accountsPartial({ payer: admin.publicKey, pda: world })
-          .remainingAccounts([validatorMeta])
+          .accountsPartial({
+            config: pda(Buffer.from("config")),
+            payer: admin.publicKey,
+            pda: world,
+          })
           .rpc(),
       );
       result.delegated.push(mode);
@@ -220,8 +232,11 @@ export async function ensureDayReady(opts: {
           tx.add(
             await baseProgram.methods
               .delegateSector(world, sx, sy)
-              .accountsPartial({ payer: admin.publicKey, pda: sectorPda(world, sx, sy) })
-              .remainingAccounts([validatorMeta])
+              .accountsPartial({
+                config: pda(Buffer.from("config")),
+                payer: admin.publicKey,
+                pda: sectorPda(world, sx, sy),
+              })
               .instruction(),
           );
         }
@@ -231,6 +246,69 @@ export async function ensureDayReady(opts: {
       }
       if (toDelegate.length)
         log(`  mode ${mode}: delegated sectors y=${sy} x=[${toDelegate.join(",")}]`);
+    }
+  }
+
+  // The immutable spawn chunk is part of live simulation state. Delegate it
+  // only after both modes' sectors exist, because sector initialization reads
+  // the base-owned chunk definition.
+  if (modes.includes(0) && modes.includes(1)) {
+    const spawnChunk = chunkPda(day, 0);
+    const chunkInfo = await withRetry("fetch spawn chunk", () =>
+      conn.getAccountInfo(spawnChunk),
+    );
+    if (chunkInfo?.owner.equals(PROGRAM_ID)) {
+      await withRetry("delegate spawn chunk", () =>
+        baseProgram.methods
+          .delegateChunk(new BN(day.toString()), 0)
+          .accountsPartial({
+            config: pda(Buffer.from("config")),
+            payer: admin.publicKey,
+            pda: spawnChunk,
+          })
+          .rpc(),
+      );
+      log(`  day ${day}: delegated spawn chunk`);
+    }
+
+    const chunkRemaining = Array.from({ length: SPAWN_BANDS }, (_, sy) =>
+      Array.from({ length: SECTORS_WIDE }, (_, sx) => ({
+        pubkey: sectorPda(worldPda(0, day), sx, sy),
+        isSigner: false,
+        isWritable: false,
+      })),
+    ).flat();
+    for (const mode of modes) {
+      const world = worldPda(mode, day);
+      const remaining = chunkRemaining.map((account, index) => ({
+        ...account,
+        pubkey: sectorPda(
+          world,
+          index % SECTORS_WIDE,
+          Math.floor(index / SECTORS_WIDE),
+        ),
+      }));
+      let ready = false;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        try {
+          await erProgram.methods
+            .markChunkReady(0)
+            .accountsPartial({
+              world,
+              chunk: spawnChunk,
+              signer: admin.publicKey,
+            })
+            .remainingAccounts(remaining)
+            .rpc({ skipPreflight: true, commitment: "processed" });
+          ready = true;
+          break;
+        } catch (thrownObject) {
+          if (attempt === 11) throw thrownObject;
+          await sleep(500);
+        }
+      }
+      if (!ready) throw new Error(`mode ${mode}: spawn readiness was not confirmed`);
+      log(`  mode ${mode}: spawn chunk ready on ER`);
     }
   }
 
@@ -276,7 +354,7 @@ async function main() {
     process.env.ADMIN_KEYPAIR ?? `${process.env.HOME}/.config/solana/id.json`,
   );
   const day = BigInt(process.env.DAY ?? Math.floor(Date.now() / 1000 / 86400));
-  const modes = (process.env.MODES ?? "1").split(",").map(Number);
+  const modes = (process.env.MODES ?? "0,1").split(",").map(Number);
   const idl = JSON.parse(
     readFileSync(resolve(__dirname, "../target/idl/crossy_world.json"), "utf8"),
   );
@@ -288,9 +366,19 @@ async function main() {
       { commitment: "confirmed" },
     ),
   ) as Program<any>;
+  const erRpc = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+  const erProgram = new Program(
+    idl,
+    new anchor.AnchorProvider(
+      new web3.Connection(erRpc, "processed"),
+      new anchor.Wallet(admin),
+      { commitment: "processed" },
+    ),
+  ) as Program<any>;
 
   const out = await ensureDayReady({
     baseProgram,
+    erProgram,
     admin,
     validator,
     day,

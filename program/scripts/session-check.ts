@@ -117,7 +117,7 @@ async function main() {
     le4(1),
   );
   const sectorPda = (sx: number, sy: number) =>
-    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le2(sy));
+    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy));
   const validatorMeta = { pubkey: VALIDATOR, isSigner: false, isWritable: false };
 
   // Join with a session that is already within seconds of expiring.
@@ -185,7 +185,7 @@ async function main() {
         run: runPda,
         sourceSector: src,
         destSector: dst.equals(src) ? null : dst,
-        chunk: pda(Buffer.from("chunk"), le8(day), le2(Math.floor((run.y + 1) / 16))),
+        chunk: pda(Buffer.from("chunk"), le8(day), le4(Math.floor((run.y + 1) / 16))),
         best: bestPda,
         signer: signer.publicKey,
       })

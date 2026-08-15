@@ -23,6 +23,10 @@ pub struct PlayerProfile {
     pub pity: [PityPair; 3],
     /// Sequential nonce for gacha pull PDAs.
     pub pull_count: u32,
+    /// The only unresolved pull for this wallet. Serializing pulls is what
+    /// makes pity snapshots exact instead of allowing parallel requests to
+    /// reuse the same counters.
+    pub pending_pull: Pubkey,
     /// Sequential nonce for payment receipt PDAs.
     pub receipt_count: u32,
     /// Authoritative daily wins, all time.
@@ -30,8 +34,8 @@ pub struct PlayerProfile {
     /// Wins in `wins_season`.
     pub season_wins: u32,
     pub wins_season: u16,
-    pub highest_paid_score: u16,
-    pub highest_casual_score: u16,
+    pub highest_paid_score: u32,
+    pub highest_casual_score: u32,
     pub completed_attempts: u32,
     pub total_successful_revives: u32,
     pub version: u16,

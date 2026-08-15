@@ -21,10 +21,14 @@ import { resolve } from "node:path";
 const PROGRAM_ID = new web3.PublicKey("GmwqXaYeTxukFCfnSwHiipYnY1mC6z9u8f7rAXjc62uX");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 const SEASON = Number(process.env.SEASON ?? 1);
+const BANNER_WEIGHTS = [
+  [70, 22, 7, 1],
+  [50, 32, 15, 3],
+  [30, 40, 24, 6],
+] as const;
 /**
  * Where an agent's metadata will live. The variant commits to the hash of
- * this string; nothing on chain forces the claim to use it yet, which is a
- * pre-mainnet gate rather than a property to rely on.
+ * this exact string and the claim instruction enforces the commitment.
  */
 const METADATA_BASE = process.env.METADATA_BASE ?? "https://lanaroads.xyz/agents/season1";
 
@@ -122,6 +126,26 @@ export const metadataUri = (season: number, variantId: number) =>
 
 const uriHash = (uri: string): number[] => [...createHash("sha256").update(uri).digest()];
 
+const weightsHash = (seasonIndex: number): number[] => {
+  const seasonBytes = Buffer.alloc(2);
+  seasonBytes.writeUInt16LE(seasonIndex);
+  const weights = Buffer.alloc(3 * 4 * 2);
+  let offset = 0;
+  for (const banner of BANNER_WEIGHTS) {
+    for (const weight of banner) {
+      weights.writeUInt16LE(weight, offset);
+      offset += 2;
+    }
+  }
+  return [
+    ...createHash("sha256")
+      .update(Buffer.from("lana-roads-season-weights-v1"))
+      .update(seasonBytes)
+      .update(weights)
+      .digest(),
+  ];
+};
+
 async function main() {
   const dry = process.env.DRY_RUN === "1";
   const admin = web3.Keypair.fromSecretKey(
@@ -147,14 +171,51 @@ async function main() {
 
   const config = pda(Buffer.from("config"));
   const season = pda(Buffer.from("season"), le2(SEASON));
-  const seasonAcc: any = await program.account.season.fetch(season);
+  const today = BigInt(Math.floor(Date.now() / 1000 / 86400));
+  const startDay = BigInt(process.env.START_DAY ?? (today + 1n).toString());
+  let seasonAcc: any = await program.account.season.fetchNullable(season);
+  if (!seasonAcc) {
+    if (startDay <= today) {
+      throw new Error("START_DAY must be a future UTC day so the season can be frozen first");
+    }
+    if (dry) {
+      console.log(`would create season ${SEASON}, starting UTC day ${startDay}`);
+      return;
+    }
+    await program.methods
+      .createSeason(SEASON, new BN(startDay.toString()), weightsHash(SEASON), 1, 1)
+      .accountsPartial({
+        config,
+        season,
+        commonPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([0])),
+        rarePool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([1])),
+        epicPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([2])),
+        legendaryPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([3])),
+        admin: admin.publicKey,
+      })
+      .rpc();
+    seasonAcc = await program.account.season.fetch(season);
+  }
   console.log(
     `season ${SEASON}: days ${seasonAcc.startDay}-${seasonAcc.endDay}, ` +
       `${seasonAcc.variantCount} variant(s) configured`,
   );
 
-  const today = BigInt(Math.floor(Date.now() / 1000 / 86400));
-  const activationDay = today + 1n;
+  const activationDay = BigInt(seasonAcc.startDay.toString());
+
+  for (let tier = 0; tier < BANNER_WEIGHTS.length; tier++) {
+    const address = pda(Buffer.from("banner"), le2(SEASON), Buffer.from([tier]));
+    if (await conn.getAccountInfo(address)) continue;
+    if (dry) {
+      console.log(`  would create tier ${tier} banner`);
+      continue;
+    }
+    await program.methods
+      .createBanner(SEASON, tier, [...BANNER_WEIGHTS[tier]])
+      .accountsPartial({ config, season, banner: address, admin: admin.publicKey })
+      .rpc();
+    console.log(`  created tier ${tier} banner`);
+  }
   for (const c of CLASSES) {
     const address = pda(Buffer.from("class"), le2(c.id), le2(1));
     if (await conn.getAccountInfo(address)) {
@@ -212,6 +273,7 @@ async function main() {
         config,
         season,
         classConfig: pda(Buffer.from("class"), le2(v.cls), le2(1)),
+        rarityPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([v.rarity])),
         variant: address,
         admin: admin.publicKey,
       })
@@ -224,6 +286,28 @@ async function main() {
 
   const after: any = await program.account.season.fetch(season);
   console.log(`season now holds ${after.variantCount} variants`);
+  if ("configured" in after.status) {
+    if (dry) {
+      console.log("would activate and permanently freeze the season configuration");
+      return;
+    }
+    await program.methods
+      .activateSeason(SEASON)
+      .accountsPartial({
+        config,
+        season,
+        standardBanner: pda(Buffer.from("banner"), le2(SEASON), Buffer.from([0])),
+        enhancedBanner: pda(Buffer.from("banner"), le2(SEASON), Buffer.from([1])),
+        premiumBanner: pda(Buffer.from("banner"), le2(SEASON), Buffer.from([2])),
+        commonPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([0])),
+        rarePool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([1])),
+        epicPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([2])),
+        legendaryPool: pda(Buffer.from("rarity_pool"), le2(SEASON), Buffer.from([3])),
+        admin: admin.publicKey,
+      })
+      .rpc();
+    console.log("season activated; banners and variants are now immutable");
+  }
 }
 
 if (require.main === module) {

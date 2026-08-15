@@ -141,9 +141,9 @@ Do not build a frontend-only simulation and later attempt to retrofit contract a
 ## Money and receipt rules
 
 - USDC uses the configured canonical mint and six-decimal integer amounts.
-- Every vault unit must belong to a versioned liability category.
+- Tracked liabilities must never exceed the vault balance. Unsolicited token deposits are harmless surplus and must not block settlement.
 - Payment receipt consumption and refund are mutually exclusive.
-- Entry/revival activation requires authenticated durable receipt evidence; a client assertion or transaction signature string is insufficient.
+- Entry/revival activation requires the canonical program-owned receipt PDA with exact owner, run, day, wallet, kind, nonce, state, and amount binding; a client assertion or transaction signature string is insufficient.
 - Settlement legs are retryable and cannot exceed the distributable pool.
 - Admin may trigger V1 settlement but cannot choose the winner, split, recipients, or amount.
 - A pause must not strand otherwise valid refunds unless the refund path itself is unsafe.
@@ -162,10 +162,13 @@ Do not build a frontend-only simulation and later attempt to retrofit contract a
 - Fail closed at an unrevealed chunk frontier.
 - Reject all gameplay at or after authoritative UTC cutoff even if automation is late.
 - Commit the final record before settlement can begin.
+- At cutoff, sweep every `DailyBest` into the strict world record before the commit-payer closes the world. A closed world cannot accept later record claims.
+- Map chunks are immutable base-layer accounts. Realtime world state is read from ER first, then explicitly checkpointed to base before any base-layer chunk request that depends on record/frontier state.
 
 ## Gameplay implementation rules
 
 - A movement action is a cardinal one-tile intent unless a closed, versioned ability handler defines otherwise.
+- A blocked in-bounds movement intent consumes the action and rotates the player toward that tile without changing position, score, cooldowns, or hazard schedule.
 - Never permit two live players on one tile, including spawn, movement, swaps, pulls, pushes, dashes, and revival placement.
 - Ability dispatch uses a closed enum and bounded arguments; no uploaded scripts or arbitrary effect payloads.
 - Cooldowns use authoritative timestamps and survive disconnect, device change, death, and paid revival.

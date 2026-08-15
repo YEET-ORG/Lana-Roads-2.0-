@@ -78,11 +78,13 @@ describe("shared golden vectors", () => {
     assert.deepEqual(sectorOf(7, 7), [0, 0]);
     assert.deepEqual(sectorOf(8, 7), [1, 0]);
     assert.deepEqual(sectorOf(63, 8), [7, 1]);
+    assert.deepEqual(sectorOf(63, 1_000_000), [7, 125_000]);
     assert.equal(sectorBit(0, 0), 0);
     assert.equal(sectorBit(7, 0), 7);
     assert.equal(sectorBit(0, 1), 8);
     assert.equal(sectorBit(7, 7), 63);
     assert.equal(sectorBit(9, 9), 9);
+    assert.equal(sectorBit(63, 1_000_000), 7);
   });
 
   // -------------------------------------------------------------------------

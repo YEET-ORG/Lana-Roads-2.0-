@@ -1,9 +1,8 @@
 /**
  * Assign pending gacha pulls.
  *
- * A player pays, `request_pull` snapshots the odds, and the pull then sits
- * in `Pending` until the configured `vrf_authority` calls `assign_pull`.
- * Nothing did that, so every pack ever bought stayed unopened.
+ * MagicBlock VRF writes verified randomness into a pull, after which this
+ * permissionless crank completes deterministic rarity/variant assignment.
  *
  * The awkward part is `selected_variant`: the program re-derives the
  * selection from the randomness and requires the passed account to be
@@ -13,16 +12,11 @@
  * against each candidate and sends the one the program accepts. The program
  * stays the only implementation of the selection.
  *
- * Until real MagicBlock VRF transport is wired, the randomness is drawn
- * here. That is the known pre-mainnet gate: whoever holds this key could
- * grind for a legendary, and only a verifiable source closes it.
- *
  *   npx tsx scripts/assign-pulls.ts          # one sweep
  *   WATCH=1 npx tsx scripts/assign-pulls.ts  # keep assigning
  */
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3 } from "@coral-xyz/anchor";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -40,6 +34,8 @@ const le4 = (v: number) => {
   b.writeUInt32LE(v);
   return b;
 };
+const rarityPool = (season: number, rarity: number) =>
+  pda(Buffer.from("rarity_pool"), le2(season), Buffer.from([rarity]));
 const pda = (...s: (Buffer | Uint8Array)[]) =>
   web3.PublicKey.findProgramAddressSync(s as Buffer[], PROGRAM_ID)[0];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +63,7 @@ export async function assignPendingPulls(opts: {
   const pulls: any[] = await program.account.gachaPull
     .all()
     .then((rows: any[]) =>
-      rows.filter((r) => Object.keys(r.account.state)[0] === "pending"),
+      rows.filter((r) => Object.keys(r.account.state)[0] === "randomnessReady"),
     )
     .catch(() => []);
   if (!pulls.length) return out;
@@ -93,24 +89,20 @@ export async function assignPendingPulls(opts: {
       );
       continue;
     }
-    const remaining = variants.map((v: any) => ({
-      pubkey: v.publicKey,
-      isSigner: false,
-      isWritable: false,
-    }));
-
-    const randomness = [...randomBytes(32)];
     const base = {
       config: pda(Buffer.from("config")),
       season,
       banner: pda(Buffer.from("banner"), le2(seasonIndex), Buffer.from([pull.tier])),
       profile: pda(Buffer.from("player"), pull.player.toBuffer()),
       pull: pullKey,
+      commonPool: rarityPool(seasonIndex, 0),
+      rarePool: rarityPool(seasonIndex, 1),
+      epicPool: rarityPool(seasonIndex, 2),
+      legendaryPool: rarityPool(seasonIndex, 3),
       teamTreasury: config.teamTreasury,
       gachaVaultAuthority: pda(Buffer.from("gacha_vault_authority")),
       gachaVault: pda(Buffer.from("gacha_vault")),
       usdcMint: config.usdcMint,
-      vrfAuthority: authority.publicKey,
       tokenProgram: TOKEN_PROGRAM,
     };
 
@@ -119,9 +111,8 @@ export async function assignPendingPulls(opts: {
     let sent = false;
     for (const candidate of variants) {
       const build = program.methods
-        .assignPull(pull.requestGeneration, randomness)
-        .accountsPartial({ ...base, selectedVariant: candidate.publicKey })
-        .remainingAccounts(remaining);
+        .assignPull()
+        .accountsPartial({ ...base, selectedVariant: candidate.publicKey });
       try {
         await build.simulate();
       } catch {

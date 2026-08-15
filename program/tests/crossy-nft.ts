@@ -79,7 +79,9 @@ const le64 = (n: number | bigint) => {
   return b;
 };
 
-describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
+const describeVrfE2e = process.env.RUN_VRF_E2E === "1" ? describe : describe.skip;
+
+describeVrfE2e("crossy-world NFT + gameplay E2E (real mpl-core + MagicBlock VRF)", () => {
   const provider = new anchor.AnchorProvider(
     new web3.Connection(process.env.PROVIDER_ENDPOINT || "http://localhost:8899", {
       wsEndpoint: process.env.WS_ENDPOINT || "ws://localhost:8900",
@@ -115,7 +117,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
   const bestPda = (world: web3.PublicKey, w: web3.PublicKey) =>
     pda(S.best, world.toBuffer(), w.toBuffer());
   const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
-    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le16(sy));
+    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le32(sy));
   const lockPda = (world: web3.PublicKey, w: web3.PublicKey, attempt: number) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(attempt));
   const receiptPda = (kind: number, day: number, w: web3.PublicKey, nonce: number) =>
@@ -248,7 +250,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
         teamTreasury: treasury,
         collection,
         collectionAuthority: mintAuthPda,
-        vrfAuthority: vrfAuthority.publicKey,
+        validator: admin.publicKey,
         admin: admin.publicKey,
       })
       .rpc();
@@ -310,7 +312,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     vaultPda = pda(S.dailyVault, le64(day), Buffer.from("ata"));
     paidWorld = pda(S.world, Buffer.from([0]), le64(day));
     casualWorld = pda(S.world, Buffer.from([1]), le64(day));
-    spawnChunk = pda(S.chunk, le64(day), le16(0));
+    spawnChunk = pda(S.chunk, le64(day), le32(0));
     await program.methods
       .prepareDay(new BN(day))
       .accountsPartial({
@@ -388,7 +390,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
       ])
       .signers([playerC])
       .rpc();
-    await program.methods
+    await (program.methods as any)
       .assignPull(1, Array(32).fill(9))
       .accountsPartial({
         config: configPda,
@@ -418,7 +420,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     const assetKp = web3.Keypair.generate();
     asset = assetKp.publicKey;
     await program.methods
-      .claimPull("Sprinter #1", "https://example.invalid/1.json")
+      .claimPull("https://example.invalid/1.json")
       .accountsPartial({
         config: configPda,
         pull: pda(S.pull, playerC.publicKey.toBuffer(), le32(0)),
@@ -437,7 +439,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     // Verify with the official client against the real program.
     const fetched = await fetchAssetV1(umi, umiPk(asset.toBase58()));
     assert.equal(fetched.owner.toString(), playerC.publicKey.toBase58());
-    assert.equal(fetched.name, "Sprinter #1");
+    assert.equal(fetched.name, "Lana Agent #1");
     const map = await program.account.assetMap.fetch(pda(S.assetMap, asset.toBuffer()));
     assert.equal(map.classId, CLASS_SPRINTER);
     const variant = await program.account.variantInventory.fetch(
@@ -454,7 +456,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     const freshKp = web3.Keypair.generate();
     await expectFail(
       program.methods
-        .claimPull("Sprinter #1", "u")
+        .claimPull("u")
         .accountsPartial({
           config: configPda,
           pull: pda(S.pull, playerC.publicKey.toBuffer(), le32(0)),
@@ -1210,38 +1212,38 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     await moveForward();
     await program.methods
       .claimRecord()
-      .accountsPartial({ world: paidWorld, run: runPda(paidWorld, c) })
+      .accountsPartial({ world: paidWorld, best: bestPda(paidWorld, c) })
       .rpc();
 
     // Request chunk 1 (frontier margin reached), reveal with the VRF key.
-    await program.methods
-      .requestChunk(1)
+    await (program.methods as any)
+      .requestChunk(new BN(day), 1)
       .accountsPartial({
         world: paidWorld,
-        chunk: pda(S.chunk, le64(day), le16(1)),
+        chunk: pda(S.chunk, le64(day), le32(1)),
         payer: admin.publicKey,
       })
       .rpc();
     // Wrong identity rejected.
     await expectFail(
-      program.methods
+      (program.methods as any)
         .revealChunk(1, Array(32).fill(5))
         .accountsPartial({
           config: configPda,
           world: paidWorld,
-          chunk: pda(S.chunk, le64(day), le16(1)),
+          chunk: pda(S.chunk, le64(day), le32(1)),
           vrfAuthority: playerD.publicKey,
         })
         .signers([playerD])
         .rpc(),
       "BadVrfAuthority",
     );
-    await program.methods
+    await (program.methods as any)
       .revealChunk(1, Array(32).fill(5))
       .accountsPartial({
         config: configPda,
         world: paidWorld,
-        chunk: pda(S.chunk, le64(day), le16(1)),
+        chunk: pda(S.chunk, le64(day), le32(1)),
         vrfAuthority: vrfAuthority.publicKey,
       })
       .signers([vrfAuthority])
@@ -1250,21 +1252,24 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
     const world = await program.account.worldHeader.fetch(paidWorld);
     assert.equal(world.revealedRows, 32);
     assert.equal(world.nextChunkIndex, 2);
+    assert.equal(world.mapSeq.toNumber(), 1);
+    assert.equal(world.latestChunkIndex, 1);
     const chunk = await program.account.chunkDefinition.fetch(
-      pda(S.chunk, le64(day), le16(1)),
+      pda(S.chunk, le64(day), le32(1)),
     );
+    assert.deepEqual(world.latestChunkHash, chunk.randomnessHash);
     assert.deepEqual(chunk.status, { revealed: {} });
     // First row of the revealed chunk is safe grass (generator guarantee).
     assert.equal(chunk.lanes[0].kind, 0);
 
     // Duplicate reveal is idempotently rejected.
     await expectFail(
-      program.methods
+      (program.methods as any)
         .revealChunk(1, Array(32).fill(6))
         .accountsPartial({
           config: configPda,
           world: paidWorld,
-          chunk: pda(S.chunk, le64(day), le16(1)),
+          chunk: pda(S.chunk, le64(day), le32(1)),
           vrfAuthority: vrfAuthority.publicKey,
         })
         .signers([vrfAuthority])
@@ -1278,7 +1283,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
         .initSector(sx, 2)
         .accountsPartial({
           world: paidWorld,
-          chunk: pda(S.chunk, le64(day), le16(1)),
+          chunk: pda(S.chunk, le64(day), le32(1)),
           sector: sectorPda(paidWorld, sx, 2),
           payer: admin.publicKey,
         })
@@ -1289,7 +1294,7 @@ describe("crossy-world NFT + gameplay E2E (real mpl-core)", () => {
   it("dies to a hazard via check_hazard and revives for exactly 10 USDC", async function () {
     this.timeout(120_000);
     const c = playerC.publicKey;
-    const chunk1 = pda(S.chunk, le64(day), le16(1));
+    const chunk1 = pda(S.chunk, le64(day), le32(1));
     const chunkAcc = await program.account.chunkDefinition.fetch(chunk1);
     // Find the first hazardous lane (road/river/rail) in chunk 1.
     const hazardRowLocal = chunkAcc.lanes.findIndex((l: any) => l.kind !== 0);

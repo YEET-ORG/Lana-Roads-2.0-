@@ -46,6 +46,8 @@ pub enum CrossyError {
     WrongAssetOwner,
     #[msg("class or variant mapping is invalid or inactive")]
     BadClassMapping,
+    #[msg("asset metadata URI does not match the configured variant")]
+    MetadataMismatch,
     #[msg("agent is locked for an active attempt")]
     AgentLocked,
     #[msg("agent is listed on the marketplace")]

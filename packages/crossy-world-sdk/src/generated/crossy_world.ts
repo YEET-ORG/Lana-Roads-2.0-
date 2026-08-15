@@ -53,6 +53,93 @@ export type CrossyWorld = {
       "args": []
     },
     {
+      "name": "activateSeason",
+      "discriminator": [
+        65,
+        12,
+        62,
+        60,
+        29,
+        166,
+        239,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "season",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  115,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "seasonIndex"
+              }
+            ]
+          }
+        },
+        {
+          "name": "standardBanner"
+        },
+        {
+          "name": "enhancedBanner"
+        },
+        {
+          "name": "premiumBanner"
+        },
+        {
+          "name": "commonPool"
+        },
+        {
+          "name": "rarePool"
+        },
+        {
+          "name": "epicPool"
+        },
+        {
+          "name": "legendaryPool"
+        },
+        {
+          "name": "admin",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "seasonIndex",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "assignPull",
       "discriminator": [
         230,
@@ -155,11 +242,27 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pull_nonce",
+                "path": "pull.pullNonce",
                 "account": "gachaPull"
               }
             ]
           }
+        },
+        {
+          "name": "commonPool",
+          "writable": true
+        },
+        {
+          "name": "rarePool",
+          "writable": true
+        },
+        {
+          "name": "epicPool",
+          "writable": true
+        },
+        {
+          "name": "legendaryPool",
+          "writable": true
         },
         {
           "name": "selectedVariant",
@@ -189,7 +292,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "selected_variant.variant_id",
+                "path": "selectedVariant.variantId",
                 "account": "variantInventory"
               }
             ]
@@ -263,31 +366,10 @@ export type CrossyWorld = {
           "name": "usdcMint"
         },
         {
-          "name": "vrfAuthority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "signer": true
-        },
-        {
           "name": "tokenProgram"
         }
       ],
-      "args": [
-        {
-          "name": "generation",
-          "type": "u16"
-        },
-        {
-          "name": "randomness",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
-      ]
+      "args": []
     },
     {
       "name": "beginPaidAttempt",
@@ -844,7 +926,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pull_nonce",
+                "path": "pull.pullNonce",
                 "account": "gachaPull"
               }
             ]
@@ -874,7 +956,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.assigned_variant",
+                "path": "pull.assignedVariant",
                 "account": "gachaPull"
               }
             ]
@@ -969,10 +1051,6 @@ export type CrossyWorld = {
       ],
       "args": [
         {
-          "name": "name",
-          "type": "string"
-        },
-        {
           "name": "uri",
           "type": "string"
         }
@@ -996,15 +1074,16 @@ export type CrossyWorld = {
           "writable": true
         },
         {
-          "name": "run",
+          "name": "best",
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  114,
-                  117,
-                  110
+                  98,
+                  101,
+                  115,
+                  116
                 ]
               },
               {
@@ -1013,8 +1092,8 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "run.wallet",
-                "account": "playerRun"
+                "path": "best.wallet",
+                "account": "dailyBest"
               }
             ]
           }
@@ -1291,6 +1370,10 @@ export type CrossyWorld = {
         {
           "name": "world",
           "writable": true
+        },
+        {
+          "name": "closer",
+          "signer": true
         }
       ],
       "args": []
@@ -1386,6 +1469,71 @@ export type CrossyWorld = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "consumePullRandomness",
+      "discriminator": [
+        83,
+        66,
+        163,
+        210,
+        208,
+        1,
+        5,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "vrfProgramIdentity",
+          "docs": [
+            "Scoped VRF identity PDA, bound to this program. Its presence as a signer proves",
+            "the callback was issued by the VRF program for this program."
+          ],
+          "signer": true
+        },
+        {
+          "name": "pull",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  117,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pull.player",
+                "account": "gachaPull"
+              },
+              {
+                "kind": "account",
+                "path": "pull.pullNonce",
+                "account": "gachaPull"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "generation",
+          "type": "u16"
+        }
+      ]
     },
     {
       "name": "consumeRollover",
@@ -1769,6 +1917,22 @@ export type CrossyWorld = {
           }
         },
         {
+          "name": "commonPool",
+          "writable": true
+        },
+        {
+          "name": "rarePool",
+          "writable": true
+        },
+        {
+          "name": "epicPool",
+          "writable": true
+        },
+        {
+          "name": "legendaryPool",
+          "writable": true
+        },
+        {
           "name": "admin",
           "writable": true,
           "signer": true
@@ -1867,6 +2031,10 @@ export type CrossyWorld = {
           ]
         },
         {
+          "name": "rarityPool",
+          "writable": true
+        },
+        {
           "name": "variant",
           "writable": true,
           "pda": {
@@ -1953,6 +2121,24 @@ export type CrossyWorld = {
         144
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -2130,6 +2316,24 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2288,7 +2492,7 @@ export type CrossyWorld = {
         },
         {
           "name": "chunkIndex",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -2305,6 +2509,24 @@ export type CrossyWorld = {
         131
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -2482,6 +2704,24 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2644,7 +2884,7 @@ export type CrossyWorld = {
         },
         {
           "name": "sectorY",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -2661,6 +2901,24 @@ export type CrossyWorld = {
         79
       ],
       "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "payer",
           "signer": true
@@ -3145,7 +3403,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "world.next_chunk_index",
+                "path": "world.nextChunkIndex",
                 "account": "worldHeader"
               }
             ]
@@ -3416,7 +3674,7 @@ export type CrossyWorld = {
         },
         {
           "name": "sectorY",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -3474,7 +3732,7 @@ export type CrossyWorld = {
           "name": "collectionAuthority"
         },
         {
-          "name": "vrfAuthority"
+          "name": "validator"
         },
         {
           "name": "admin",
@@ -4016,6 +4274,61 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "markChunkReady",
+      "discriminator": [
+        54,
+        96,
+        115,
+        15,
+        128,
+        90,
+        245,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "world",
+          "writable": true
+        },
+        {
+          "name": "chunk",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  104,
+                  117,
+                  110,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world.day",
+                "account": "worldHeader"
+              },
+              {
+                "kind": "arg",
+                "path": "chunkIndex"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "chunkIndex",
+          "type": "u32"
+        }
+      ]
+    },
+    {
       "name": "moveAction",
       "discriminator": [
         108,
@@ -4350,6 +4663,8 @@ export type CrossyWorld = {
                 "kind": "const",
                 "value": [
                   0,
+                  0,
+                  0,
                   0
                 ]
               }
@@ -4542,58 +4857,12 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "world",
+          "name": "vrfProgramIdentity",
           "docs": [
-            "typed account would reject it. The handler validates it by committed",
-            "read + mode/day PDA derivation."
-          ]
-        },
-        {
-          "name": "prevChunk",
-          "docs": [
-            "Continuity anchor: the preceding chunk must already be revealed, so",
-            "the revealed range can never gain a hole."
+            "Scoped VRF identity PDA, bound to this program. Its presence as a signer proves",
+            "the callback was issued by the VRF program for this program."
           ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunk_index.saturating_sub(1)"
-              }
-            ]
-          }
+          "signer": true
         },
         {
           "name": "chunk",
@@ -4620,29 +4889,9 @@ export type CrossyWorld = {
               }
             ]
           }
-        },
-        {
-          "name": "vrfAuthority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
-        {
-          "name": "day",
-          "type": "u64"
-        },
-        {
-          "name": "chunkIndex",
-          "type": "u16"
-        },
         {
           "name": "randomness",
           "type": {
@@ -4651,6 +4900,18 @@ export type CrossyWorld = {
               32
             ]
           }
+        },
+        {
+          "name": "day",
+          "type": "u64"
+        },
+        {
+          "name": "chunkIndex",
+          "type": "u32"
+        },
+        {
+          "name": "generation",
+          "type": "u16"
         }
       ]
     },
@@ -4834,7 +5095,31 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "pull.pull_nonce",
+                "path": "pull.pullNonce",
+                "account": "gachaPull"
+              }
+            ]
+          }
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pull.player",
                 "account": "gachaPull"
               }
             ]
@@ -5034,8 +5319,28 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
-          "name": "world",
-          "writable": true
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "world"
+        },
+        {
+          "name": "prevChunk"
         },
         {
           "name": "chunk",
@@ -5053,9 +5358,8 @@ export type CrossyWorld = {
                 ]
               },
               {
-                "kind": "account",
-                "path": "world.day",
-                "account": "worldHeader"
+                "kind": "arg",
+                "path": "day"
               },
               {
                 "kind": "arg",
@@ -5070,14 +5374,50 @@ export type CrossyWorld = {
           "signer": true
         },
         {
+          "name": "oracleQueue",
+          "writable": true
+        },
+        {
+          "name": "programIdentity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrfProgram",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slotHashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
+          "name": "day",
+          "type": "u64"
+        },
+        {
           "name": "chunkIndex",
-          "type": "u16"
+          "type": "u32"
         }
       ]
     },
@@ -5129,7 +5469,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "season.season_index",
+                "path": "season.seasonIndex",
                 "account": "season"
               }
             ]
@@ -5163,6 +5503,18 @@ export type CrossyWorld = {
           }
         },
         {
+          "name": "commonPool"
+        },
+        {
+          "name": "rarePool"
+        },
+        {
+          "name": "epicPool"
+        },
+        {
+          "name": "legendaryPool"
+        },
+        {
           "name": "pull",
           "writable": true,
           "pda": {
@@ -5182,7 +5534,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "profile.pull_count",
+                "path": "profile.pullCount",
                 "account": "playerProfile"
               }
             ]
@@ -5265,97 +5617,42 @@ export type CrossyWorld = {
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "tokenProgram"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "revealChunk",
-      "discriminator": [
-        71,
-        169,
-        11,
-        194,
-        226,
-        62,
-        17,
-        52
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "world",
+          "name": "oracleQueue",
           "writable": true
         },
         {
-          "name": "chunk",
-          "writable": true,
+          "name": "tokenProgram"
+        },
+        {
+          "name": "programIdentity",
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  99,
-                  104,
-                  117,
+                  105,
+                  100,
+                  101,
                   110,
-                  107
+                  116,
+                  105,
+                  116,
+                  121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "worldHeader"
-              },
-              {
-                "kind": "account",
-                "path": "chunk.chunk_index",
-                "account": "chunkDefinition"
               }
             ]
           }
         },
         {
-          "name": "vrfAuthority",
-          "docs": [
-            "The authenticated randomness identity fixed in config."
-          ],
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "generation",
-          "type": "u16"
+          "name": "vrfProgram",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
         },
         {
-          "name": "randomness",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
+          "name": "slotHashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
         }
-      ]
+      ],
+      "args": []
     },
     {
       "name": "rotateSession",
@@ -5498,16 +5795,16 @@ export type CrossyWorld = {
       ]
     },
     {
-      "name": "setVrfAuthority",
+      "name": "setValidator",
       "discriminator": [
-        219,
-        49,
-        136,
-        166,
-        71,
-        6,
-        51,
-        74
+        150,
+        135,
+        78,
+        171,
+        156,
+        91,
+        161,
+        221
       ],
       "accounts": [
         {
@@ -5536,7 +5833,7 @@ export type CrossyWorld = {
       ],
       "args": [
         {
-          "name": "newAuthority",
+          "name": "newValidator",
           "type": "pubkey"
         }
       ]
@@ -5622,6 +5919,24 @@ export type CrossyWorld = {
       ],
       "accounts": [
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "payer",
           "writable": true,
           "signer": true
@@ -5701,7 +6016,7 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "lock.attempt_nonce",
+                "path": "lock.attemptNonce",
                 "account": "agentLock"
               }
             ]
@@ -5831,12 +6146,12 @@ export type CrossyWorld = {
               },
               {
                 "kind": "account",
-                "path": "caster.class_id",
+                "path": "caster.classId",
                 "account": "playerRun"
               },
               {
                 "kind": "account",
-                "path": "caster.class_version",
+                "path": "caster.classVersion",
                 "account": "playerRun"
               }
             ]
@@ -6172,6 +6487,19 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "rarityPool",
+      "discriminator": [
+        58,
+        216,
+        129,
+        198,
+        222,
+        247,
+        236,
+        254
+      ]
+    },
+    {
       "name": "season",
       "discriminator": [
         76,
@@ -6343,6 +6671,19 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "chunkReady",
+      "discriminator": [
+        151,
+        190,
+        133,
+        179,
+        104,
+        128,
+        179,
+        32
+      ]
+    },
+    {
       "name": "chunkRequested",
       "discriminator": [
         182,
@@ -6470,6 +6811,19 @@ export type CrossyWorld = {
         252,
         136,
         107
+      ]
+    },
+    {
+      "name": "frontierExtended",
+      "discriminator": [
+        182,
+        49,
+        74,
+        133,
+        2,
+        83,
+        34,
+        158
       ]
     },
     {
@@ -6681,6 +7035,19 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "seasonActivated",
+      "discriminator": [
+        15,
+        222,
+        137,
+        105,
+        208,
+        146,
+        188,
+        6
+      ]
+    },
+    {
       "name": "seasonConfigured",
       "discriminator": [
         60,
@@ -6704,6 +7071,19 @@ export type CrossyWorld = {
         91,
         205,
         115
+      ]
+    },
+    {
+      "name": "validatorChanged",
+      "discriminator": [
+        59,
+        121,
+        4,
+        77,
+        62,
+        29,
+        214,
+        54
       ]
     },
     {
@@ -6826,236 +7206,241 @@ export type CrossyWorld = {
     },
     {
       "code": 6018,
+      "name": "metadataMismatch",
+      "msg": "asset metadata URI does not match the configured variant"
+    },
+    {
+      "code": 6019,
       "name": "agentLocked",
       "msg": "agent is locked for an active attempt"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "agentListed",
       "msg": "agent is listed on the marketplace"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "starterAlreadyClaimed",
       "msg": "starter entitlement already claimed"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "starterNotClaimed",
       "msg": "starter entitlement not claimed"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "wrongAmount",
       "msg": "payment amount does not match program-derived amount"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "badReceiptState",
       "msg": "receipt is not in the required state"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "receiptMismatch",
       "msg": "receipt does not match this run/attempt/death nonce"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "wrongVault",
       "msg": "wrong vault account"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "wrongTreasury",
       "msg": "wrong treasury account"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "overflow",
       "msg": "checked arithmetic overflow"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "liabilityMismatch",
       "msg": "vault liability invariant violated"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "badBasisPoints",
       "msg": "basis points must sum to 10000"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "soldOut",
       "msg": "variant is sold out"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "staleInventory",
       "msg": "inventory revision is stale"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "pityInventoryUnavailable",
       "msg": "required pity inventory unavailable; banner paused"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "supplyExceeded",
       "msg": "supply cap exceeded"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "invalidTransition",
       "msg": "invalid state transition"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "alreadyTerminal",
       "msg": "already consumed, refunded, claimed, or settled"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "dayNotOpen",
       "msg": "day is not prepared/open for this operation"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "dayVoided",
       "msg": "day is voided"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "paused",
       "msg": "subsystem is paused"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "badActionSequence",
       "msg": "duplicate or out-of-order action sequence"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "badAttemptNonce",
       "msg": "attempt nonce mismatch"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "badRunState",
       "msg": "run is not in the required state"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "worldNotOpen",
       "msg": "world is not open"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "attemptStillActive",
       "msg": "another attempt is still active for this wallet"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "tileOccupied",
       "msg": "destination tile is occupied"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "outOfBounds",
       "msg": "destination is out of bounds"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "blocked",
       "msg": "destination terrain is not traversable"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "worldFull",
       "msg": "world is full"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "cooldown",
       "msg": "cooldown has not elapsed"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "noTarget",
       "msg": "no valid target"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "immobilized",
       "msg": "player is stunned or immobilized"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "tooFast",
       "msg": "movement cadence exceeded for this slot"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "invalidName",
       "msg": "Display name is empty, too long, or contains characters that cannot be shown"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "staleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "lethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "effectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "badAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "frontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "frontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "wrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "badGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "badChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "notReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "badVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6064,
+      "code": 6065,
       "name": "capacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -7082,7 +7467,7 @@ export type CrossyWorld = {
           },
           {
             "name": "targetY",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -7421,7 +7806,7 @@ export type CrossyWorld = {
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -7445,7 +7830,7 @@ export type CrossyWorld = {
           },
           {
             "name": "finalScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "reason",
@@ -7567,14 +7952,14 @@ export type CrossyWorld = {
           },
           {
             "name": "chunkIndex",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "rowStart",
             "docs": [
               "First absolute row of this chunk (chunk_index * 16)."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "rowCount",
@@ -7642,6 +8027,31 @@ export type CrossyWorld = {
       }
     },
     {
+      "name": "chunkReady",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "world",
+            "type": "pubkey"
+          },
+          {
+            "name": "chunkIndex",
+            "type": "u32"
+          },
+          {
+            "name": "randomnessHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "chunkRequestState",
       "repr": {
         "kind": "rust"
@@ -7669,7 +8079,7 @@ export type CrossyWorld = {
           },
           {
             "name": "chunkIndex",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "generation",
@@ -7689,7 +8099,7 @@ export type CrossyWorld = {
           },
           {
             "name": "chunkIndex",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "generation",
@@ -7715,6 +8125,9 @@ export type CrossyWorld = {
       "type": {
         "kind": "enum",
         "variants": [
+          {
+            "name": "uninitialized"
+          },
           {
             "name": "requested"
           },
@@ -7852,6 +8265,10 @@ export type CrossyWorld = {
           {
             "name": "collection",
             "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
           }
         ]
       }
@@ -7876,7 +8293,7 @@ export type CrossyWorld = {
           },
           {
             "name": "bestScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "attemptNonce",
@@ -8014,7 +8431,7 @@ export type CrossyWorld = {
           },
           {
             "name": "settledScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "winnerAmount",
@@ -8122,7 +8539,7 @@ export type CrossyWorld = {
           },
           {
             "name": "recordScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "recordHolder",
@@ -8229,6 +8646,55 @@ export type CrossyWorld = {
       }
     },
     {
+      "name": "frontierExtended",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "world",
+            "type": "pubkey"
+          },
+          {
+            "name": "day",
+            "type": "u64"
+          },
+          {
+            "name": "mode",
+            "type": {
+              "defined": {
+                "name": "worldMode"
+              }
+            }
+          },
+          {
+            "name": "mapSeq",
+            "type": "u64"
+          },
+          {
+            "name": "chunkIndex",
+            "type": "u32"
+          },
+          {
+            "name": "generation",
+            "type": "u16"
+          },
+          {
+            "name": "revealedRows",
+            "type": "u32"
+          },
+          {
+            "name": "randomnessHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "gachaPull",
       "docs": [
         "PDA: [\"pull\", player, pull_nonce_le]"
@@ -8283,15 +8749,6 @@ export type CrossyWorld = {
             "type": "u16"
           },
           {
-            "name": "inventoryRevision",
-            "docs": [
-              "Banner inventory revision at request; a callback whose required",
-              "selection was invalidated by concurrent assignment refunds instead of",
-              "silently using newer odds."
-            ],
-            "type": "u32"
-          },
-          {
             "name": "requestedAt",
             "type": "i64"
           },
@@ -8302,6 +8759,18 @@ export type CrossyWorld = {
               "late callback from an older generation must fail."
             ],
             "type": "u16"
+          },
+          {
+            "name": "randomness",
+            "docs": [
+              "Set only by an authenticated MagicBlock VRF callback."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           },
           {
             "name": "state",
@@ -8397,11 +8866,9 @@ export type CrossyWorld = {
             "type": "pubkey"
           },
           {
-            "name": "vrfAuthority",
+            "name": "validator",
             "docs": [
-              "Authenticated randomness callback identity. Only this signer may",
-              "deliver chunk/gacha randomness (the MagicBlock VRF integration point;",
-              "binding, generation, and idempotency rules live in the handlers)."
+              "MagicBlock validator that must host every delegated gameplay account."
             ],
             "type": "pubkey"
           },
@@ -8616,7 +9083,7 @@ export type CrossyWorld = {
           },
           {
             "name": "sectorY",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "occupancy",
@@ -8917,7 +9384,7 @@ export type CrossyWorld = {
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "reviveDeadline",
@@ -9024,6 +9491,15 @@ export type CrossyWorld = {
             "type": "u32"
           },
           {
+            "name": "pendingPull",
+            "docs": [
+              "The only unresolved pull for this wallet. Serializing pulls is what",
+              "makes pity snapshots exact instead of allowing parallel requests to",
+              "reuse the same counters."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "receiptCount",
             "docs": [
               "Sequential nonce for payment receipt PDAs."
@@ -9050,11 +9526,11 @@ export type CrossyWorld = {
           },
           {
             "name": "highestPaidScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "highestCasualScore",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "completedAttempts",
@@ -9106,7 +9582,7 @@ export type CrossyWorld = {
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           }
         ]
       }
@@ -9184,7 +9660,7 @@ export type CrossyWorld = {
           },
           {
             "name": "y",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "facing",
@@ -9198,7 +9674,7 @@ export type CrossyWorld = {
             "docs": [
               "Furthest forward row = authoritative score for this attempt."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "safeX",
@@ -9209,7 +9685,7 @@ export type CrossyWorld = {
           },
           {
             "name": "safeY",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "lastMoveSlot",
@@ -9222,6 +9698,14 @@ export type CrossyWorld = {
             "name": "actionSeq",
             "docs": [
               "Exact-next action sequence; consumed by successfully executed actions."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stateSeq",
+            "docs": [
+              "Monotonic sequence for every authoritative run mutation, including",
+              "changes that do not consume a player action."
             ],
             "type": "u64"
           },
@@ -9414,10 +9898,6 @@ export type CrossyWorld = {
           {
             "name": "price",
             "type": "u64"
-          },
-          {
-            "name": "inventoryRevision",
-            "type": "u32"
           }
         ]
       }
@@ -9434,6 +9914,9 @@ export type CrossyWorld = {
             "name": "pending"
           },
           {
+            "name": "randomnessReady"
+          },
+          {
             "name": "assigned"
           },
           {
@@ -9444,6 +9927,79 @@ export type CrossyWorld = {
           },
           {
             "name": "refunded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rarityPool",
+      "docs": [
+        "PDA: [\"rarity_pool\", season_le, rarity]. A compact canonical catalog",
+        "lets a gacha assignment select from one bounded account after VRF",
+        "fulfillment; callback transactions never need hundreds of variant keys."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "season",
+            "type": "u16"
+          },
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "count",
+            "type": "u16"
+          },
+          {
+            "name": "revision",
+            "docs": [
+              "Monotonic reservation counter for auditing and indexer cache busting."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "initialized",
+            "type": "bool"
+          },
+          {
+            "name": "entries",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "rarityPoolEntry"
+                  }
+                },
+                64
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rarityPoolEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "variantId",
+            "type": "u16"
+          },
+          {
+            "name": "available",
+            "docs": [
+              "Units not yet assigned. Reservations are removed here atomically with",
+              "the corresponding `VariantInventory.reserved` increment."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -9511,7 +10067,7 @@ export type CrossyWorld = {
           },
           {
             "name": "score",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "slot",
@@ -9656,6 +10212,31 @@ export type CrossyWorld = {
       }
     },
     {
+      "name": "seasonActivated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "season",
+            "type": "u16"
+          },
+          {
+            "name": "weightsHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "variantCount",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "seasonConfigured",
       "type": {
         "kind": "struct",
@@ -9732,7 +10313,7 @@ export type CrossyWorld = {
           },
           {
             "name": "centerY",
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "radius",
@@ -9763,6 +10344,22 @@ export type CrossyWorld = {
           {
             "name": "nonce",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "validatorChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
           }
         ]
       }
@@ -9970,14 +10567,67 @@ export type CrossyWorld = {
               "Number of revealed rows; the frontier. Movement at/above this row is",
               "rejected (fail closed at an unrevealed boundary)."
             ],
+            "type": "u32"
+          },
+          {
+            "name": "mapSeq",
+            "docs": [
+              "Monotonic sequence for visible map changes. Clients use this to",
+              "detect dropped frontier notifications and refetch a snapshot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "latestChunkIndex",
+            "docs": [
+              "Exact immutable chunk currently terminating the visible frontier."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "latestChunkGeneration",
             "type": "u16"
+          },
+          {
+            "name": "latestChunkHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "readyChunkIndex",
+            "docs": [
+              "A non-zero index means all sectors for that next chunk were observed",
+              "together on this ER and the frontier may advance over it."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "readyChunkHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "spawnReady",
+            "docs": [
+              "The spawn chunk and all of its sectors have been observed together on",
+              "this world's ER. No attempt may activate before this barrier is set."
+            ],
+            "type": "bool"
           },
           {
             "name": "recordScore",
             "docs": [
               "Current record: score, holder, attempt, slot. The ONLY prize authority."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "recordHolder",
@@ -9996,7 +10646,7 @@ export type CrossyWorld = {
             "docs": [
               "Chunk pipeline: index the next request will target and its state."
             ],
-            "type": "u16"
+            "type": "u32"
           },
           {
             "name": "chunkRequestState",

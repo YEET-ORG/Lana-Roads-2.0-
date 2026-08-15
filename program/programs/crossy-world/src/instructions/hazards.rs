@@ -71,9 +71,10 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
 
     if !hazard::is_lethal(&descriptor, run.x, t_ms) {
         // Still safe: reschedule the next meaningful deadline, if any.
-        run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+        run.bump_hazard_nonce()?;
         run.hazard_deadline_ms =
             hazard::next_hazard_deadline_ms(&descriptor, run.x, t_ms).unwrap_or(0);
+        run.touch()?;
         return Ok(());
     }
 
@@ -115,20 +116,21 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
         if dest_free {
             if same_sector {
                 let s = &mut ctx.accounts.sector;
-                s.clear_occupied(src_bit);
-                s.set_occupied(dest_bit);
+                s.clear_occupied(src_bit)?;
+                s.set_occupied(dest_bit)?;
             } else {
-                ctx.accounts.sector.clear_occupied(src_bit);
+                ctx.accounts.sector.clear_occupied(src_bit)?;
                 ctx.accounts
                     .drift_sector
                     .as_deref_mut()
-                    .unwrap()
-                    .set_occupied(dest_bit);
+                    .ok_or(CrossyError::WrongSector)?
+                    .set_occupied(dest_bit)?;
             }
             run.x = drift;
-            run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+            run.bump_hazard_nonce()?;
             run.hazard_deadline_ms =
                 hazard::next_hazard_deadline_ms(&descriptor, drift, t_ms).unwrap_or(0);
+            run.touch()?;
             return Ok(());
         }
     }
@@ -136,9 +138,10 @@ pub fn check_hazard(ctx: Context<CheckHazard>, hazard_nonce: u32) -> Result<()> 
     // Shield absorbs one environmental collision.
     if run.shield_charges > 0 && now < run.shield_until {
         run.shield_charges -= 1;
-        run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+        run.bump_hazard_nonce()?;
         run.hazard_deadline_ms =
             hazard::next_hazard_deadline_ms(&descriptor, run.x, t_ms).unwrap_or(0);
+        run.touch()?;
         return Ok(());
     }
 
@@ -164,8 +167,11 @@ pub fn execute_death(
 ) -> Result<()> {
     // Remove from occupancy immediately.
     let bit = grid::sector_bit(run.x, run.y);
-    sector.clear_occupied(bit);
-    world.active_players = world.active_players.saturating_sub(1);
+    sector.clear_occupied(bit)?;
+    world.active_players = world
+        .active_players
+        .checked_sub(1)
+        .ok_or(CrossyError::LiabilityMismatch)?;
 
     let death_x = run.x;
     let death_y = run.y;
@@ -174,7 +180,7 @@ pub fn execute_death(
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
     // Invalidate movement and scheduled-action nonces.
-    run.hazard_nonce = run.hazard_nonce.wrapping_add(1);
+    run.bump_hazard_nonce()?;
     run.hazard_deadline_ms = 0;
 
     match world.mode {
@@ -222,5 +228,6 @@ pub fn execute_death(
             });
         }
     }
+    run.touch()?;
     Ok(())
 }

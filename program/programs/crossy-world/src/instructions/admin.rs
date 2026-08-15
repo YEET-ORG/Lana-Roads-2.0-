@@ -6,6 +6,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount};
+use solana_sha256_hasher as sha256;
 
 use crate::constants::{
     seeds, BANNER_PRICES, HARD_MAX_PLAYERS, MAX_ABILITY_COOLDOWN_SECONDS, MAX_ABILITY_RANGE,
@@ -41,8 +42,8 @@ pub struct InitializeConfig<'info> {
     pub collection: UncheckedAccount<'info>,
     /// CHECK: collection update / mint authority (program PDA or ops key).
     pub collection_authority: UncheckedAccount<'info>,
-    /// CHECK: authenticated randomness callback identity.
-    pub vrf_authority: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock validator identity pinned for all delegation CPIs.
+    pub validator: UncheckedAccount<'info>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -57,6 +58,11 @@ pub fn initialize_config(
         ctx.accounts.usdc_mint.decimals == USDC_DECIMALS,
         CrossyError::WrongMint
     );
+    require_keys_eq!(
+        *ctx.accounts.usdc_mint.to_account_info().owner,
+        anchor_spl::token::ID,
+        CrossyError::WrongTokenProgram
+    );
     require!(
         max_paid_players > 0 && max_paid_players <= HARD_MAX_PLAYERS,
         CrossyError::CapacityExceeded
@@ -64,6 +70,10 @@ pub fn initialize_config(
     require!(
         max_casual_players > 0 && max_casual_players <= HARD_MAX_PLAYERS,
         CrossyError::CapacityExceeded
+    );
+    require!(
+        ctx.accounts.validator.key() != Pubkey::default(),
+        CrossyError::NotReconcilable
     );
     // Winner/team basis points are compile-time constants; assert the split.
     require!(
@@ -85,13 +95,13 @@ pub fn initialize_config(
     config.team_treasury = ctx.accounts.team_treasury.key();
     config.collection = ctx.accounts.collection.key();
     config.collection_authority = ctx.accounts.collection_authority.key();
-    config.vrf_authority = ctx.accounts.vrf_authority.key();
+    config.validator = ctx.accounts.validator.key();
     config.pause_flags = 0;
     config.winner_bps = WINNER_BPS;
     config.team_bps = TEAM_BPS;
     config.max_paid_players = max_paid_players;
     config.max_casual_players = max_casual_players;
-    config.version = 1;
+    config.version = 3;
     config.bump = ctx.bumps.config;
 
     emit!(ConfigInitialized {
@@ -99,6 +109,7 @@ pub fn initialize_config(
         usdc_mint: config.usdc_mint,
         treasury: config.team_treasury,
         collection: config.collection,
+        validator: config.validator,
     });
     Ok(())
 }
@@ -158,11 +169,17 @@ pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     Ok(())
 }
 
-/// Rotate the authenticated randomness identity. Chunk and gacha callbacks
-/// are bound to whatever key is current at the moment they land; already
-/// revealed results are immutable, so a rotation can never rewrite history.
-pub fn set_vrf_authority(ctx: Context<AdminOnly>, new_authority: Pubkey) -> Result<()> {
-    ctx.accounts.config.vrf_authority = new_authority;
+pub fn set_validator(ctx: Context<AdminOnly>, new_validator: Pubkey) -> Result<()> {
+    require!(
+        new_validator != Pubkey::default(),
+        CrossyError::NotReconcilable
+    );
+    let previous = ctx.accounts.config.validator;
+    ctx.accounts.config.validator = new_validator;
+    emit!(ValidatorChanged {
+        previous,
+        validator: new_validator,
+    });
     Ok(())
 }
 
@@ -205,6 +222,38 @@ pub struct CreateSeason<'info> {
         bump
     )]
     pub season: Box<Account<'info, Season>>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + RarityPool::INIT_SPACE,
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[0u8]],
+        bump
+    )]
+    pub common_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + RarityPool::INIT_SPACE,
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[1u8]],
+        bump
+    )]
+    pub rare_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + RarityPool::INIT_SPACE,
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[2u8]],
+        bump
+    )]
+    pub epic_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + RarityPool::INIT_SPACE,
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[3u8]],
+        bump
+    )]
+    pub legendary_pool: Box<Account<'info, RarityPool>>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -236,6 +285,24 @@ pub fn create_season(
     season.status = SeasonStatus::Configured;
     season.variant_count = 0;
     season.bump = ctx.bumps.season;
+
+    for (pool, rarity, bump) in [
+        (&mut ctx.accounts.common_pool, 0u8, ctx.bumps.common_pool),
+        (&mut ctx.accounts.rare_pool, 1u8, ctx.bumps.rare_pool),
+        (&mut ctx.accounts.epic_pool, 2u8, ctx.bumps.epic_pool),
+        (
+            &mut ctx.accounts.legendary_pool,
+            3u8,
+            ctx.bumps.legendary_pool,
+        ),
+    ] {
+        pool.season = season_index;
+        pool.rarity = rarity;
+        pool.count = 0;
+        pool.revision = 0;
+        pool.initialized = true;
+        pool.bump = bump;
+    }
 
     emit!(SeasonConfigured {
         season: season_index,
@@ -300,8 +367,149 @@ pub fn create_banner(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// activate_season -- one-way configuration freeze before paid pulls
+// ---------------------------------------------------------------------------
+
 #[derive(Accounts)]
-#[instruction(season_index: u16, variant_id: u16)]
+#[instruction(season_index: u16)]
+pub struct ActivateSeason<'info> {
+    #[account(
+        seeds = [seeds::CONFIG],
+        bump = config.bump,
+        constraint = config.admin == admin.key() @ CrossyError::NotAdmin
+    )]
+    pub config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [seeds::SEASON, &season_index.to_le_bytes()],
+        bump = season.bump,
+        constraint = season.status == SeasonStatus::Configured @ CrossyError::InvalidTransition
+    )]
+    pub season: Box<Account<'info, Season>>,
+    #[account(
+        seeds = [seeds::BANNER, &season_index.to_le_bytes(), &[0u8]],
+        bump = standard_banner.bump
+    )]
+    pub standard_banner: Box<Account<'info, Banner>>,
+    #[account(
+        seeds = [seeds::BANNER, &season_index.to_le_bytes(), &[1u8]],
+        bump = enhanced_banner.bump
+    )]
+    pub enhanced_banner: Box<Account<'info, Banner>>,
+    #[account(
+        seeds = [seeds::BANNER, &season_index.to_le_bytes(), &[2u8]],
+        bump = premium_banner.bump
+    )]
+    pub premium_banner: Box<Account<'info, Banner>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[0u8]],
+        bump = common_pool.bump
+    )]
+    pub common_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[1u8]],
+        bump = rare_pool.bump
+    )]
+    pub rare_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[2u8]],
+        bump = epic_pool.bump
+    )]
+    pub epic_pool: Box<Account<'info, RarityPool>>,
+    #[account(
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[3u8]],
+        bump = legendary_pool.bump
+    )]
+    pub legendary_pool: Box<Account<'info, RarityPool>>,
+    pub admin: Signer<'info>,
+}
+
+/// Canonical commitment published at season creation and independently
+/// reproducible by clients before activation.
+pub fn season_weights_commitment(season_index: u16, weights: [[u16; 4]; 3]) -> [u8; 32] {
+    let mut bytes = Vec::with_capacity(29 + 2 + 3 * 4 * 2);
+    bytes.extend_from_slice(b"lana-roads-season-weights-v1");
+    bytes.extend_from_slice(&season_index.to_le_bytes());
+    for banner_weights in weights {
+        for weight in banner_weights {
+            bytes.extend_from_slice(&weight.to_le_bytes());
+        }
+    }
+    sha256::hash(&bytes).to_bytes()
+}
+
+/// Freeze a complete season before its first UTC second. After this
+/// transition, banner and variant accounts can no longer be created or
+/// changed by the configuration instructions.
+pub fn activate_season(ctx: Context<ActivateSeason>, season_index: u16) -> Result<()> {
+    let season = &mut ctx.accounts.season;
+    let now = Clock::get()?.unix_timestamp;
+    let start_ts = time::day_start(season.start_day).ok_or(CrossyError::Overflow)?;
+    require!(now < start_ts, CrossyError::CutoffPassed);
+
+    let banners = [
+        &*ctx.accounts.standard_banner,
+        &*ctx.accounts.enhanced_banner,
+        &*ctx.accounts.premium_banner,
+    ];
+    for (tier, banner) in banners.iter().enumerate() {
+        require!(
+            banner.season == season_index
+                && banner.tier == tier as u8
+                && banner.status == BannerStatus::Active
+                && banner.price == BANNER_PRICES[tier],
+            CrossyError::InvalidTransition
+        );
+    }
+
+    let pools = [
+        &*ctx.accounts.common_pool,
+        &*ctx.accounts.rare_pool,
+        &*ctx.accounts.epic_pool,
+        &*ctx.accounts.legendary_pool,
+    ];
+    let mut counted = 0u16;
+    for (rarity, pool) in pools.iter().enumerate() {
+        require!(
+            pool.initialized
+                && pool.season == season_index
+                && pool.rarity == rarity as u8
+                && pool.count > 0
+                && pool.has_available(),
+            CrossyError::PityInventoryUnavailable
+        );
+        counted = counted
+            .checked_add(pool.count)
+            .ok_or(CrossyError::Overflow)?;
+    }
+    require!(
+        counted == season.variant_count,
+        CrossyError::LiabilityMismatch
+    );
+
+    let weights = [
+        banners[0].base_weights,
+        banners[1].base_weights,
+        banners[2].base_weights,
+    ];
+    let commitment = season_weights_commitment(season_index, weights);
+    require!(
+        commitment == season.weights_hash,
+        CrossyError::LiabilityMismatch
+    );
+
+    season.status = SeasonStatus::Active;
+    emit!(SeasonActivated {
+        season: season_index,
+        weights_hash: commitment,
+        variant_count: season.variant_count,
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(season_index: u16, variant_id: u16, rarity: u8)]
 pub struct CreateVariant<'info> {
     #[account(
         seeds = [seeds::CONFIG],
@@ -318,6 +526,13 @@ pub struct CreateVariant<'info> {
     pub season: Box<Account<'info, Season>>,
     /// The class this variant maps to must exist (any version).
     pub class_config: Box<Account<'info, ClassConfig>>,
+    #[account(
+        mut,
+        seeds = [seeds::RARITY_POOL, &season_index.to_le_bytes(), &[rarity]],
+        bump = rarity_pool.bump,
+        constraint = rarity_pool.initialized @ CrossyError::StaleInventory
+    )]
+    pub rarity_pool: Box<Account<'info, RarityPool>>,
     #[account(
         init,
         payer = admin,
@@ -353,6 +568,26 @@ pub fn create_variant(
     // Stronger classes may require a minimum rarity; enforce the disclosed
     // relationship at configuration time.
     require!(rarity >= class.min_rarity, CrossyError::BadClassMapping);
+
+    let pool = &mut ctx.accounts.rarity_pool;
+    require!(
+        pool.season == season_index && pool.rarity == rarity,
+        CrossyError::StaleInventory
+    );
+    require!(
+        (pool.count as usize) < crate::constants::MAX_RARITY_VARIANTS,
+        CrossyError::CapacityExceeded
+    );
+    if pool.count > 0 {
+        let previous = pool.entries[pool.count as usize - 1].variant_id;
+        require!(variant_id > previous, CrossyError::StaleInventory);
+    }
+    let pool_index = pool.count as usize;
+    pool.entries[pool_index] = RarityPoolEntry {
+        variant_id,
+        available: supply_cap,
+    };
+    pool.count = pool.count.checked_add(1).ok_or(CrossyError::Overflow)?;
 
     season.variant_count = season
         .variant_count
@@ -460,4 +695,18 @@ pub fn create_class_config(
         activation_day
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn season_weight_commitment_matches_offchain_golden_vector() {
+        let hash = season_weights_commitment(1, [[70, 22, 7, 1], [50, 32, 15, 3], [30, 40, 24, 6]]);
+        assert_eq!(
+            hex::encode(hash),
+            "99dbb072ad2794fe2e69e5d143471b21c60ade74913a3c82811823fb54aeba15"
+        );
+    }
 }

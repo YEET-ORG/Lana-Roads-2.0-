@@ -27,7 +27,7 @@ pub fn ensure_profile(ctx: Context<EnsureProfile>) -> Result<()> {
     let profile = &mut ctx.accounts.profile;
     if profile.wallet == Pubkey::default() {
         profile.wallet = ctx.accounts.wallet.key();
-        profile.version = 1;
+        profile.version = 2;
         profile.bump = ctx.bumps.profile;
     }
     Ok(())

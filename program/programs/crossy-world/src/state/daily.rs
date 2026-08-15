@@ -1,8 +1,9 @@
 //! Daily competition, vault accounting, contributions, and payment receipts.
 //!
-//! Vault conservation invariant (contract spec §7.1):
-//! `vault balance = pending + active_pool + rollover_held + refund_liability
-//!                 + winner_unpaid + team_unpaid`
+//! Vault solvency invariant (contract spec §7.1):
+//! `vault balance >= pending + active_pool + rollover_held + refund_liability
+//!                  + winner_unpaid + team_unpaid`.
+//! Surplus is possible because SPL token accounts accept unsolicited deposits.
 
 use anchor_lang::prelude::*;
 
@@ -57,7 +58,7 @@ pub struct DailyCompetition {
 
     // ---- settlement record ----
     pub settled_winner: Pubkey,
-    pub settled_score: u16,
+    pub settled_score: u32,
     pub winner_amount: u64,
     pub team_amount: u64,
     pub winner_paid: bool,
@@ -71,9 +72,9 @@ pub struct DailyCompetition {
 }
 
 impl DailyCompetition {
-    /// Sum of all liability categories — must equal the vault token balance
-    /// at every economic transition. Rollover-out counts as a held liability
-    /// until the successor day consumes it.
+    /// Sum of all liability categories. It must never exceed the vault token
+    /// balance. Rollover-out counts as a held liability until the successor
+    /// day consumes it.
     pub fn total_liabilities(&self) -> Result<u64> {
         let rollover_held = if self.rollover_consumed {
             0
@@ -89,11 +90,12 @@ impl DailyCompetition {
             .ok_or_else(|| error!(CrossyError::Overflow))
     }
 
-    /// Enforce the conservation invariant against the actual vault balance.
-    /// Any unexplained difference blocks the transition.
-    pub fn assert_conservation(&self, vault_balance: u64) -> Result<()> {
+    /// Enforce solvency against the actual vault balance. SPL token accounts
+    /// can receive unsolicited transfers, so surplus tokens must not let a
+    /// third party block settlement; only a deficit is unsafe.
+    pub fn assert_solvency(&self, vault_balance: u64) -> Result<()> {
         require!(
-            vault_balance == self.total_liabilities()?,
+            vault_balance >= self.total_liabilities()?,
             CrossyError::LiabilityMismatch
         );
         Ok(())

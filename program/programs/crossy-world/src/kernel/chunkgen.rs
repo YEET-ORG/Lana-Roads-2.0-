@@ -81,7 +81,7 @@ pub struct DetRng {
 }
 
 impl DetRng {
-    pub fn new(seed: &[u8; 32], chunk_index: u16) -> Self {
+    pub fn new(seed: &[u8; 32], chunk_index: u32) -> Self {
         let mut s: u64 = 0x9e37_79b9_7f4a_7c15;
         for (i, chunk) in seed.chunks(8).enumerate() {
             let mut b = [0u8; 8];
@@ -122,7 +122,7 @@ impl DetRng {
 
 /// Difficulty stage from chunk index: hazards start immediately after the
 /// spawn rows and get denser/faster within audited maxima.
-pub const fn difficulty_stage(chunk_index: u16) -> u8 {
+pub const fn difficulty_stage(chunk_index: u32) -> u8 {
     match chunk_index {
         0..=1 => 1,  // rows 0-31
         2..=3 => 2,  // rows 32-63
@@ -137,7 +137,7 @@ pub const fn difficulty_stage(chunk_index: u16) -> u8 {
 /// wider apron so players are never dropped straight onto traffic; every
 /// later chunk still opens on one safe row, so entering it is never an
 /// instant trap.
-pub const fn safe_prefix(chunk_index: u16) -> usize {
+pub const fn safe_prefix(chunk_index: u32) -> usize {
     if chunk_index == 0 {
         3
     } else {
@@ -151,7 +151,7 @@ pub const fn safe_prefix(chunk_index: u16) -> usize {
 /// the menu camera frames them, so nothing in chunk 0 may be lethal. It is
 /// still not empty: past the apron it grows rocks and trees, which stop a
 /// player without hurting them.
-pub const fn is_safe_zone(chunk_index: u16) -> bool {
+pub const fn is_safe_zone(chunk_index: u32) -> bool {
     chunk_index == 0
 }
 
@@ -227,7 +227,7 @@ const fn stage_params(stage: u8) -> StageParams {
 /// Generate a chunk from VRF randomness. Total function: every seed yields a
 /// valid, bounded layout satisfying the generator guarantees (16 rows, a
 /// traversable static route, bounded params, minimum train warning).
-pub fn generate_chunk(seed: &[u8; 32], chunk_index: u16) -> ChunkLayout {
+pub fn generate_chunk(seed: &[u8; 32], chunk_index: u32) -> ChunkLayout {
     let mut rng = DetRng::new(seed, chunk_index);
     let stage = difficulty_stage(chunk_index);
     let p = stage_params(stage);
@@ -314,7 +314,7 @@ pub fn generate_chunk(seed: &[u8; 32], chunk_index: u16) -> ChunkLayout {
 /// Validate a layout against the audited bounds. The program re-validates the
 /// generator output before persisting a reveal — a defense-in-depth check
 /// that VRF bytes can never smuggle an invalid account layout.
-pub fn validate_layout(layout: &ChunkLayout, chunk_index: u16) -> bool {
+pub fn validate_layout(layout: &ChunkLayout, chunk_index: u32) -> bool {
     let prefix = safe_prefix(chunk_index);
     for (row, lane) in layout.lanes.iter().enumerate() {
         let Some(kind) = LaneKind::from_u8(lane.kind) else {
@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn every_chunk_opens_on_safe_rows() {
         for s in 0u8..40 {
-            for idx in [0u16, 1, 2, 7, 12, 33] {
+            for idx in [0u32, 1, 2, 7, 12, 33] {
                 let layout = generate_chunk(&[s; 32], idx);
                 for lane in layout.lanes.iter().take(safe_prefix(idx)) {
                     assert_eq!(lane.kind, LaneKind::Grass as u8, "seed {s} chunk {idx}");
@@ -416,9 +416,15 @@ mod tests {
     }
 
     #[test]
+    fn generation_supports_chunk_indices_beyond_u16() {
+        let layout = generate_chunk(&[13u8; 32], 100_000);
+        assert!(validate_layout(&layout, 100_000));
+    }
+
+    #[test]
     fn every_seed_validates() {
         for s in 0u8..50 {
-            for idx in [0u16, 1, 2, 4, 7, 11, 16, 40, 100, 1000] {
+            for idx in [0u32, 1, 2, 4, 7, 11, 16, 40, 100, 1000] {
                 let layout = generate_chunk(&[s; 32], idx);
                 assert!(validate_layout(&layout, idx), "seed {s} chunk {idx}");
             }
@@ -429,7 +435,7 @@ mod tests {
     fn difficulty_rises_with_distance() {
         // Sample the same seed deep into the run: later chunks must be
         // denser and faster, never easier.
-        let hazards_at = |idx: u16| {
+        let hazards_at = |idx: u32| {
             let layout = generate_chunk(&[7u8; 32], idx);
             layout
                 .lanes

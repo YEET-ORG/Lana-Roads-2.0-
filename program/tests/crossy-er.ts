@@ -106,7 +106,7 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
   const lockPda = (attempt: number) =>
     pda(S.agentLock, world.toBuffer(), player.publicKey.toBuffer(), le32(attempt));
   const sectorPda = (sx: number, sy: number) =>
-    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le16(sy));
+    pda(S.sector, world.toBuffer(), Buffer.from([sx]), le32(sy));
 
   const spawnSectors = () => {
     const out = [];
@@ -150,7 +150,7 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     const ts = await base.connection.getBlockTime(slot);
     day = Math.floor(ts! / 86400);
     world = pda(S.world, Buffer.from([1]), le64(day));
-    spawnChunk = pda(S.chunk, le64(day), le16(0));
+    spawnChunk = pda(S.chunk, le64(day), le32(0));
     const worldAcc = await base.connection.getAccountInfo(world);
     assert.ok(
       worldAcc,
@@ -331,9 +331,9 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     this.timeout(300_000);
     await erProgram.methods
       .undelegateState()
-      .accountsPartial({ payer: player.publicKey })
+      .accountsPartial({ config: pda(S.config), payer: admin.publicKey })
       .remainingAccounts([{ pubkey: runPda(), isSigner: false, isWritable: true }])
-      .signers([player])
+      .signers([admin])
       .rpc();
 
     await waitFor(

@@ -13,7 +13,29 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 
 use crate::constants::seeds;
 use crate::errors::CrossyError;
-use crate::state::{PlayerRun, WorldHeader};
+use crate::state::{ChunkDefinition, PlayerRun, WorldHeader};
+
+pub fn read_committed_chunk(
+    account: &AccountInfo,
+    day: u64,
+    chunk_index: u32,
+) -> Result<ChunkDefinition> {
+    let (expected, _) = Pubkey::find_program_address(
+        &[seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        &crate::ID,
+    );
+    require_keys_eq!(*account.key, expected, CrossyError::NotReconcilable);
+    let owner_ok = *account.owner == crate::ID || *account.owner == DELEGATION_PROGRAM_ID;
+    require!(owner_ok, CrossyError::NotReconcilable);
+    let data = account.try_borrow_data()?;
+    require!(data.len() > 8, CrossyError::NotReconcilable);
+    require!(
+        data[..8] == ChunkDefinition::DISCRIMINATOR[..],
+        CrossyError::NotReconcilable
+    );
+    ChunkDefinition::try_deserialize(&mut &data[..])
+        .map_err(|_| error!(CrossyError::NotReconcilable))
+}
 
 /// Read the committed representation of a `PlayerRun`, validating:
 /// - PDA address for (world, wallet),

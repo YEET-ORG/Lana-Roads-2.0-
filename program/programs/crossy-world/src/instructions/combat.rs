@@ -102,43 +102,59 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
     let facing = Direction::from_u8(ctx.accounts.kicker.facing).ok_or(CrossyError::NoTarget)?;
     let struck = grid::facing_tile(ctx.accounts.kicker.x, ctx.accounts.kicker.y, facing);
 
+    let mut target_changed = false;
     if let Some((tx, ty)) = struck {
         if kick_connects(&ctx, tx, ty, facing, now, revealed_rows, world_day)? {
-            let (dx, dy) = grid::step(tx, ty, facing).unwrap();
+            let (dx, dy) = grid::step(tx, ty, facing).ok_or(CrossyError::OutOfBounds)?;
             let dest_bit = grid::sector_bit(dx, dy);
             let src_bit = grid::sector_bit(tx, ty);
 
             // Atomic displacement.
             match ctx.accounts.dest_sector.as_deref_mut() {
                 None => {
-                    let s = ctx.accounts.target_sector.as_deref_mut().unwrap();
-                    s.clear_occupied(src_bit);
-                    s.set_occupied(dest_bit);
+                    let s = ctx
+                        .accounts
+                        .target_sector
+                        .as_deref_mut()
+                        .ok_or(CrossyError::WrongSector)?;
+                    s.clear_occupied(src_bit)?;
+                    s.set_occupied(dest_bit)?;
                 }
                 Some(dest) => {
                     ctx.accounts
                         .target_sector
                         .as_deref_mut()
-                        .unwrap()
-                        .clear_occupied(src_bit);
-                    dest.set_occupied(dest_bit);
+                        .ok_or(CrossyError::WrongSector)?
+                        .clear_occupied(src_bit)?;
+                    dest.set_occupied(dest_bit)?;
                 }
             }
 
             // Forced movement re-evaluates environmental hazards at the
             // destination: being kicked into a river or a lane of traffic is
             // fatal, but the environment is what kills.
-            let lane = lane_for_row(ctx.accounts.chunk.as_deref().unwrap(), dy)?;
+            let lane = lane_for_row(
+                ctx.accounts
+                    .chunk
+                    .as_deref()
+                    .ok_or(CrossyError::BadChunkState)?,
+                dy,
+            )?;
             let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
-            let target = ctx.accounts.target.as_deref_mut().unwrap();
+            let target = ctx
+                .accounts
+                .target
+                .as_deref_mut()
+                .ok_or(CrossyError::NoTarget)?;
             target.x = dx;
             target.y = dy;
-            target.hazard_nonce = target.hazard_nonce.wrapping_add(1);
+            target.bump_hazard_nonce()?;
             target.hazard_deadline_ms = if hazard::is_lethal(&descriptor, dx, t_ms) {
                 t_ms // immediate: next check_hazard resolves the death
             } else {
                 hazard::next_hazard_deadline_ms(&descriptor, dx, t_ms).unwrap_or(0)
             };
+            target_changed = true;
         }
     }
 
@@ -151,6 +167,14 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
         .action_seq
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
+    kicker.touch()?;
+    if target_changed {
+        ctx.accounts
+            .target
+            .as_deref_mut()
+            .ok_or(CrossyError::NoTarget)?
+            .touch()?;
+    }
     Ok(())
 }
 
@@ -161,10 +185,10 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
 fn kick_connects(
     ctx: &Context<Kick>,
     tx: u8,
-    ty: u16,
+    ty: u32,
     facing: Direction,
     now: i64,
-    revealed_rows: u16,
+    revealed_rows: u32,
     world_day: u64,
 ) -> Result<bool> {
     let (Some(target), Some(target_sector), Some(chunk)) = (
@@ -216,7 +240,7 @@ pub struct AbilityArgs {
     pub direction: u8,
     /// Target tile for placed effects (Trap/TimeSlow/AreaStun/LaneShift).
     pub target_x: u8,
-    pub target_y: u16,
+    pub target_y: u32,
 }
 
 #[derive(Accounts)]
@@ -336,12 +360,23 @@ pub fn use_ability(
         .action_seq
         .checked_add(1)
         .ok_or(CrossyError::Overflow)?;
+    caster.touch()?;
+    if matches!(
+        class.ability,
+        AbilityKind::Ram | AbilityKind::Hook | AbilityKind::Swap
+    ) {
+        ctx.accounts
+            .target
+            .as_deref_mut()
+            .ok_or(CrossyError::NoTarget)?
+            .touch()?;
+    }
     Ok(())
 }
 
 /// Which provided sector account covers the tile (caster_sector, or the
 /// optional dest_sector).
-fn find_slot(ctx: &Context<UseAbility>, x: u8, y: u16) -> Result<SectorSlot> {
+fn find_slot(ctx: &Context<UseAbility>, x: u8, y: u32) -> Result<SectorSlot> {
     let world_key = ctx.accounts.world.key();
     let (sx, sy) = grid::sector_of(x, y);
     let cs = &ctx.accounts.caster_sector;
@@ -356,16 +391,21 @@ fn find_slot(ctx: &Context<UseAbility>, x: u8, y: u16) -> Result<SectorSlot> {
     Err(error!(CrossyError::WrongSector))
 }
 
-fn sector_ref<'a>(ctx: &'a Context<UseAbility>, slot: SectorSlot) -> &'a OccupancySector {
+fn sector_ref<'a>(ctx: &'a Context<UseAbility>, slot: SectorSlot) -> Result<&'a OccupancySector> {
     match slot {
-        SectorSlot::Caster => &ctx.accounts.caster_sector,
-        SectorSlot::Dest => ctx.accounts.dest_sector.as_deref().unwrap(),
+        SectorSlot::Caster => Ok(&ctx.accounts.caster_sector),
+        SectorSlot::Dest => ctx
+            .accounts
+            .dest_sector
+            .as_deref()
+            .map(|account| &**account)
+            .ok_or_else(|| error!(CrossyError::WrongSector)),
     }
 }
 
 /// Move an occupancy bit from one tile to another across the provided
 /// sector accounts.
-fn move_bit(ctx: &mut Context<UseAbility>, from: (u8, u16), to: (u8, u16)) -> Result<()> {
+fn move_bit(ctx: &mut Context<UseAbility>, from: (u8, u32), to: (u8, u32)) -> Result<()> {
     let src_slot = find_slot(ctx, from.0, from.1)?;
     let dst_slot = find_slot(ctx, to.0, to.1)?;
     let src_bit = grid::sector_bit(from.0, from.1);
@@ -373,49 +413,53 @@ fn move_bit(ctx: &mut Context<UseAbility>, from: (u8, u16), to: (u8, u16)) -> Re
     match (src_slot, dst_slot) {
         (SectorSlot::Caster, SectorSlot::Caster) => {
             let s = &mut ctx.accounts.caster_sector;
-            s.clear_occupied(src_bit);
-            s.set_occupied(dst_bit);
+            s.clear_occupied(src_bit)?;
+            s.set_occupied(dst_bit)?;
         }
         (SectorSlot::Dest, SectorSlot::Dest) => {
-            let s = ctx.accounts.dest_sector.as_deref_mut().unwrap();
-            s.clear_occupied(src_bit);
-            s.set_occupied(dst_bit);
+            let s = ctx
+                .accounts
+                .dest_sector
+                .as_deref_mut()
+                .ok_or(CrossyError::WrongSector)?;
+            s.clear_occupied(src_bit)?;
+            s.set_occupied(dst_bit)?;
         }
         (SectorSlot::Caster, SectorSlot::Dest) => {
-            ctx.accounts.caster_sector.clear_occupied(src_bit);
+            ctx.accounts.caster_sector.clear_occupied(src_bit)?;
             ctx.accounts
                 .dest_sector
                 .as_deref_mut()
-                .unwrap()
-                .set_occupied(dst_bit);
+                .ok_or(CrossyError::WrongSector)?
+                .set_occupied(dst_bit)?;
         }
         (SectorSlot::Dest, SectorSlot::Caster) => {
             ctx.accounts
                 .dest_sector
                 .as_deref_mut()
-                .unwrap()
-                .clear_occupied(src_bit);
-            ctx.accounts.caster_sector.set_occupied(dst_bit);
+                .ok_or(CrossyError::WrongSector)?
+                .clear_occupied(src_bit)?;
+            ctx.accounts.caster_sector.set_occupied(dst_bit)?;
         }
     }
     Ok(())
 }
 
 /// Tile emptiness across the provided sectors.
-fn tile_free(ctx: &Context<UseAbility>, x: u8, y: u16) -> Result<bool> {
+fn tile_free(ctx: &Context<UseAbility>, x: u8, y: u32) -> Result<bool> {
     let slot = find_slot(ctx, x, y)?;
-    let s = sector_ref(ctx, slot);
+    let s = sector_ref(ctx, slot)?;
     let bit = grid::sector_bit(x, y);
     Ok(!s.is_occupied(bit) && !s.is_blocked(bit))
 }
 
-fn tile_statically_blocked(ctx: &Context<UseAbility>, x: u8, y: u16) -> Result<bool> {
+fn tile_statically_blocked(ctx: &Context<UseAbility>, x: u8, y: u32) -> Result<bool> {
     let slot = find_slot(ctx, x, y)?;
-    let s = sector_ref(ctx, slot);
+    let s = sector_ref(ctx, slot)?;
     Ok(s.is_blocked(grid::sector_bit(x, y)))
 }
 
-fn require_row_traversable(ctx: &Context<UseAbility>, x: u8, y: u16, t_ms: u64) -> Result<()> {
+fn require_row_traversable(ctx: &Context<UseAbility>, x: u8, y: u32, t_ms: u64) -> Result<()> {
     require!(
         y < ctx.accounts.world.revealed_rows,
         CrossyError::FrontierClosed
@@ -432,7 +476,7 @@ fn reschedule_caster_hazard(ctx: &mut Context<UseAbility>, t_ms: u64) -> Result<
     let lane = lane_for_row(&ctx.accounts.chunk, y)?;
     let d: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
     let caster = &mut ctx.accounts.caster;
-    caster.hazard_nonce = caster.hazard_nonce.wrapping_add(1);
+    caster.bump_hazard_nonce()?;
     caster.hazard_deadline_ms = hazard::next_hazard_deadline_ms(&d, x, t_ms).unwrap_or(0);
     Ok(())
 }
@@ -447,8 +491,12 @@ fn reschedule_target_hazard(ctx: &mut Context<UseAbility>, t_ms: u64) -> Result<
     let (x, y) = (target.x, target.y);
     let lane = lane_for_row(&ctx.accounts.chunk, y)?;
     let d: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
-    let target = ctx.accounts.target.as_deref_mut().unwrap();
-    target.hazard_nonce = target.hazard_nonce.wrapping_add(1);
+    let target = ctx
+        .accounts
+        .target
+        .as_deref_mut()
+        .ok_or(CrossyError::NoTarget)?;
+    target.bump_hazard_nonce()?;
     target.hazard_deadline_ms = if hazard::is_lethal(&d, x, t_ms) {
         t_ms // lethal now: the next check_hazard resolves the death
     } else {
@@ -514,7 +562,11 @@ fn ram(ctx: &mut Context<UseAbility>, class: &ClassConfig, t_ms: u64, now: i64) 
         py = ny;
     }
     move_bit(ctx, (tx, ty), (px, py))?;
-    let target = ctx.accounts.target.as_deref_mut().unwrap();
+    let target = ctx
+        .accounts
+        .target
+        .as_deref_mut()
+        .ok_or(CrossyError::NoTarget)?;
     target.x = px;
     target.y = py;
     reschedule_target_hazard(ctx, t_ms)
@@ -535,11 +587,11 @@ fn hook(ctx: &mut Context<UseAbility>, class: &ClassConfig, t_ms: u64, now: i64)
         (target.x, target.y)
     };
     // Straight cardinal line within range, at least 2 tiles away.
-    let (dx, dy) = (tx as i32 - cx as i32, ty as i32 - cy as i32);
+    let (dx, dy) = (tx as i64 - cx as i64, ty as i64 - cy as i64);
     require!((dx == 0) != (dy == 0), CrossyError::NoTarget);
     let dist = dx.unsigned_abs().max(dy.unsigned_abs());
     require!(
-        dist >= 2 && dist <= class.range as u32,
+        dist >= 2 && dist <= class.range as u64,
         CrossyError::NoTarget
     );
     let step_dir = if dx > 0 {
@@ -554,7 +606,11 @@ fn hook(ctx: &mut Context<UseAbility>, class: &ClassConfig, t_ms: u64, now: i64)
     let (nx, ny) = grid::step(tx, ty, step_dir).ok_or(CrossyError::OutOfBounds)?;
     require!(tile_free(ctx, nx, ny)?, CrossyError::TileOccupied);
     move_bit(ctx, (tx, ty), (nx, ny))?;
-    let target = ctx.accounts.target.as_deref_mut().unwrap();
+    let target = ctx
+        .accounts
+        .target
+        .as_deref_mut()
+        .ok_or(CrossyError::NoTarget)?;
     target.x = nx;
     target.y = ny;
     reschedule_target_hazard(ctx, t_ms)
@@ -608,9 +664,9 @@ fn swap(ctx: &mut Context<UseAbility>, class: &ClassConfig, now: i64) -> Result<
         require!(now >= target.anchor_until, CrossyError::Blocked);
         (target.x, target.y)
     };
-    let dist = (cx as i32 - tx as i32).unsigned_abs() + (cy as i32 - ty as i32).unsigned_abs();
+    let dist = (cx as i64 - tx as i64).unsigned_abs() + (cy as i64 - ty as i64).unsigned_abs();
     require!(
-        dist >= 1 && dist <= class.range as u32,
+        dist >= 1 && dist <= class.range as u64,
         CrossyError::NoTarget
     );
     // Both tiles must be covered by provided sectors (address validation).
@@ -621,13 +677,17 @@ fn swap(ctx: &mut Context<UseAbility>, class: &ClassConfig, now: i64) -> Result<
         let caster = &mut ctx.accounts.caster;
         caster.x = tx;
         caster.y = ty;
-        caster.hazard_nonce = caster.hazard_nonce.wrapping_add(1);
+        caster.bump_hazard_nonce()?;
         caster.hazard_deadline_ms = 0;
     }
-    let target = ctx.accounts.target.as_deref_mut().unwrap();
+    let target = ctx
+        .accounts
+        .target
+        .as_deref_mut()
+        .ok_or(CrossyError::NoTarget)?;
     target.x = cx;
     target.y = cy;
-    target.hazard_nonce = target.hazard_nonce.wrapping_add(1);
+    target.bump_hazard_nonce()?;
     target.hazard_deadline_ms = 0;
     // Swap never increases score (prevents swap-score exploits): score only
     // advances through movement/dash/leap instructions.
@@ -645,8 +705,11 @@ fn place_effect(
     let (cx, cy) = (ctx.accounts.caster.x, ctx.accounts.caster.y);
     // Target tile within class range (Chebyshev distance).
     let dx = (cx as i32 - args.target_x as i32).abs();
-    let dy = (cy as i32 - args.target_y as i32).abs();
-    require!(dx.max(dy) <= class.range as i32, CrossyError::NoTarget);
+    let dy = (cy as i64 - args.target_y as i64).abs();
+    require!(
+        (dx as i64).max(dy) <= class.range as i64,
+        CrossyError::NoTarget
+    );
     require!(class.duration_seconds > 0, CrossyError::BadAbility);
     let radius = (class.param_b as u8).min(MAX_EFFECT_RADIUS);
 
@@ -669,7 +732,11 @@ fn place_effect(
     };
     let sector: &mut OccupancySector = match slot {
         SectorSlot::Caster => &mut ctx.accounts.caster_sector,
-        SectorSlot::Dest => ctx.accounts.dest_sector.as_deref_mut().unwrap(),
+        SectorSlot::Dest => ctx
+            .accounts
+            .dest_sector
+            .as_deref_mut()
+            .ok_or(CrossyError::WrongSector)?,
     };
     let free = sector
         .effects
@@ -677,6 +744,6 @@ fn place_effect(
         .position(|e| e.is_free(now))
         .ok_or(CrossyError::EffectSlotsFull)?;
     sector.effects[free] = effect;
-    sector.seq = sector.seq.wrapping_add(1);
+    sector.seq = sector.seq.checked_add(1).ok_or(CrossyError::Overflow)?;
     Ok(())
 }

@@ -5,6 +5,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::{MAX_CHUNK_LANES, MAX_SECTOR_EFFECTS};
+use crate::errors::CrossyError;
 use crate::kernel::chunkgen::LaneDescriptor;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
@@ -55,14 +56,28 @@ pub struct WorldHeader {
     pub player_cap: u16,
     /// Number of revealed rows; the frontier. Movement at/above this row is
     /// rejected (fail closed at an unrevealed boundary).
-    pub revealed_rows: u16,
+    pub revealed_rows: u32,
+    /// Monotonic sequence for visible map changes. Clients use this to
+    /// detect dropped frontier notifications and refetch a snapshot.
+    pub map_seq: u64,
+    /// Exact immutable chunk currently terminating the visible frontier.
+    pub latest_chunk_index: u32,
+    pub latest_chunk_generation: u16,
+    pub latest_chunk_hash: [u8; 32],
+    /// A non-zero index means all sectors for that next chunk were observed
+    /// together on this ER and the frontier may advance over it.
+    pub ready_chunk_index: u32,
+    pub ready_chunk_hash: [u8; 32],
+    /// The spawn chunk and all of its sectors have been observed together on
+    /// this world's ER. No attempt may activate before this barrier is set.
+    pub spawn_ready: bool,
     /// Current record: score, holder, attempt, slot. The ONLY prize authority.
-    pub record_score: u16,
+    pub record_score: u32,
     pub record_holder: Pubkey,
     pub record_attempt: u32,
     pub record_slot: u64,
     /// Chunk pipeline: index the next request will target and its state.
-    pub next_chunk_index: u16,
+    pub next_chunk_index: u32,
     pub chunk_request_state: ChunkRequestState,
     /// VRF request generation for the in-flight chunk request.
     pub chunk_generation: u16,
@@ -130,6 +145,7 @@ impl From<Lane> for LaneDescriptor {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
 #[repr(u8)]
 pub enum ChunkStatus {
+    Uninitialized,
     Requested,
     Revealed,
     Closed,
@@ -141,9 +157,9 @@ pub enum ChunkStatus {
 #[derive(InitSpace)]
 pub struct ChunkDefinition {
     pub day: u64,
-    pub chunk_index: u16,
+    pub chunk_index: u32,
     /// First absolute row of this chunk (chunk_index * 16).
-    pub row_start: u16,
+    pub row_start: u32,
     /// Fixed 16.
     pub row_count: u8,
     /// VRF request generation this chunk was revealed under.
@@ -167,7 +183,7 @@ pub struct TempEffect {
     /// 0 = empty slot. Mirrors AbilityKind for placed effects.
     pub kind: u8,
     pub center_x: u8,
-    pub center_y: u16,
+    pub center_y: u32,
     pub radius: u8,
     /// e.g. slow permille for Trap/TimeSlow, unused otherwise.
     pub magnitude: u16,
@@ -185,13 +201,13 @@ impl TempEffect {
     pub fn is_active(&self, now: i64) -> bool {
         self.kind != 0 && self.start_ts <= now && now < self.end_ts
     }
-    pub fn covers(&self, x: u8, y: u16, now: i64) -> bool {
+    pub fn covers(&self, x: u8, y: u32, now: i64) -> bool {
         if !self.is_active(now) {
             return false;
         }
         let dx = (self.center_x as i32 - x as i32).abs();
-        let dy = (self.center_y as i32 - y as i32).abs();
-        dx <= self.radius as i32 && dy <= self.radius as i32
+        let dy = (self.center_y as i64 - y as i64).abs();
+        dx <= self.radius as i32 && dy <= self.radius as i64
     }
 }
 
@@ -202,7 +218,7 @@ impl TempEffect {
 pub struct OccupancySector {
     pub world: Pubkey,
     pub sector_x: u8,
-    pub sector_y: u16,
+    pub sector_y: u32,
     /// One bit per tile (bit = local_y * 8 + local_x). One live player per
     /// tile, enforced atomically by movement/spawn/displacement handlers.
     pub occupancy: u64,
@@ -218,13 +234,15 @@ impl OccupancySector {
     pub fn is_occupied(&self, bit: u8) -> bool {
         self.occupancy & (1u64 << bit) != 0
     }
-    pub fn set_occupied(&mut self, bit: u8) {
+    pub fn set_occupied(&mut self, bit: u8) -> Result<()> {
         self.occupancy |= 1u64 << bit;
-        self.seq = self.seq.wrapping_add(1);
+        self.seq = self.seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+        Ok(())
     }
-    pub fn clear_occupied(&mut self, bit: u8) {
+    pub fn clear_occupied(&mut self, bit: u8) -> Result<()> {
         self.occupancy &= !(1u64 << bit);
-        self.seq = self.seq.wrapping_add(1);
+        self.seq = self.seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+        Ok(())
     }
     pub fn is_blocked(&self, bit: u8) -> bool {
         self.blockers & (1u64 << bit) != 0
@@ -275,18 +293,21 @@ pub struct PlayerRun {
     pub class_id: u16,
     pub class_version: u16,
     pub x: u8,
-    pub y: u16,
+    pub y: u32,
     /// Facing direction (grid::Direction as u8), updated by accepted moves.
     pub facing: u8,
     /// Furthest forward row = authoritative score for this attempt.
-    pub score: u16,
+    pub score: u32,
     /// Last verified safe tile (revival placement policy).
     pub safe_x: u8,
-    pub safe_y: u16,
+    pub safe_y: u32,
     /// One accepted movement per ER slot.
     pub last_move_slot: u64,
     /// Exact-next action sequence; consumed by successfully executed actions.
     pub action_seq: u64,
+    /// Monotonic sequence for every authoritative run mutation, including
+    /// changes that do not consume a player action.
+    pub state_seq: u64,
     pub kick_ready_ts: i64,
     pub ability_ready_ts: i64,
     // ---- bounded status effects (authoritative timestamps) ----
@@ -320,6 +341,22 @@ impl PlayerRun {
             RunState::Ended | RunState::EntryFailed | RunState::Idle
         )
     }
+
+    pub fn touch(&mut self) -> Result<()> {
+        self.state_seq = self
+            .state_seq
+            .checked_add(1)
+            .ok_or(crate::errors::CrossyError::Overflow)?;
+        Ok(())
+    }
+
+    pub fn bump_hazard_nonce(&mut self) -> Result<()> {
+        self.hazard_nonce = self
+            .hazard_nonce
+            .checked_add(1)
+            .ok_or(crate::errors::CrossyError::Overflow)?;
+        Ok(())
+    }
 }
 
 /// PDA: ["best", world, wallet]
@@ -330,7 +367,7 @@ impl PlayerRun {
 pub struct DailyBest {
     pub world: Pubkey,
     pub wallet: Pubkey,
-    pub best_score: u16,
+    pub best_score: u32,
     pub attempt_nonce: u32,
     pub reached_slot: u64,
     pub class_id: u16,

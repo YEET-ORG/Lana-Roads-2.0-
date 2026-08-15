@@ -69,7 +69,7 @@ pub struct PrepareDay<'info> {
         init,
         payer = admin,
         space = 8 + ChunkDefinition::INIT_SPACE,
-        seeds = [seeds::CHUNK, &day.to_le_bytes(), &0u16.to_le_bytes()],
+        seeds = [seeds::CHUNK, &day.to_le_bytes(), &0u32.to_le_bytes()],
         bump
     )]
     pub spawn_chunk: Box<Account<'info, ChunkDefinition>>,
@@ -127,7 +127,14 @@ pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
         world.safe_rows = SAFE_ZONE_ROWS;
         world.active_players = 0;
         world.player_cap = cap;
-        world.revealed_rows = CHUNK_ROWS as u16; // chunk 0 = safe zone
+        world.revealed_rows = CHUNK_ROWS as u32; // chunk 0 = safe zone
+        world.map_seq = 0;
+        world.latest_chunk_index = 0;
+        world.latest_chunk_generation = 0;
+        world.latest_chunk_hash = [0u8; 32];
+        world.ready_chunk_index = 0;
+        world.ready_chunk_hash = [0u8; 32];
+        world.spawn_ready = false;
         world.record_score = 0;
         world.record_holder = Pubkey::default();
         world.next_chunk_index = 1;
@@ -209,12 +216,25 @@ pub struct ConsumeRollover<'info> {
 pub fn consume_rollover(ctx: Context<ConsumeRollover>) -> Result<()> {
     let previous = &mut ctx.accounts.previous;
     require!(
-        previous.status == DayStatus::Settled,
+        matches!(previous.status, DayStatus::Settled | DayStatus::Voided),
         CrossyError::InvalidTransition
     );
     require!(!previous.rollover_consumed, CrossyError::AlreadyTerminal);
     let amount = previous.rollover_out;
     require!(amount > 0, CrossyError::WrongAmount);
+    let daily = &ctx.accounts.daily;
+    require!(
+        matches!(daily.status, DayStatus::Prepared | DayStatus::Open),
+        CrossyError::InvalidTransition
+    );
+    require!(daily.rollover_in == 0, CrossyError::AlreadyTerminal);
+    let now = Clock::get()?.unix_timestamp;
+    require!(
+        !time::cutoff_passed(daily.day, now),
+        CrossyError::CutoffPassed
+    );
+    previous.assert_solvency(ctx.accounts.previous_vault.amount)?;
+    daily.assert_solvency(ctx.accounts.vault.amount)?;
 
     let day_bytes = previous.day.to_le_bytes();
     let signer_seeds: &[&[&[u8]]] = &[&[
@@ -342,16 +362,22 @@ pub struct CloseWorldBase<'info> {
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
+    pub closer: Signer<'info>,
 }
 
-/// Permissionless base-layer closure for an UNDELEGATED world after the
-/// hard cutoff. In production the world is delegated (owned by the
+/// Commit-payer-authorized base-layer closure for an UNDELEGATED world after
+/// the hard cutoff. In production the world is delegated (owned by the
 /// delegation program) so this fails Anchor's owner check and `close_world`
 /// (ER commit + undelegate) is the normal path — this exists for recovery
 /// when a world was never delegated or was undelegated without closing.
 pub fn close_world_base(ctx: Context<CloseWorldBase>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let world = &mut ctx.accounts.world;
+    require_keys_eq!(
+        ctx.accounts.closer.key(),
+        world.commit_payer,
+        CrossyError::NotAdmin
+    );
     require!(now >= world.end_ts, CrossyError::CutoffPassed);
     require!(
         world.status != WorldStatus::Closed,
@@ -471,8 +497,9 @@ pub fn finalize_day(ctx: Context<FinalizeDay>) -> Result<()> {
     );
     // All pending payments must have been reconciled before settlement.
     require!(daily.pending_total == 0, CrossyError::NotReconcilable);
-    // Conservation check before moving money.
-    daily.assert_conservation(ctx.accounts.vault.amount)?;
+    // Solvency check before moving money. Unsolicited vault donations are
+    // harmless surplus and cannot be used to grief settlement.
+    daily.assert_solvency(ctx.accounts.vault.amount)?;
 
     if daily.settled_score == 0 {
         // No winner: entire active pool rolls to the next day; no team cut.
@@ -505,6 +532,10 @@ pub fn finalize_day(ctx: Context<FinalizeDay>) -> Result<()> {
         daily.winner_unpaid = winner;
         daily.team_unpaid = team;
         daily.active_pool = 0;
+    }
+    if daily.active_pool == 0 && daily.winner_amount == 0 && daily.team_amount == 0 {
+        daily.winner_paid = true;
+        daily.team_paid = true;
     }
 
     let day_bytes = daily.day.to_le_bytes();
@@ -605,9 +636,10 @@ pub struct VoidDay<'info> {
     pub admin: Signer<'info>,
 }
 
-/// Irreversible: converts the active pool into refund liability. Individual
-/// wallets claim against their `DailyContribution`. Pending receipts follow
-/// their own refund path. No winner, no team fee, no rollover.
+/// Irreversible: converts same-day player contributions into refund liability.
+/// Inherited rollover is not owned by today's entrants, so it remains a
+/// rollover liability for the successor day. Pending receipts follow their
+/// own refund path. No winner and no team fee.
 pub fn void_day(ctx: Context<VoidDay>) -> Result<()> {
     let daily = &mut ctx.accounts.daily;
     require!(
@@ -617,9 +649,17 @@ pub fn void_day(ctx: Context<VoidDay>) -> Result<()> {
         ),
         CrossyError::InvalidTransition
     );
+    let player_contributions = daily
+        .active_pool
+        .checked_sub(daily.rollover_in)
+        .ok_or(CrossyError::LiabilityMismatch)?;
     daily.refund_liability = daily
         .refund_liability
-        .checked_add(daily.active_pool)
+        .checked_add(player_contributions)
+        .ok_or(CrossyError::Overflow)?;
+    daily.rollover_out = daily
+        .rollover_out
+        .checked_add(daily.rollover_in)
         .ok_or(CrossyError::Overflow)?;
     daily.active_pool = 0;
     daily.winner_amount = 0;

@@ -11,6 +11,7 @@ import type { CrossyWorld } from "./generated/crossy_world.js";
 import idl from "./generated/crossy_world.json" with { type: "json" };
 import {
   type SessionClaim,
+  DEFAULT_VRF_BASE_QUEUE,
   MAX_SESSION_SECONDS,
   MPL_CORE_PROGRAM_ID,
   Direction,
@@ -197,7 +198,12 @@ export class CrossyClient {
   readonly wallet: WalletSigner;
   readonly validator?: PublicKey;
   readonly routerUrl?: string;
+  /** Account subscriptions on the active ER connection. */
   subscriptions: SubscriptionHub;
+  /** Immutable map chunks remain on base and use its websocket. */
+  readonly baseSubscriptions: SubscriptionHub;
+  /** Raw ER slot/program subscriptions that must move with the connection. */
+  private erRealtimeDisposers = new Set<() => void>();
 
   constructor(opts: CrossyClientOptions) {
     this.connection = opts.connection;
@@ -218,6 +224,25 @@ export class CrossyClient {
     this.program = new Program(idl as CrossyWorld, baseProvider);
     this.erProgram = new Program(idl as CrossyWorld, erProvider);
     this.subscriptions = new SubscriptionHub(this.erConnection);
+    this.baseSubscriptions = new SubscriptionHub(this.connection);
+  }
+
+  /** Register an idempotent disposer tied to the current ER connection. */
+  private trackErSubscription(dispose: () => void): () => void {
+    let disposed = false;
+    const tracked = () => {
+      if (disposed) return;
+      disposed = true;
+      this.erRealtimeDisposers.delete(tracked);
+      dispose();
+    };
+    this.erRealtimeDisposers.add(tracked);
+    return tracked;
+  }
+
+  /** Close raw listeners before replacing the ER connection. */
+  private closeErRealtimeSubscriptions(): void {
+    for (const dispose of [...this.erRealtimeDisposers]) dispose();
   }
 
   // ---- transaction activity ---------------------------------------------
@@ -387,6 +412,7 @@ export class CrossyClient {
       const current = (this.erConnection as { rpcEndpoint?: string }).rpcEndpoint ?? "";
       if (!current.startsWith(rpc)) {
         const ws = rpc.replace(/^http/, "ws");
+        this.closeErRealtimeSubscriptions();
         await this.subscriptions.close().catch(() => {});
         this.erConnection = new Connection(rpc, {
           wsEndpoint: ws,
@@ -458,13 +484,11 @@ export class CrossyClient {
    * caller can carry the value forward with a monotonic timer.
    */
   subscribeSlot(onSlot: (slot: number) => void): () => void {
-    const id = this.erConnection.onSlotChange((info) => onSlot(info.slot));
-    let disposed = false;
-    return () => {
-      if (disposed) return;
-      disposed = true;
-      void this.erConnection.removeSlotChangeListener(id);
-    };
+    const connection = this.erConnection;
+    const id = connection.onSlotChange((info) => onSlot(info.slot));
+    return this.trackErSubscription(() => {
+      void connection.removeSlotChangeListener(id);
+    });
   }
 
   /**
@@ -646,9 +670,124 @@ export class CrossyClient {
   }
 
   async getChunk(day: bigint, chunkIndex: number) {
-    return this.erProgram.account.chunkDefinition.fetchNullable(
-      pda.chunk(day, chunkIndex),
+    // Visible chunks are delegated with the live world, so map bootstrap has
+    // one authoritative low-latency source.
+    const address = pda.chunk(day, chunkIndex);
+    const er = await this.erProgram.account.chunkDefinition
+      .fetchNullable(address)
+      .catch(() => null);
+    if (this.isRevealedChunk(er, day, chunkIndex)) return er;
+    // Base is a propagation fallback for freshly published chunks.
+    const base = await this.program.account.chunkDefinition
+      .fetchNullable(address)
+      .catch(() => null);
+    return this.isRevealedChunk(base, day, chunkIndex) ? base : null;
+  }
+
+  private isRevealedChunk(chunk: any, day: bigint, chunkIndex: number): boolean {
+    if (!chunk) return false;
+    try {
+      return (
+        BigInt(chunk.day.toString()) === day &&
+        chunk.chunkIndex === chunkIndex &&
+        chunk.rowStart === chunkIndex * 16 &&
+        chunk.rowCount === 16 &&
+        chunk.status != null &&
+        "revealed" in chunk.status
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Read a contiguous ER-local map snapshot in bounded RPC batches.
+   *
+   * Cold start used to issue one request per chunk. A throttled public RPC
+   * could therefore return a mixture of generations/holes and leave the
+   * scene waiting on several independent retries. One multiple-account read
+   * gives the renderer a consistent contiguous prefix and is substantially
+   * cheaper during reloads. Solana limits this RPC to 100 addresses.
+   */
+  async getChunks(
+    day: bigint,
+    fromIndex: number,
+    count: number,
+  ): Promise<Array<any | null>> {
+    if (!Number.isInteger(fromIndex) || fromIndex < 0)
+      throw new Error("invalid first chunk index");
+    if (!Number.isInteger(count) || count < 0) throw new Error("invalid chunk count");
+    const addresses = Array.from({ length: count }, (_, offset) =>
+      pda.chunk(day, fromIndex + offset),
     );
+    const chunks: Array<any | null> = [];
+    for (let start = 0; start < addresses.length; start += 100) {
+      const batchAddresses = addresses.slice(start, start + 100);
+      const infos = await this.erConnection
+        .getMultipleAccountsInfo(batchAddresses, { commitment: "confirmed" })
+        .catch(() => batchAddresses.map(() => null));
+      const decoded = infos.map((info, offset) => {
+        if (!info) return null;
+        try {
+          const chunk = this.program.coder.accounts.decode(
+            "chunkDefinition",
+            Buffer.from(info.data),
+          );
+          return this.isRevealedChunk(chunk, day, fromIndex + start + offset)
+            ? chunk
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      const missing = decoded
+        .map((chunk, offset) => (chunk == null ? offset : -1))
+        .filter((offset) => offset >= 0);
+      if (missing.length) {
+        const fallbackInfos = await this.connection
+          .getMultipleAccountsInfo(
+            missing.map((offset) => batchAddresses[offset]),
+            { commitment: "processed" },
+          )
+          .catch(() => missing.map(() => null));
+        fallbackInfos.forEach((info, fallbackIndex) => {
+          if (!info) return;
+          const offset = missing[fallbackIndex];
+          try {
+            const chunk = this.program.coder.accounts.decode(
+              "chunkDefinition",
+              Buffer.from(info.data),
+            );
+            if (this.isRevealedChunk(chunk, day, fromIndex + start + offset))
+              decoded[offset] = chunk;
+          } catch {
+            // Remains missing; the map subscription/retry path will heal it.
+          }
+        });
+      }
+      chunks.push(...decoded);
+    }
+    return chunks;
+  }
+
+  /** Push notification for an immutable base-layer map chunk. */
+  subscribeChunk(
+    day: bigint,
+    chunkIndex: number,
+    onChunk: (chunk: any, slot: number) => void,
+  ): () => void {
+    return this.baseSubscriptions.onAccount(pda.chunk(day, chunkIndex), (info, slot) => {
+      try {
+        const chunk = this.program.coder.accounts.decode(
+          "chunkDefinition",
+          Buffer.from(info.data),
+        );
+        onChunk(chunk, slot);
+      } catch {
+        // The account may be observed between creation and valid decoding;
+        // the confirmed read/retry path will heal it.
+      }
+    });
   }
 
   async getSector(world: PublicKey, sx: number, sy: number) {
@@ -720,22 +859,27 @@ export class CrossyClient {
    * Money leaves the wallet here, so it follows the same rule as paid
    * entry: the player sees exactly what will move before anything is
    * signed. The pull is NOT decided by this transaction — it only pays and
-   * snapshots the odds; the VRF authority assigns afterwards.
+   * snapshots the odds; MagicBlock VRF supplies authenticated randomness.
    */
   async reviewPull(params: {
     seasonIndex: number;
     tier: number;
     payerToken: PublicKey;
+    oracleQueue?: PublicKey;
   }): Promise<TransactionReview & { pullNonce: number }> {
     const wallet = this.wallet.publicKey;
     const config: any = await this.getConfig();
+    const season: any = await this.getSeason(params.seasonIndex);
+    if (!season || !("active" in season.status)) throw new Error("season is not active");
     const banner: any = await this.getBanner(params.seasonIndex, params.tier);
     if (!banner) throw new Error("banner not configured");
-    const variants = await this.listVariants(params.seasonIndex);
-    if (!variants.length) throw new Error("season has no variants");
+    if (season.variantCount === 0) throw new Error("season has no variants");
 
     const instructions: TransactionInstruction[] = [];
     const profile: any = await this.getProfile();
+    if (profile && !new PublicKey(profile.pendingPull).equals(PublicKey.default)) {
+      throw new Error("finish or refund the current pack before opening another");
+    }
     if (!profile) {
       instructions.push(
         await this.program.methods
@@ -754,21 +898,20 @@ export class CrossyClient {
           season: pda.season(params.seasonIndex),
           banner: pda.banner(params.seasonIndex, params.tier),
           profile: pda.profile(wallet),
+          commonPool: pda.rarityPool(params.seasonIndex, 0),
+          rarePool: pda.rarityPool(params.seasonIndex, 1),
+          epicPool: pda.rarityPool(params.seasonIndex, 2),
+          legendaryPool: pda.rarityPool(params.seasonIndex, 3),
           pull: pda.pull(wallet, pullNonce),
           gachaVaultAuthority: pda.gachaVaultAuthority(),
           gachaVault: pda.gachaVault(),
           payerToken: params.payerToken,
           usdcMint: config.usdcMint,
           wallet,
+          oracleQueue:
+            params.oracleQueue ?? DEFAULT_VRF_BASE_QUEUE,
           tokenProgram: config.tokenProgram,
         })
-        .remainingAccounts(
-          variants.map((v) => ({
-            pubkey: v.address,
-            isSigner: false,
-            isWritable: false,
-          })),
-        )
         .instruction(),
     );
 
@@ -801,7 +944,6 @@ export class CrossyClient {
    */
   async claimPull(params: {
     pullNonce: number;
-    name: string;
     uri: string;
   }): Promise<{ signature: string; asset: PublicKey }> {
     const wallet = this.wallet.publicKey;
@@ -811,7 +953,7 @@ export class CrossyClient {
     const asset = Keypair.generate();
     const signature = await this.track("Minting your agent", "base", () =>
       this.program.methods
-        .claimPull(params.name, params.uri)
+        .claimPull(params.uri)
         .accountsPartial({
           config: pda.config(),
           pull: pullAddress,
@@ -842,6 +984,7 @@ export class CrossyClient {
         .accountsPartial({
           config: pda.config(),
           pull: pda.pull(this.wallet.publicKey, params.pullNonce),
+          profile: pda.profile(this.wallet.publicKey),
           gachaVaultAuthority: pda.gachaVaultAuthority(),
           gachaVault: pda.gachaVault(),
           walletToken: params.walletToken,
@@ -1058,9 +1201,6 @@ export class CrossyClient {
     const world = pda.world(WorldMode.Casual, params.day);
     const runAddr = pda.run(world, wallet);
     const bestAddr = pda.best(world, wallet);
-    const validatorAccounts = this.validator
-      ? [{ pubkey: this.validator, isSigner: false, isWritable: false }]
-      : [];
 
     const instructions: TransactionInstruction[] = [];
     const profile = await this.getProfile();
@@ -1114,13 +1254,11 @@ export class CrossyClient {
       instructions.push(
         await this.program.methods
           .delegateRun(world, wallet)
-          .accountsPartial({ payer: wallet, pda: runAddr })
-          .remainingAccounts(validatorAccounts)
+          .accountsPartial({ config: pda.config(), payer: wallet, pda: runAddr })
           .instruction(),
         await this.program.methods
           .delegateBest(world, wallet)
-          .accountsPartial({ payer: wallet, pda: bestAddr })
-          .remainingAccounts(validatorAccounts)
+          .accountsPartial({ config: pda.config(), payer: wallet, pda: bestAddr })
           .instruction(),
       );
     }
@@ -1318,7 +1456,7 @@ export class CrossyClient {
     const world = pda.world(mode, day);
     return this.erProgram.methods
       .claimRecord()
-      .accountsPartial({ world, run: pda.run(world, this.wallet.publicKey) })
+      .accountsPartial({ world, best: pda.best(world, this.wallet.publicKey) })
       .rpc();
   }
 
@@ -1612,7 +1750,7 @@ export class CrossyClient {
     const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
     const ix = await this.erProgram.methods
       .claimRecord()
-      .accountsPartial({ world, run: pda.run(world, this.wallet.publicKey) })
+      .accountsPartial({ world, best: pda.best(world, this.wallet.publicKey) })
       .instruction();
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
@@ -1691,7 +1829,8 @@ export class CrossyClient {
     onSector?: (sector: any, slot: number) => void;
     onWorld?: (world: any, slot: number) => void;
   }): () => void {
-    const subId = this.erConnection.onProgramAccountChange(
+    const connection = this.erConnection;
+    const subId = connection.onProgramAccountChange(
       this.program.programId,
       (keyed, ctx) => {
         const data = Buffer.from(keyed.accountInfo.data);
@@ -1717,7 +1856,7 @@ export class CrossyClient {
     );
     let worldSubId: number | null = null;
     if (params.onWorld) {
-      worldSubId = this.erConnection.onAccountChange(
+      worldSubId = connection.onAccountChange(
         params.world,
         (info, ctx) => {
           try {
@@ -1733,14 +1872,10 @@ export class CrossyClient {
         { commitment: "processed" },
       );
     }
-    let disposed = false;
-    return () => {
-      if (disposed) return;
-      disposed = true;
-      void this.erConnection.removeProgramAccountChangeListener(subId);
-      if (worldSubId != null)
-        void this.erConnection.removeAccountChangeListener(worldSubId);
-    };
+    return this.trackErSubscription(() => {
+      void connection.removeProgramAccountChangeListener(subId);
+      if (worldSubId != null) void connection.removeAccountChangeListener(worldSubId);
+    });
   }
 
   // ---- interest management ---------------------------------------------
@@ -1790,6 +1925,9 @@ export class CrossyClient {
 
   /** Release all subscriptions. */
   async close(): Promise<void> {
-    await this.subscriptions.close();
+    this.closeErRealtimeSubscriptions();
+    if (this.erBlockhashTimer) clearInterval(this.erBlockhashTimer);
+    this.erBlockhashTimer = null;
+    await Promise.all([this.subscriptions.close(), this.baseSubscriptions.close()]);
   }
 }

@@ -71,9 +71,9 @@ async function main() {
   const idl = JSON.parse(
     readFileSync(resolve(__dirname, "../target/idl/crossy_world.json"), "utf8"),
   );
-  const chunkPda = (i: number) => pda(Buffer.from("chunk"), le8(day), le2(i));
+  const chunkPda = (i: number) => pda(Buffer.from("chunk"), le8(day), le4(i));
   const sectorPda = (sx: number, sy: number) =>
-    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le2(sy));
+    pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy));
 
   const player = web3.Keypair.generate();
   const session = web3.Keypair.generate();

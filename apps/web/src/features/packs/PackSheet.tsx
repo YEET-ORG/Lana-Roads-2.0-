@@ -168,7 +168,6 @@ export function PackSheet({
     try {
       const { asset } = await boot.client.claimPull({
         pullNonce: pull.pullNonce,
-        name: `${agentName(variant.modelId)} #${variant.variantId}`,
         uri: `https://lanaroads.xyz/agents/season${SEASON}/${variant.variantId}.json`,
       });
       sfx.fanfare();

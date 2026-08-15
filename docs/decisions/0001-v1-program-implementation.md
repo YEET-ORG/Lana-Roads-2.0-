@@ -6,6 +6,15 @@
 Decisions made while implementing `programs/crossy-world`, with the spec
 invariants they preserve and the follow-ups they require.
 
+> **2026-08-15 implementation update:** Sections 1, 8, and 10 preserve the
+> historical state of the first prototype. The current code no longer trusts
+> a configured `vrf_authority`: chunk and gacha requests use MagicBlock scoped
+> VRF (`#[vrf]` + `#[vrf_callback]`) through `ephemeral-rollups-sdk 0.16.2` and
+> `ephemeral-vrf-sdk 0.4.1`. The current release baseline is documented in
+> [`../DEPLOYMENT_READINESS.md`](../DEPLOYMENT_READINESS.md). A fresh
+> program ID must pass real devnet chunk and gacha callback smoke tests before
+> paid flows are enabled.
+
 ## 1. Randomness transport: configured `vrf_authority` signer
 
 The spec requires MagicBlock VRF with `#[vrf]`/`#[vrf_callback]` binding.

@@ -7,6 +7,7 @@ pub mod seeds {
     pub const SEASON: &[u8] = b"season";
     pub const BANNER: &[u8] = b"banner";
     pub const VARIANT: &[u8] = b"variant";
+    pub const RARITY_POOL: &[u8] = b"rarity_pool";
     pub const CLASS: &[u8] = b"class";
     pub const PLAYER: &[u8] = b"player";
     pub const IDENTITY: &[u8] = b"identity";
@@ -86,7 +87,7 @@ pub const HARD_MAX_PLAYERS: u16 = 1_024;
 
 /// Request the next chunk when the leader is within this many rows of the
 /// revealed frontier.
-pub const CHUNK_REQUEST_MARGIN: u16 = 8;
+pub const CHUNK_REQUEST_MARGIN: u32 = 8;
 /// A chunk VRF request may be permissionlessly retried after this timeout.
 pub const CHUNK_VRF_TIMEOUT_SECONDS: i64 = 90;
 
@@ -114,6 +115,10 @@ pub const SEASON_DAYS: u64 = 30;
 
 /// Maximum variants a season may register (bounded account growth).
 pub const MAX_SEASON_VARIANTS: u16 = 256;
+/// Maximum variants in one rarity pool. Four fixed pools keep gacha
+/// selection bounded without putting the full season account set in a VRF
+/// callback transaction.
+pub const MAX_RARITY_VARIANTS: usize = 64;
 
 /// Minimum train warning window in slots-equivalent milliseconds; the
 /// generator may not produce a railway lane with a shorter warning.

@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { ReceiptKind, TransactionReview } from "@crossy-world/sdk";
+import { pda, ReceiptKind, TransactionReview, WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
 import { Button, Icon, Loader, Modal, Notice, Steps } from "../../design-system";
 
@@ -78,6 +78,15 @@ export function EntryFlow({
   ) {
     setStage({ name: "signing" });
     try {
+      // Paid spawn is an ER write too. Resolve before taking payment so a
+      // router-selected world can never be spawned on the default/wrong ER.
+      if (boot.client.routerUrl) {
+        const status = await boot.client.resolveErForWorld(
+          pda.world(WorldMode.Paid, day),
+        );
+        if (!status.isDelegated || !status.fqdn)
+          throw new Error("paid world is not delegated to a live rollup");
+      }
       await boot.client.submitReviewed(review);
       setStage({ name: "payment-confirmed", attemptNonce, receiptNonce });
       setStage({ name: "spawn-pending", attemptNonce, receiptNonce });
@@ -115,7 +124,9 @@ export function EntryFlow({
     <Modal
       title="Paid entry"
       ariaLabel="Paid entry"
-      onClose={stage.name === "signing" || stage.name === "spawn-pending" ? undefined : onCancel}
+      onClose={
+        stage.name === "signing" || stage.name === "spawn-pending" ? undefined : onCancel
+      }
     >
       {stage.name !== "failed" && (
         <div style={{ marginBottom: 12 }}>
@@ -154,9 +165,7 @@ export function EntryFlow({
           <div className="row">
             <Button
               variant="primary"
-              onClick={() =>
-                submit(stage.review, stage.attemptNonce, stage.receiptNonce)
-              }
+              onClick={() => submit(stage.review, stage.attemptNonce, stage.receiptNonce)}
             >
               Confirm & sign
             </Button>

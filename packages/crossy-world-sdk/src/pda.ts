@@ -37,6 +37,8 @@ export const pda = {
     find([SEEDS.banner, le16(seasonIndex), Buffer.from([tier])]),
   variant: (seasonIndex: number, variantId: number) =>
     find([SEEDS.variant, le16(seasonIndex), le16(variantId)]),
+  rarityPool: (seasonIndex: number, rarity: number) =>
+    find([SEEDS.rarityPool, le16(seasonIndex), Buffer.from([rarity])]),
   classConfig: (classId: number, version: number) =>
     find([SEEDS.class, le16(classId), le16(version)]),
   profile: (wallet: PublicKey) => find([SEEDS.player, wallet.toBuffer()]),
@@ -69,9 +71,9 @@ export const pda = {
   world: (mode: WorldMode, day: bigint | number) =>
     find([SEEDS.world, Buffer.from([mode]), le64(day)]),
   chunk: (day: bigint | number, chunkIndex: number) =>
-    find([SEEDS.chunk, le64(day), le16(chunkIndex)]),
+    find([SEEDS.chunk, le64(day), le32(chunkIndex)]),
   sector: (world: PublicKey, sectorX: number, sectorY: number) =>
-    find([SEEDS.sector, world.toBuffer(), Buffer.from([sectorX]), le16(sectorY)]),
+    find([SEEDS.sector, world.toBuffer(), Buffer.from([sectorX]), le32(sectorY)]),
   run: (world: PublicKey, wallet: PublicKey) =>
     find([SEEDS.run, world.toBuffer(), wallet.toBuffer()]),
   best: (world: PublicKey, wallet: PublicKey) =>

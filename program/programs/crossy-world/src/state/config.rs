@@ -31,10 +31,8 @@ pub struct GlobalConfig {
     pub collection: Pubkey,
     /// Update authority configured for the collection.
     pub collection_authority: Pubkey,
-    /// Authenticated randomness callback identity. Only this signer may
-    /// deliver chunk/gacha randomness (the MagicBlock VRF integration point;
-    /// binding, generation, and idempotency rules live in the handlers).
-    pub vrf_authority: Pubkey,
+    /// MagicBlock validator that must host every delegated gameplay account.
+    pub validator: Pubkey,
     /// Pause bitmask (see `pause`).
     pub pause_flags: u16,
     /// Winner basis points: 9000.

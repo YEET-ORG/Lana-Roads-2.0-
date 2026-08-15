@@ -19,20 +19,25 @@ use crate::state::*;
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateWorld<'info> {
+    #[account(
+        seeds = [seeds::CONFIG],
+        bump = config.bump,
+        constraint = config.admin == payer.key() @ CrossyError::NotAdmin
+    )]
+    pub config: Box<Account<'info, GlobalConfig>>,
     pub payer: Signer<'info>,
     /// CHECK: the world PDA to delegate; seeds validated by delegate_pda.
     #[account(mut, del)]
     pub pda: UncheckedAccount<'info>,
 }
 
-/// Delegate a world header to the ER. Validator identity may be passed as
-/// the first remaining account (pinned placement).
+/// Delegate a world header to the ER using the validator pinned in config.
 pub fn delegate_world(ctx: Context<DelegateWorld>, mode: u8, day: u64) -> Result<()> {
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::WORLD, &[mode], &day.to_le_bytes()],
         DelegateConfig {
-            validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
+            validator: Some(ctx.accounts.config.validator),
             ..Default::default()
         },
     )?;
@@ -42,6 +47,12 @@ pub fn delegate_world(ctx: Context<DelegateWorld>, mode: u8, day: u64) -> Result
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateSector<'info> {
+    #[account(
+        seeds = [seeds::CONFIG],
+        bump = config.bump,
+        constraint = config.admin == payer.key() @ CrossyError::NotAdmin
+    )]
+    pub config: Box<Account<'info, GlobalConfig>>,
     pub payer: Signer<'info>,
     /// CHECK: the sector PDA to delegate.
     #[account(mut, del)]
@@ -52,7 +63,7 @@ pub fn delegate_sector(
     ctx: Context<DelegateSector>,
     world: Pubkey,
     sector_x: u8,
-    sector_y: u16,
+    sector_y: u32,
 ) -> Result<()> {
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
@@ -63,7 +74,7 @@ pub fn delegate_sector(
             &sector_y.to_le_bytes(),
         ],
         DelegateConfig {
-            validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
+            validator: Some(ctx.accounts.config.validator),
             ..Default::default()
         },
     )?;
@@ -73,6 +84,8 @@ pub fn delegate_sector(
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateRun<'info> {
+    #[account(seeds = [seeds::CONFIG], bump = config.bump)]
+    pub config: Box<Account<'info, GlobalConfig>>,
     pub payer: Signer<'info>,
     /// CHECK: the run PDA to delegate.
     #[account(mut, del)]
@@ -80,11 +93,12 @@ pub struct DelegateRun<'info> {
 }
 
 pub fn delegate_run(ctx: Context<DelegateRun>, world: Pubkey, wallet: Pubkey) -> Result<()> {
+    require_keys_eq!(ctx.accounts.payer.key(), wallet, CrossyError::NotWallet);
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::RUN, world.as_ref(), wallet.as_ref()],
         DelegateConfig {
-            validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
+            validator: Some(ctx.accounts.config.validator),
             ..Default::default()
         },
     )?;
@@ -94,6 +108,8 @@ pub fn delegate_run(ctx: Context<DelegateRun>, world: Pubkey, wallet: Pubkey) ->
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateBest<'info> {
+    #[account(seeds = [seeds::CONFIG], bump = config.bump)]
+    pub config: Box<Account<'info, GlobalConfig>>,
     pub payer: Signer<'info>,
     /// CHECK: the daily-best PDA to delegate.
     #[account(mut, del)]
@@ -101,11 +117,12 @@ pub struct DelegateBest<'info> {
 }
 
 pub fn delegate_best(ctx: Context<DelegateBest>, world: Pubkey, wallet: Pubkey) -> Result<()> {
+    require_keys_eq!(ctx.accounts.payer.key(), wallet, CrossyError::NotWallet);
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::BEST, world.as_ref(), wallet.as_ref()],
         DelegateConfig {
-            validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
+            validator: Some(ctx.accounts.config.validator),
             ..Default::default()
         },
     )?;
@@ -115,18 +132,24 @@ pub fn delegate_best(ctx: Context<DelegateBest>, world: Pubkey, wallet: Pubkey) 
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateChunk<'info> {
+    #[account(
+        seeds = [seeds::CONFIG],
+        bump = config.bump,
+        constraint = config.admin == payer.key() @ CrossyError::NotAdmin
+    )]
+    pub config: Box<Account<'info, GlobalConfig>>,
     pub payer: Signer<'info>,
     /// CHECK: the chunk PDA to delegate.
     #[account(mut, del)]
     pub pda: UncheckedAccount<'info>,
 }
 
-pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u16) -> Result<()> {
+pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u32) -> Result<()> {
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
         DelegateConfig {
-            validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
+            validator: Some(ctx.accounts.config.validator),
             ..Default::default()
         },
     )?;
@@ -183,12 +206,18 @@ pub struct CloseWorld<'info> {
     pub world: Box<Account<'info, WorldHeader>>,
 }
 
-/// After the hard cutoff: mark the world Closed and commit+undelegate it to
-/// base. Cutoff correctness never depends on this crank — every gameplay
-/// instruction checks time independently.
+/// After the hard cutoff, the world's configured commit payer may mark it
+/// Closed and commit+undelegate it to base. Restricting closure leaves time
+/// for the final DailyBest audit; gameplay still stops independently at the
+/// hard cutoff.
 pub fn close_world(ctx: Context<CloseWorld>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let world = &mut ctx.accounts.world;
+    require_keys_eq!(
+        ctx.accounts.payer.key(),
+        world.commit_payer,
+        CrossyError::NotAdmin
+    );
     require!(now >= world.end_ts, CrossyError::CutoffPassed);
     require!(
         world.status != WorldStatus::Closed,
@@ -210,6 +239,12 @@ pub fn close_world(ctx: Context<CloseWorld>) -> Result<()> {
 #[commit]
 #[derive(Accounts)]
 pub struct UndelegateAccounts<'info> {
+    #[account(
+        seeds = [seeds::CONFIG],
+        bump = config.bump,
+        constraint = config.admin == payer.key() @ CrossyError::NotAdmin
+    )]
+    pub config: Box<Account<'info, GlobalConfig>>,
     #[account(mut)]
     pub payer: Signer<'info>,
 }

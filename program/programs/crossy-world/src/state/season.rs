@@ -1,5 +1,7 @@
 //! Seasons, banners, variant inventory, and versioned class configuration.
 
+use crate::constants::MAX_RARITY_VARIANTS;
+use crate::errors::CrossyError;
 use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
@@ -84,10 +86,113 @@ pub struct VariantInventory {
 }
 
 impl VariantInventory {
-    pub fn available(&self) -> u32 {
+    pub fn available(&self) -> Result<u32> {
+        let used = self
+            .reserved
+            .checked_add(self.minted)
+            .ok_or(CrossyError::Overflow)?;
+        require!(used <= self.supply_cap, CrossyError::SupplyExceeded);
         self.supply_cap
-            .saturating_sub(self.reserved)
-            .saturating_sub(self.minted)
+            .checked_sub(used)
+            .ok_or_else(|| error!(CrossyError::SupplyExceeded))
+    }
+}
+
+#[derive(
+    AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, Default, InitSpace,
+)]
+pub struct RarityPoolEntry {
+    pub variant_id: u16,
+    /// Units not yet assigned. Reservations are removed here atomically with
+    /// the corresponding `VariantInventory.reserved` increment.
+    pub available: u32,
+}
+
+/// PDA: ["rarity_pool", season_le, rarity]. A compact canonical catalog
+/// lets a gacha assignment select from one bounded account after VRF
+/// fulfillment; callback transactions never need hundreds of variant keys.
+#[account]
+#[derive(InitSpace)]
+pub struct RarityPool {
+    pub season: u16,
+    pub rarity: u8,
+    pub count: u16,
+    /// Monotonic reservation counter for auditing and indexer cache busting.
+    pub revision: u32,
+    pub initialized: bool,
+    pub entries: [RarityPoolEntry; MAX_RARITY_VARIANTS],
+    pub bump: u8,
+}
+
+impl RarityPool {
+    pub fn has_available(&self) -> bool {
+        self.entries[..self.count as usize]
+            .iter()
+            .any(|entry| entry.available > 0)
+    }
+
+    pub fn available_count(&self) -> Result<u32> {
+        self.entries[..self.count as usize]
+            .iter()
+            .filter(|entry| entry.available > 0)
+            .try_fold(0u32, |count, _| {
+                count.checked_add(1).ok_or(CrossyError::Overflow)
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn nth_available(&self, selected: u32) -> Result<(usize, RarityPoolEntry)> {
+        let mut cursor = 0u32;
+        for (index, entry) in self.entries[..self.count as usize].iter().enumerate() {
+            if entry.available == 0 {
+                continue;
+            }
+            if cursor == selected {
+                return Ok((index, *entry));
+            }
+            cursor = cursor.checked_add(1).ok_or(CrossyError::Overflow)?;
+        }
+        err!(CrossyError::SoldOut)
+    }
+
+    /// Select from the immutable configured catalog. Sold-out entries are
+    /// deliberately not rerolled: callers refund that pull, which prevents
+    /// concurrent assignments from changing another player's random result.
+    pub fn entry(&self, selected: u32) -> Result<(usize, RarityPoolEntry)> {
+        require!(selected < self.count as u32, CrossyError::SoldOut);
+        let index = selected as usize;
+        Ok((index, self.entries[index]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn immutable_catalog_selection_never_rerolls_a_sold_out_entry() {
+        let mut pool = RarityPool {
+            season: 1,
+            rarity: 3,
+            count: 2,
+            revision: 1,
+            initialized: true,
+            entries: [RarityPoolEntry::default(); MAX_RARITY_VARIANTS],
+            bump: 0,
+        };
+        pool.entries[0] = RarityPoolEntry {
+            variant_id: 10,
+            available: 0,
+        };
+        pool.entries[1] = RarityPoolEntry {
+            variant_id: 11,
+            available: 5,
+        };
+
+        assert_eq!(pool.entry(0).unwrap().1.variant_id, 10);
+        assert_eq!(pool.entry(0).unwrap().1.available, 0);
+        assert_eq!(pool.entry(1).unwrap().1.variant_id, 11);
+        assert!(pool.entry(2).is_err());
     }
 }
 

@@ -2,6 +2,7 @@
 //! carry stable object identities + nonces, never secrets. The indexer must be
 //! able to rebuild all leaderboards/history from these plus accounts.
 
+use crate::state::WorldMode;
 use anchor_lang::prelude::*;
 
 #[event]
@@ -10,6 +11,13 @@ pub struct ConfigInitialized {
     pub usdc_mint: Pubkey,
     pub treasury: Pubkey,
     pub collection: Pubkey,
+    pub validator: Pubkey,
+}
+
+#[event]
+pub struct ValidatorChanged {
+    pub previous: Pubkey,
+    pub validator: Pubkey,
 }
 
 #[event]
@@ -79,7 +87,7 @@ pub struct DayClosed {
 #[event]
 pub struct DayCommitted {
     pub day: u64,
-    pub record_score: u16,
+    pub record_score: u32,
     pub record_holder: Pubkey,
 }
 
@@ -154,7 +162,7 @@ pub struct AttemptActivated {
     pub class_id: u16,
     pub asset: Pubkey,
     pub x: u8,
-    pub y: u16,
+    pub y: u32,
 }
 
 #[event]
@@ -162,7 +170,7 @@ pub struct AttemptEnded {
     pub world: Pubkey,
     pub wallet: Pubkey,
     pub attempt_nonce: u32,
-    pub final_score: u16,
+    pub final_score: u32,
     pub reason: u8,
 }
 
@@ -174,7 +182,7 @@ pub struct PlayerDied {
     pub death_nonce: u32,
     pub cause: u8,
     pub x: u8,
-    pub y: u16,
+    pub y: u32,
     pub revive_deadline: i64,
 }
 
@@ -186,7 +194,7 @@ pub struct PlayerRevived {
     pub death_nonce: u32,
     pub revive_count: u16,
     pub x: u8,
-    pub y: u16,
+    pub y: u32,
 }
 
 #[event]
@@ -194,22 +202,41 @@ pub struct RecordChanged {
     pub world: Pubkey,
     pub wallet: Pubkey,
     pub attempt_nonce: u32,
-    pub score: u16,
+    pub score: u32,
     pub slot: u64,
 }
 
 #[event]
 pub struct ChunkRequested {
     pub day: u64,
-    pub chunk_index: u16,
+    pub chunk_index: u32,
     pub generation: u16,
 }
 
 #[event]
 pub struct ChunkRevealed {
     pub day: u64,
-    pub chunk_index: u16,
+    pub chunk_index: u32,
     pub generation: u16,
+    pub randomness_hash: [u8; 32],
+}
+
+#[event]
+pub struct ChunkReady {
+    pub world: Pubkey,
+    pub chunk_index: u32,
+    pub randomness_hash: [u8; 32],
+}
+
+#[event]
+pub struct FrontierExtended {
+    pub world: Pubkey,
+    pub day: u64,
+    pub mode: WorldMode,
+    pub map_seq: u64,
+    pub chunk_index: u32,
+    pub generation: u16,
+    pub revealed_rows: u32,
     pub randomness_hash: [u8; 32],
 }
 
@@ -242,7 +269,13 @@ pub struct PullRequested {
     pub tier: u8,
     pub pull_nonce: u32,
     pub price: u64,
-    pub inventory_revision: u32,
+}
+
+#[event]
+pub struct SeasonActivated {
+    pub season: u16,
+    pub weights_hash: [u8; 32],
+    pub variant_count: u16,
 }
 
 #[event]

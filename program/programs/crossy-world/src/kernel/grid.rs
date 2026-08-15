@@ -29,7 +29,7 @@ impl Direction {
 /// Destination of a one-tile step. `None` when it leaves the board (x edges
 /// are hard boundaries; y below 0 is invalid; y has no upper bound here —
 /// traversability at the frontier is checked against revealed chunks).
-pub fn step(x: u8, y: u16, dir: Direction) -> Option<(u8, u16)> {
+pub fn step(x: u8, y: u32, dir: Direction) -> Option<(u8, u32)> {
     match dir {
         Direction::Forward => y.checked_add(1).map(|ny| (x, ny)),
         Direction::Backward => y.checked_sub(1).map(|ny| (x, ny)),
@@ -47,19 +47,19 @@ pub fn step(x: u8, y: u16, dir: Direction) -> Option<(u8, u16)> {
 
 /// Sector coordinates for a tile. Sectors are 8x8; sector_x in 0..8,
 /// sector_y unbounded (grows with revealed rows).
-pub const fn sector_of(x: u8, y: u16) -> (u8, u16) {
-    (x / SECTOR_EDGE, y / SECTOR_EDGE as u16)
+pub const fn sector_of(x: u8, y: u32) -> (u8, u32) {
+    (x / SECTOR_EDGE, y / SECTOR_EDGE as u32)
 }
 
 /// Bit index of a tile inside its 8x8 sector bitset (0..64).
-pub const fn sector_bit(x: u8, y: u16) -> u8 {
+pub const fn sector_bit(x: u8, y: u32) -> u8 {
     let lx = x % SECTOR_EDGE;
-    let ly = (y % SECTOR_EDGE as u16) as u8;
+    let ly = (y % SECTOR_EDGE as u32) as u8;
     ly * SECTOR_EDGE + lx
 }
 
 /// True when the two tiles live in the same sector account.
-pub fn same_sector(ax: u8, ay: u16, bx: u8, by: u16) -> bool {
+pub fn same_sector(ax: u8, ay: u32, bx: u8, by: u32) -> bool {
     sector_of(ax, ay) == sector_of(bx, by)
 }
 
@@ -91,22 +91,22 @@ pub fn spawn_scan_start(wallet: &[u8; 32], day: u64, attempt_nonce: u32, tile_co
 
 /// Convert a safe-zone scan index (0..tile_count) to tile coordinates.
 /// Scanning wraps: index i maps to (i % width, i / width).
-pub const fn scan_index_to_tile(index: u32) -> (u8, u16) {
+pub const fn scan_index_to_tile(index: u32) -> (u8, u32) {
     (
         (index % WORLD_WIDTH as u32) as u8,
-        (index / WORLD_WIDTH as u32) as u16,
+        index / WORLD_WIDTH as u32,
     )
 }
 
 /// Manhattan-adjacent (4-neighborhood) test used by Kick/ability targeting.
-pub fn is_adjacent(ax: u8, ay: u16, bx: u8, by: u16) -> bool {
+pub fn is_adjacent(ax: u8, ay: u32, bx: u8, by: u32) -> bool {
     let dx = (ax as i32 - bx as i32).abs();
-    let dy = (ay as i32 - by as i32).abs();
-    dx + dy == 1
+    let dy = (ay as i64 - by as i64).abs();
+    dx as i64 + dy == 1
 }
 
 /// The facing-adjacent tile (Kick target tile).
-pub fn facing_tile(x: u8, y: u16, facing: Direction) -> Option<(u8, u16)> {
+pub fn facing_tile(x: u8, y: u32, facing: Direction) -> Option<(u8, u32)> {
     step(x, y, facing)
 }
 
@@ -122,6 +122,13 @@ mod tests {
         assert_eq!(step(5, 0, Direction::Backward), None);
         assert_eq!(step(5, 1, Direction::Backward), Some((5, 0)));
         assert_eq!(step(5, 1, Direction::Forward), Some((5, 2)));
+        assert_eq!(step(5, 65_535, Direction::Forward), Some((5, 65_536)));
+    }
+
+    #[test]
+    fn sector_coordinates_continue_beyond_u16_rows() {
+        assert_eq!(sector_of(63, 1_000_000), (7, 125_000));
+        assert_eq!(sector_bit(63, 1_000_000), 7);
     }
 
     #[test]
