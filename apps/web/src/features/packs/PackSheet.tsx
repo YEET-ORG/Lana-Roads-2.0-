@@ -1,12 +1,9 @@
 /**
- * Packs: buy one, watch it open, mint what it gave you.
+ * Contract-backed gacha shop and pack-opening ceremony.
  *
- * The sequence is not cosmetic — it is what the program actually does, and
- * the screen says so at each step. You pay; the odds are snapshotted at
- * that moment; the VRF authority assigns a rarity and a variant from the
- * season's remaining inventory; only then does an asset get minted to you.
- * Nothing here decides the outcome, and the wait between paying and
- * knowing is real, so it is dressed rather than hidden.
+ * The client never chooses the result: payment snapshots a banner's odds,
+ * MagicBlock VRF assigns the rarity and variant, and the final action mints
+ * that exact assignment as a Metaplex Core asset.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
@@ -17,27 +14,67 @@ import type { Bootstrapped } from "../../lib/client";
 import { agentName } from "../../lib/agent";
 import { agentId } from "../../game/renderer/assets";
 import { sfx } from "../../game/audio";
+import { AgentPackPreview } from "./AgentPackPreview";
 
 const SEASON = Number(import.meta.env.VITE_SEASON ?? 1);
-const TIER = 0;
+const POLL_MS = 1500;
+const MIN_OPEN_MS = 1800;
 
 const RARITY = ["common", "rare", "epic", "legendary"] as const;
-type Rarity = (typeof RARITY)[number];
+const TIER_COPY = [
+  { title: "Scout", strap: "The classic pull", fallbackPrice: 5_000_000n },
+  { title: "Ranger", strap: "Higher rare odds", fallbackPrice: 10_000_000n },
+  { title: "Crown", strap: "Best epic odds", fallbackPrice: 20_000_000n },
+] as const;
+const CLASS_NAMES: Record<number, string> = {
+  1: "Dash",
+  2: "Shield",
+  3: "Leap",
+  4: "Hook",
+};
 
-/** How often to ask whether the pack has been assigned yet. */
-const POLL_MS = 1500;
+interface BannerView {
+  tier: number;
+  price: bigint;
+  weights: number[];
+}
+
+interface PityView {
+  epic: number;
+  legendary: number;
+}
 
 type Stage =
   | { name: "shop" }
-  | { name: "paying" }
-  | { name: "opening"; pullNonce: number }
+  | { name: "paying"; tier: number }
+  | { name: "opening"; pullNonce: number; tier: number; startedAt: number }
   | { name: "revealed"; pull: PullSummary; variant: VariantSummary }
   | { name: "minting"; pull: PullSummary; variant: VariantSummary }
   | { name: "minted"; variant: VariantSummary; asset: string }
-  | { name: "refundable"; pullNonce: number };
+  | { name: "refundable"; pullNonce: number; tier: number };
 
 function usdc(v: bigint | number): string {
   return `${(Number(v) / 1e6).toFixed(2)} USDC`;
+}
+
+function summaryFromAccount(
+  pull: any,
+  pullNonce: number,
+  address = PublicKey.default,
+): PullSummary {
+  const state = Object.keys(pull.state)[0] as PullSummary["state"];
+  return {
+    address,
+    pullNonce,
+    season: pull.season,
+    tier: pull.tier,
+    price: BigInt(pull.price.toString()),
+    state,
+    assignedRarity: pull.assignedRarity,
+    assignedVariant: pull.assignedVariant,
+    mintedAsset: pull.mintedAsset,
+    requestedAt: Number(pull.requestedAt.toString()),
+  };
 }
 
 export function PackSheet({
@@ -46,34 +83,83 @@ export function PackSheet({
   onClose,
 }: {
   boot: Bootstrapped;
-  /** Show the pulled agent in the world behind the sheet. */
   onAgentRevealed?: (modelId: string) => void;
   onClose: () => void;
 }) {
   const [stage, setStage] = useState<Stage>({ name: "shop" });
-  const [banner, setBanner] = useState<{ price: bigint; weights: number[] } | null>(null);
+  const [selectedTier, setSelectedTier] = useState(0);
+  const [banners, setBanners] = useState<Array<BannerView | null> | null>(null);
   const [variants, setVariants] = useState<VariantSummary[] | null>(null);
   const [pulls, setPulls] = useState<PullSummary[] | null>(null);
+  const [pity, setPity] = useState<PityView[]>(() =>
+    Array.from({ length: 3 }, () => ({ epic: 0, legendary: 0 })),
+  );
   const [balance, setBalance] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef<PublicKey | null>(null);
+  const stageRef = useRef(stage);
+  const onAgentRevealedRef = useRef(onAgentRevealed);
+  stageRef.current = stage;
+  onAgentRevealedRef.current = onAgentRevealed;
 
-  // Everything the shop needs: price, odds, what is left, what you own.
+  const resumePull = useCallback((pull: PullSummary, list: VariantSummary[]) => {
+    if (pull.state === "pending") {
+      setSelectedTier(pull.tier);
+      setStage({
+        name: "opening",
+        pullNonce: pull.pullNonce,
+        tier: pull.tier,
+        startedAt: performance.now(),
+      });
+      return true;
+    }
+    if (pull.state === "refundable") {
+      setSelectedTier(pull.tier);
+      setStage({ name: "refundable", pullNonce: pull.pullNonce, tier: pull.tier });
+      return true;
+    }
+    if (pull.state === "assigned") {
+      const variant = list.find((v) => v.variantId === pull.assignedVariant);
+      if (!variant) return false;
+      setSelectedTier(pull.tier);
+      onAgentRevealedRef.current?.(agentId(variant.modelId));
+      setStage({ name: "revealed", pull, variant });
+      return true;
+    }
+    return false;
+  }, []);
+
   const load = useCallback(async () => {
+    setError(null);
     try {
-      const [b, v, p, config] = await Promise.all([
-        boot.client.getBanner(SEASON, TIER),
+      const [bannerRows, list, history, config, profile] = await Promise.all([
+        Promise.all(
+          [0, 1, 2].map((tier) => boot.client.getBanner(SEASON, tier).catch(() => null)),
+        ),
         boot.client.listVariants(SEASON),
         boot.client.listPulls(),
         boot.client.getConfig(),
+        boot.client.getProfile().catch(() => null),
       ]);
-      if (b)
-        setBanner({
-          price: BigInt(b.price.toString()),
-          weights: [...(b.baseWeights as number[])],
-        });
-      setVariants(v);
-      setPulls(p);
+      const nextBanners = bannerRows.map((banner: any, tier) =>
+        banner
+          ? {
+              tier,
+              price: BigInt(banner.price.toString()),
+              weights: [...(banner.baseWeights as number[])],
+            }
+          : null,
+      );
+      setBanners(nextBanners);
+      setVariants(list);
+      setPulls(history);
+      setPity(
+        [0, 1, 2].map((tier) => ({
+          epic: profile?.pity?.[tier]?.epicMisses ?? 0,
+          legendary: profile?.pity?.[tier]?.legendaryMisses ?? 0,
+        })),
+      );
+
       const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
       const token = getAssociatedTokenAddressSync(
         new PublicKey(config.usdcMint),
@@ -84,78 +170,90 @@ export function PackSheet({
         .getTokenAccountBalance(token)
         .catch(() => null);
       setBalance(bal ? BigInt(bal.value.amount) : 0n);
+
+      // A pull survives closing the sheet and refreshing the page. Surface it
+      // immediately so a paid assignment can never become stranded in UI.
+      if (stageRef.current.name === "shop") {
+        const active = history.find(
+          (p) =>
+            p.state === "pending" || p.state === "assigned" || p.state === "refundable",
+        );
+        if (active) queueMicrotask(() => resumePull(active, list));
+      }
     } catch (e) {
-      setError(`${e}`.slice(0, 140));
+      setError(`${(e as { message?: string }).message ?? e}`.slice(0, 160));
+      setBanners((current) => current ?? [null, null, null]);
     }
-  }, [boot]);
+  }, [boot, resumePull]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // While a pack is open, watch the pull account for the assignment.
   useEffect(() => {
     if (stage.name !== "opening") return;
     let live = true;
+    let revealing = false;
+    const { pullNonce, startedAt } = stage;
+
     const tick = async () => {
-      const pull = await boot.client
-        .getPull(boot.wallet.publicKey, stage.pullNonce)
+      if (revealing) return;
+      const account = await boot.client
+        .getPull(boot.wallet.publicKey, pullNonce)
         .catch(() => null);
-      if (!live || !pull) return;
-      const state = Object.keys(pull.state)[0];
+      if (!live || !account) return;
+      const state = Object.keys(account.state)[0];
       if (state === "refundable") {
-        setStage({ name: "refundable", pullNonce: stage.pullNonce });
+        setStage({ name: "refundable", pullNonce, tier: account.tier });
         return;
       }
       if (state !== "assigned" && state !== "claimed") return;
+      revealing = true;
+      const wait = Math.max(0, MIN_OPEN_MS - (performance.now() - startedAt));
+      if (wait > 0) await new Promise((resolve) => window.setTimeout(resolve, wait));
       const list = variants ?? (await boot.client.listVariants(SEASON));
-      const variant = list.find((v) => v.variantId === pull.assignedVariant);
+      const variant = list.find((v) => v.variantId === account.assignedVariant);
       if (!variant || !live) return;
-      const summary: PullSummary = {
-        address: boot.client.program.programId, // unused in this view
-        pullNonce: stage.pullNonce,
-        season: pull.season,
-        tier: pull.tier,
-        price: BigInt(pull.price.toString()),
-        state: state as PullSummary["state"],
-        assignedRarity: pull.assignedRarity,
-        assignedVariant: pull.assignedVariant,
-        mintedAsset: pull.mintedAsset,
-        requestedAt: Number(pull.requestedAt.toString()),
-      };
-      onAgentRevealed?.(agentId(variant.modelId));
+      const summary = summaryFromAccount(account, pullNonce);
+      onAgentRevealedRef.current?.(agentId(variant.modelId));
       if (variant.rarity >= 2) sfx.fanfare();
       else sfx.confirm();
       setStage({ name: "revealed", pull: summary, variant });
     };
+
     void tick();
-    const id = setInterval(() => void tick(), POLL_MS);
+    const id = window.setInterval(() => void tick(), POLL_MS);
     return () => {
       live = false;
-      clearInterval(id);
+      window.clearInterval(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage.name, (stage as { pullNonce?: number }).pullNonce]);
+  }, [boot, stage, variants]);
 
   async function buy() {
-    if (!tokenRef.current) return;
+    const banner = banners?.[selectedTier];
+    if (!tokenRef.current || !banner) return;
     setError(null);
-    setStage({ name: "paying" });
+    setStage({ name: "paying", tier: selectedTier });
     sfx.click();
     try {
       const review = await boot.client.reviewPull({
         seasonIndex: SEASON,
-        tier: TIER,
+        tier: selectedTier,
         payerToken: tokenRef.current,
       });
       await boot.client.submitReviewed(review);
-      setStage({ name: "opening", pullNonce: review.pullNonce });
+      setStage({
+        name: "opening",
+        pullNonce: review.pullNonce,
+        tier: selectedTier,
+        startedAt: performance.now(),
+      });
     } catch (e) {
       const why = `${(e as { message?: string }).message ?? e}`;
       setError(
         /insufficient|0x1$/i.test(why)
-          ? "Not enough USDC for a pack."
-          : why.slice(0, 140),
+          ? "Not enough USDC for this pack."
+          : why.slice(0, 160),
       );
       setStage({ name: "shop" });
     }
@@ -174,7 +272,7 @@ export function PackSheet({
       setStage({ name: "minted", variant, asset: asset.toBase58() });
       void load();
     } catch (e) {
-      setError(`${(e as { message?: string }).message ?? e}`.slice(0, 140));
+      setError(`${(e as { message?: string }).message ?? e}`.slice(0, 160));
       setStage({ name: "revealed", pull, variant });
     }
   }
@@ -189,114 +287,195 @@ export function PackSheet({
       setStage({ name: "shop" });
       void load();
     } catch (e) {
-      setError(`${(e as { message?: string }).message ?? e}`.slice(0, 140));
+      setError(`${(e as { message?: string }).message ?? e}`.slice(0, 160));
     }
   }
 
   const left = (rarity: number) =>
     (variants ?? [])
-      .filter((v) => v.rarity === rarity && v.active)
-      .reduce((n, v) => n + v.remaining, 0);
+      .filter((variant) => variant.rarity === rarity && variant.active)
+      .reduce((count, variant) => count + variant.remaining, 0);
+
+  const banner = banners?.[selectedTier] ?? null;
+  const shownPrice = banner?.price ?? TIER_COPY[selectedTier].fallbackPrice;
+  const canAfford = balance == null || (banner != null && balance >= banner.price);
 
   return (
-    <Sheet title="Packs" ariaLabel="Agent packs" tone="gold" onClose={onClose}>
+    <Sheet
+      title="Agent packs"
+      ariaLabel="Agent pack shop"
+      tone="gold"
+      className="pack-sheet"
+      onClose={onClose}
+    >
       {error && <Notice tone="error">{error}</Notice>}
 
       {stage.name === "shop" && (
-        <>
-          <div className="pack-hero">
-            <div
-              className="pack-box"
-              onClick={buy}
-              role="button"
-              aria-label="open a pack"
-            >
-              <span className="pack-box__lid" />
-              <span className="pack-box__glow" />
-              <Icon name="spark" size={30} />
-            </div>
-            <div className="pack-price">
-              {banner ? usdc(banner.price) : "…"}
-              <small>
-                {balance == null ? "checking balance…" : `you hold ${usdc(balance)}`}
-              </small>
+        <div className="pack-shop">
+          <div className="pack-shop__topline">
+            <span>Season {SEASON}</span>
+            <span>
+              <Icon name="coin" size={14} />{" "}
+              {balance == null ? "checking..." : usdc(balance)}
+            </span>
+          </div>
+
+          <div className="pack-tier-picker" role="radiogroup" aria-label="Pack tier">
+            {TIER_COPY.map((copy, tier) => {
+              const item = banners?.[tier] ?? null;
+              const price = item?.price ?? copy.fallbackPrice;
+              return (
+                <button
+                  key={copy.title}
+                  className={`pack-tier pack-tier--${tier} ${selectedTier === tier ? "is-selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={selectedTier === tier}
+                  onClick={() => {
+                    setSelectedTier(tier);
+                    sfx.hop();
+                  }}
+                >
+                  <span className="pack-tier__rank">0{tier + 1}</span>
+                  <strong>{copy.title}</strong>
+                  <small>{copy.strap}</small>
+                  <span className="pack-tier__price">
+                    {usdc(price).replace(".00", "")}
+                  </span>
+                  {banners && !item && (
+                    <span className="pack-tier__offline">not live</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className={`pack-stage pack-stage--${selectedTier}`}>
+            <PackCrate tier={selectedTier} onClick={() => void buy()} />
+            <div className="pack-stage__copy">
+              <span className="pack-stage__eyebrow">{TIER_NAMES[selectedTier]} pack</span>
+              <strong>{TIER_COPY[selectedTier].title} crate</strong>
+              <small>One permanent, tradable agent NFT</small>
             </div>
           </div>
 
-          <h3 className="setting-group">Odds this season</h3>
-          <div className="odds">
-            {RARITY.map((r, i) => (
-              <div key={r} className={`odds__row odds__row--${r}`}>
-                <span className="odds__name">{r}</span>
-                <span className="odds__bar">
-                  <span style={{ width: `${banner?.weights[i] ?? 0}%` }} />
-                </span>
-                <span className="odds__pct">{banner?.weights[i] ?? 0}%</span>
-                <span className="odds__left">{left(i)} left</span>
-              </div>
-            ))}
+          <div className="pack-pity" aria-label="Pity progress">
+            <PityMeter
+              label="Epic guarantee"
+              value={pity[selectedTier].epic}
+              max={10}
+              tone="epic"
+            />
+            <PityMeter
+              label="Legendary guarantee"
+              value={pity[selectedTier].legendary}
+              max={100}
+              tone="legendary"
+            />
           </div>
-          <p className="ds-dim pack-note">
-            The odds are snapshotted when you pay, so a pack cannot get worse while it is
-            being opened. If the rarity it lands on has sold out, the pack becomes
-            refundable rather than dropping you to a lower one.
+
+          <div className="pack-odds-head">
+            <h3>Drop chances</h3>
+            <span>VRF verified</span>
+          </div>
+          <div className="odds">
+            {RARITY.map((rarity, index) => {
+              const chance = banner?.weights[index];
+              return (
+                <div key={rarity} className={`odds__row odds__row--${rarity}`}>
+                  <span className="odds__name">{rarity}</span>
+                  <span className="odds__bar">
+                    <span style={{ width: `${chance ?? 0}%` }} />
+                  </span>
+                  <span className="odds__pct">{chance == null ? "-" : `${chance}%`}</span>
+                  <span className="odds__left">
+                    {variants ? `${left(index)} left` : "..."}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <Button
+            variant="play"
+            size="giant"
+            icon="spark"
+            block
+            disabled={!banner || !canAfford}
+            onClick={() => void buy()}
+          >
+            {!banner
+              ? "Pack unavailable"
+              : !canAfford
+                ? "Not enough USDC"
+                : `Open for ${usdc(shownPrice)}`}
+          </Button>
+          <p className="pack-trustline">
+            <Icon name="lock" size={13} /> Odds lock when you pay. Results come from
+            MagicBlock VRF and cannot be rerolled.
           </p>
 
-          <div className="row">
-            <Button
-              variant="play"
-              icon="spark"
-              disabled={!banner || (balance != null && banner && balance < banner.price)}
-              onClick={buy}
-            >
-              Open a pack
-            </Button>
-            <Button variant="ghost" onClick={onClose}>
-              Done
-            </Button>
-          </div>
-
           {pulls != null && pulls.length > 0 && (
-            <>
-              <h3 className="setting-group">Your packs</h3>
+            <section className="pack-collection">
+              <h3>Your recent pulls</h3>
               <ul className="pack-history">
-                {pulls.slice(0, 6).map((p) => {
-                  const v = (variants ?? []).find(
-                    (x) => x.variantId === p.assignedVariant,
+                {pulls.slice(0, 6).map((pull) => {
+                  const variant = (variants ?? []).find(
+                    (item) => item.variantId === pull.assignedVariant,
                   );
+                  const resumable =
+                    pull.state === "pending" ||
+                    pull.state === "assigned" ||
+                    pull.state === "refundable";
                   return (
-                    <li key={p.pullNonce} className="pack-history__row">
+                    <li key={pull.pullNonce} className="pack-history__row">
                       <span
-                        className={`rarity-dot rarity-dot--${RARITY[p.assignedRarity] ?? "common"}`}
+                        className={`rarity-dot rarity-dot--${RARITY[pull.assignedRarity] ?? "common"}`}
                       />
                       <span className="pack-history__name">
-                        {v ? agentName(v.modelId) : "unopened"}
+                        {variant
+                          ? agentName(variant.modelId)
+                          : `${TIER_NAMES[pull.tier]} pack`}
+                        <small>pull #{pull.pullNonce}</small>
                       </span>
-                      <span className="pack-history__state">{p.state}</span>
+                      {resumable ? (
+                        <button
+                          type="button"
+                          className="pack-history__resume"
+                          onClick={() => resumePull(pull, variants ?? [])}
+                        >
+                          Resume
+                        </button>
+                      ) : (
+                        <span className="pack-history__state">{pull.state}</span>
+                      )}
                     </li>
                   );
                 })}
               </ul>
-            </>
+            </section>
           )}
-        </>
+        </div>
       )}
 
       {(stage.name === "paying" || stage.name === "opening") && (
-        <div className="pack-opening">
-          <div className={`pack-box pack-box--shaking`}>
-            <span className="pack-box__lid" />
-            <span className="pack-box__glow" />
-            <Icon name="spark" size={30} />
+        <div className={`pack-opening pack-opening--${stage.tier}`}>
+          <OpeningSteps step={stage.name === "paying" ? 0 : 1} />
+          <div className="pack-opening__theatre">
+            <div className="pack-opening__rays" />
+            <PackCrate tier={stage.tier} opening />
+            <span className="pack-opening__shadow" />
           </div>
           <Loader
-            label={
-              stage.name === "paying" ? "paying…" : "the chain is picking your agent…"
-            }
+            label={stage.name === "paying" ? "locking your odds..." : "VRF is drawing..."}
           />
-          <p className="ds-dim pack-note">
-            Your payment is in. The outcome is being drawn against the odds you just
-            bought — this is the part nobody, including us, can hurry.
+          <p className="pack-opening__status">
+            {stage.name === "paying"
+              ? "Confirming payment on Solana"
+              : "Your result is being selected from the season inventory"}
+          </p>
+          <p className="pack-trustline">
+            You can close this screen safely. Your paid pull will resume here next time.
           </p>
         </div>
       )}
@@ -307,12 +486,21 @@ export function PackSheet({
 
       {stage.name === "minted" && (
         <div className={`reveal reveal--${RARITY[stage.variant.rarity]}`}>
-          <Confetti />
+          <Confetti count={22} />
+          <div className="reveal__burst" />
+          <div className="reveal__kicker">
+            <Icon name="check" size={14} /> Mint complete
+          </div>
+          <div className="reveal__model">
+            <AgentPackPreview modelId={stage.variant.modelId} />
+          </div>
           <div className="reveal__rarity">{RARITY[stage.variant.rarity]}</div>
           <div className="reveal__name">{agentName(stage.variant.modelId)}</div>
-          <div className="reveal__meta">minted to your wallet</div>
-          <code className="reveal__asset">{stage.asset.slice(0, 16)}…</code>
-          <div className="row">
+          <div className="reveal__meta">Permanent NFT in your wallet</div>
+          <code className="reveal__asset">
+            {stage.asset.slice(0, 12)}...{stage.asset.slice(-6)}
+          </code>
+          <div className="row reveal__actions">
             <Button
               variant="play"
               icon="spark"
@@ -328,22 +516,104 @@ export function PackSheet({
       )}
 
       {stage.name === "refundable" && (
-        <>
+        <div className="pack-refund">
+          <span className="pack-refund__icon">
+            <Icon name="coin" size={34} />
+          </span>
+          <h3>This rarity sold out</h3>
           <Notice tone="warn">
-            The rarity this pack landed on sold out while it was being opened. The program
-            marked it refundable rather than giving you something worse.
+            Your pack was not downgraded. The program protected the exact result and
+            marked the full payment refundable.
           </Notice>
           <div className="row">
-            <Button variant="primary" icon="coin" onClick={refund}>
-              Refund my USDC
+            <Button variant="primary" icon="coin" onClick={() => void refund()}>
+              Refund all USDC
             </Button>
             <Button variant="ghost" onClick={onClose}>
               Later
             </Button>
           </div>
-        </>
+        </div>
       )}
     </Sheet>
+  );
+}
+
+function PackCrate({
+  tier,
+  opening = false,
+  onClick,
+}: {
+  tier: number;
+  opening?: boolean;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
+      <span className="pack-crate__halo" />
+      <span className="pack-crate__lid" />
+      <span className="pack-crate__band pack-crate__band--v" />
+      <span className="pack-crate__band pack-crate__band--h" />
+      <span className="pack-crate__badge">
+        <Icon name="spark" size={22} />
+      </span>
+      <span className="pack-crate__rank">0{tier + 1}</span>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`pack-crate pack-crate--${tier}`}
+        aria-label={`Open ${TIER_NAMES[tier]} pack`}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+  return (
+    <div className={`pack-crate pack-crate--${tier} ${opening ? "is-opening" : ""}`}>
+      {content}
+    </div>
+  );
+}
+
+function PityMeter({
+  label,
+  value,
+  max,
+  tone,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: "epic" | "legendary";
+}) {
+  const remaining = Math.max(1, max - value);
+  return (
+    <div className={`pity-meter pity-meter--${tone}`}>
+      <div className="pity-meter__copy">
+        <span>{label}</span>
+        <strong>{remaining === 1 ? "Next pull" : `${remaining} pulls max`}</strong>
+      </div>
+      <span className="pity-meter__track">
+        <span style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+      </span>
+    </div>
+  );
+}
+
+function OpeningSteps({ step }: { step: number }) {
+  return (
+    <div className="pack-opening-steps" aria-label="Pack opening progress">
+      {["Odds locked", "VRF draw", "Reveal"].map((label, index) => (
+        <span key={label} className={index <= step ? "is-active" : ""}>
+          <i>{index < step ? <Icon name="check" size={11} /> : index + 1}</i>
+          {label}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -359,24 +629,51 @@ function Reveal({
   const rarity = RARITY[variant.rarity] ?? "common";
   return (
     <div className={`reveal reveal--${rarity}`}>
-      {variant.rarity >= 2 && <Confetti />}
+      {variant.rarity >= 2 && <Confetti count={20} />}
       <div className="reveal__burst" />
+      <div className="reveal__kicker">New agent found</div>
+      <div className="reveal__model">
+        <AgentPackPreview modelId={variant.modelId} />
+      </div>
       <div className="reveal__rarity">{rarity}</div>
       <div className="reveal__name">{agentName(variant.modelId)}</div>
       <div className="reveal__meta">
-        <Pill tone="info">class {variant.classId}</Pill>
-        <Pill tone="neutral">
-          {variant.minted + variant.reserved} of {variant.supplyCap} claimed
+        <Pill tone="info">
+          {CLASS_NAMES[variant.classId] ?? `Class ${variant.classId}`}
         </Pill>
+        <Pill tone="neutral">#{variant.variantId}</Pill>
+        <Pill tone="neutral">{variant.remaining} left</Pill>
       </div>
-      <p className="ds-dim pack-note">
-        It is yours the moment it is minted — a Metaplex Core asset in your wallet, not a
-        row in our database.
+      <p className="pack-note">
+        The draw is final. Mint this assignment to receive the permanent, tradable NFT.
       </p>
-      <div className="row">
-        <Button variant="play" icon="spark" busy={busy} onClick={onMint}>
-          {busy ? "Minting…" : "Mint it"}
-        </Button>
+      <Button variant="play" size="giant" icon="spark" block busy={busy} onClick={onMint}>
+        {busy ? "Minting agent..." : "Claim agent NFT"}
+      </Button>
+    </div>
+  );
+}
+
+/** Deterministic development gallery for visual regression screenshots. */
+export function PackRevealPreview() {
+  const variant: VariantSummary = {
+    address: PublicKey.default,
+    variantId: 12,
+    classId: 4,
+    rarity: 3,
+    modelId: 0,
+    supplyCap: 60,
+    reserved: 7,
+    minted: 21,
+    active: true,
+    remaining: 32,
+  };
+  return (
+    <div className="pack-preview-page">
+      <div className="ds-sheet ds-sheet--gold pack-sheet">
+        <div className="ds-sheet__handle" />
+        <h2 className="ds-sheet__title">Agent packs</h2>
+        <Reveal variant={variant} busy={false} onMint={() => undefined} />
       </div>
     </div>
   );

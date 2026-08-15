@@ -53,12 +53,14 @@ export function Sheet({
   tone,
   children,
   ariaLabel,
+  className = "",
 }: {
   title?: ReactNode;
   onClose?: () => void;
   tone?: "gold";
   children: ReactNode;
   ariaLabel?: string;
+  className?: string;
 }) {
   useEscape(onClose);
   return (
@@ -70,7 +72,7 @@ export function Sheet({
       aria-label={ariaLabel}
     >
       <div
-        className={`ds-sheet ${tone === "gold" ? "ds-sheet--gold" : ""}`}
+        className={`ds-sheet ${tone === "gold" ? "ds-sheet--gold" : ""} ${className}`.trim()}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="ds-sheet__handle" />

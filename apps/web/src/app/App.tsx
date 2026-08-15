@@ -10,6 +10,7 @@ import { GameScreen } from "../features/game/GameScreen";
 import { IdentityGate } from "../features/identity/IdentityGate";
 import { DemoScreen } from "../features/demo/DemoScreen";
 import { AgentGallery } from "../features/demo/AgentGallery";
+import { PackRevealPreview } from "../features/packs/PackSheet";
 import { Button, Icon, IconButton, Loader, Notice, TxToasts } from "../design-system";
 import { SettingsSheet } from "../features/settings/SettingsSheet";
 import { sfx } from "../game/audio";
@@ -49,6 +50,9 @@ function AppInner() {
       : { name: "home" },
   );
   const showGallery = new URLSearchParams(window.location.search).has("agents");
+  const showPackPreview =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).has("pack-preview");
   const [balance, setBalance] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -102,6 +106,7 @@ function AppInner() {
   }, [boot]);
 
   if (showGallery) return <AgentGallery />;
+  if (showPackPreview) return <PackRevealPreview />;
   // Practice mode needs no cluster and no identity — always reachable.
   if (route.name === "demo")
     return <DemoScreen onExit={() => setRoute({ name: "home" })} />;
