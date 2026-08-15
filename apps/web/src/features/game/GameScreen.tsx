@@ -991,36 +991,40 @@ export function GameScreen({
    *
    * 120ms it is. Roughly eight actions a second is what this rollup takes.
    */
-  const MIN_SEND_GAP_MS = 120;
+  /**
+   * The hard floor: one rollup slot.
+   *
+   * This one is not a guess and not tunable. Two accepted actions cannot
+   * share a slot, so sending closer than this cannot make the second land —
+   * it can only produce a refusal to retry.
+   */
+  const MIN_SEND_GAP_MS = MS_PER_SLOT + 10;
   /**
    * Where the optimistic gap starts, and how far it may drift.
    *
-   * Confirmation is the only thing that PROVES the previous action applied,
-   * so a confirmed action releases the next one immediately with no gap at
-   * all — that path can never be refused. The gap below exists only for the
-   * case where confirmation has not arrived yet, and 120ms is what THIS
-   * machine measured against THIS rollup. Somebody further away, or on a
-   * worse link, would have a slower floor and would spend that difference on
-   * refusals and rubber-banding.
+   * It starts at the hard floor: send as soon as the previous action is out,
+   * one slot behind it, and do not wait for anything. That is the fastest
+   * this can legally go and it is what movement should feel like when the
+   * connection is good.
    *
-   * So it is not a constant. It starts at a round trip — safe anywhere —
-   * and only walks down toward the measured floor while nothing is being
-   * refused. A refusal walks it straight back up. The player on the worst
-   * connection converges somewhere slow and correct; the player beside the
-   * rollup converges on 120ms.
+   * It is optimistic in the exact sense that it may be wrong. `action_seq`
+   * must match at EXECUTION, so an action sent before its predecessor has
+   * been applied is refused — measured at 120ms this machine took 10/10, at
+   * 60ms it took 1/10. Rather than pick one of those numbers for everybody,
+   * the gap responds to what actually happens: every unacknowledged action
+   * pushes it up 60ms, every six clean confirmations pull it back down 20ms.
+   *
+   * So a good connection sits near the floor and a bad one finds its own
+   * level within a few seconds, instead of either being throttled to a
+   * stranger's measurement or rubber-banding forever at a rate it cannot
+   * sustain. Confirmation still releases the next action immediately and
+   * bypasses the gap entirely, because at that point there is nothing left
+   * to guess.
    */
-  const GAP_START_MS = 220;
+  const GAP_START_MS = MIN_SEND_GAP_MS;
   const GAP_MAX_MS = 500;
   /** Consecutive clean confirmations before trying a shorter gap. */
   const GAP_TIGHTEN_AFTER = 6;
-  /**
-   * How far prediction may run ahead of the chain.
-   *
-   * Input faster than the chain accepts cannot all land, so queueing it
-   * without limit only buys a longer rollback later. Two outstanding keeps
-   * the screen honest.
-   */
-  const MAX_PENDING_ACTIONS = 2;
   const gapRef = useRef(GAP_START_MS);
   const cleanRunRef = useRef(0);
 
@@ -1355,11 +1359,6 @@ export function GameScreen({
           // actions a second, input beyond that cannot land, and predicting
           // it only buys a bigger rollback — which is the rubber-band other
           // players see as lag.
-          // Backstop only. Input now repeats at the drain rate, so reaching
-          // this means genuine mashing far beyond what the chain can take.
-          // Drop it silently: telling someone they are "too fast" for holding
-          // a direction is blaming them for the client's pacing.
-          if (outboxRef.current.length >= MAX_PENDING_ACTIONS) return;
           // Optimistic: advance the local mirror + visual immediately.
           liveRun.current = {
             ...mine,
