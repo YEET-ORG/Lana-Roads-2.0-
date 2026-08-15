@@ -161,6 +161,13 @@ export function SettingsSheet({
         onPick={set("haptics")}
       />
       <Choice
+        label="Hold to run"
+        hint="Holding a direction keeps hopping. Each hop is still a separate on-chain action."
+        value={s.holdToRun}
+        options={ON_OFF}
+        onPick={set("holdToRun")}
+      />
+      <Choice
         label="Danger markers"
         hint="Traffic is smoothed between the program's whole-second steps. This marks the tiles a car actually occupies on chain."
         value={s.hazardMarks}

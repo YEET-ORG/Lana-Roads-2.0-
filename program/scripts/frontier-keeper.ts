@@ -29,6 +29,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
+import { assignPendingPulls } from "./assign-pulls";
 
 const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
@@ -50,6 +51,15 @@ const CRANK_HAZARDS = (process.env.CRANK_HAZARDS ?? "1") !== "0";
 const SETTLE = (process.env.SETTLE ?? "1") !== "0";
 /** Settlement is idempotent and slow-moving; once every few minutes is plenty. */
 const SETTLE_EVERY_MS = Number(process.env.SETTLE_EVERY_MS ?? 5 * 60_000);
+/** Set ASSIGN=0 to leave gacha assignment to a separate operator process. */
+const ASSIGN = (process.env.ASSIGN ?? "1") !== "0";
+/**
+ * A player is watching an opening animation while this is outstanding, so it
+ * runs far more often than settlement — and a pull left unassigned for
+ * GACHA_TIMEOUT_SECONDS becomes refundable, which hands the player a free
+ * reroll on a result that is already public on chain.
+ */
+const ASSIGN_EVERY_MS = Number(process.env.ASSIGN_EVERY_MS ?? 4_000);
 
 const S = {
   config: Buffer.from("config"),
@@ -170,6 +180,8 @@ async function main() {
   const dayRollAt = new Map<string, number>();
   /** Last settlement sweep; settlement is a pipeline, not a fast path. */
   let settleAt = 0;
+  /** Last gacha assignment sweep. */
+  let assignAt = 0;
 
   for (;;) {
     for (const mode of modes) {
@@ -179,8 +191,35 @@ async function main() {
         log(`mode ${mode} error:`, e?.message ?? e);
       }
     }
+    await assignOpenPulls();
     await settleYesterday();
     await sleep(POLL_MS);
+  }
+
+  /**
+   * Draw the variant for every pull whose randomness has landed.
+   *
+   * MagicBlock's VRF callback only writes the randomness; `assign_pull` is a
+   * separate permissionless step, and until somebody takes it the pack stays
+   * open. Nothing did, so a bought pack sat on its opening animation forever.
+   * The program re-derives the selection and demands the matching variant
+   * account back, so this is a mechanical crank, not an authority — it cannot
+   * influence which agent comes out.
+   */
+  async function assignOpenPulls() {
+    if (!ASSIGN) return;
+    if (Date.now() - assignAt < ASSIGN_EVERY_MS) return;
+    assignAt = Date.now();
+    try {
+      const out = await assignPendingPulls({
+        program: baseProgram,
+        authority: keeper,
+        log: (...a: any[]) => log(" ", ...a),
+      });
+      if (out.failed.length) log(`gacha assignment failed: ${out.failed.join("; ")}`);
+    } catch (e: any) {
+      log("gacha assignment sweep failed:", e?.message ?? e);
+    }
   }
 
   /**

@@ -110,7 +110,21 @@ export interface TxActivity {
 }
 
 /** Where a pack is in its life. */
-export type PullState = "pending" | "assigned" | "claimed" | "refundable" | "refunded";
+/**
+ * Mirrors `state::gacha::PullState`.
+ *
+ * `randomnessReady` is the window between MagicBlock's VRF callback landing
+ * and `assign_pull` drawing the variant from it. A pull is still open there —
+ * paid for, not yet resolved — and the profile allows only one open pull, so
+ * a client that treats it as terminal shows a buy button that can only fail.
+ */
+export type PullState =
+  | "pending"
+  | "randomnessReady"
+  | "assigned"
+  | "claimed"
+  | "refundable"
+  | "refunded";
 
 /** One variant of a season's roster, with what is left of it. */
 export interface VariantSummary {

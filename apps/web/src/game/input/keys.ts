@@ -1,13 +1,23 @@
 /**
  * Gameplay input: WASD/arrows + Space (kick) on desktop; tap/swipe on the
- * gameplay surface for touch. One press or gesture = exactly one grid-step
- * intent — no hold-repeat, no charge; browser key auto-repeat is suppressed.
- * Focused text inputs suspend gameplay shortcuts.
+ * gameplay surface for touch. Focused text inputs suspend gameplay shortcuts.
+ *
+ * Holding a direction repeats it (`settings.holdToRun`). The browser's own
+ * auto-repeat is still suppressed — it is jittery, starts after ~500 ms, and
+ * fires at whatever rate the OS is set to. This drives its own timer instead,
+ * paced to the hop so the rig flows rather than stepping.
+ *
+ * Repeating does not weaken authority: every repeat is an ordinary sequenced
+ * action through the same outbox, subject to the same prediction checks, and
+ * REPEAT_MS is an order of magnitude slower than the program's one-accepted-
+ * move-per-slot rule. A repeat that authority refuses rolls back like any
+ * other.
  *
  * Touch recognition per docs/FRONTEND.md §14: min travel 24 CSS px, axis
  * dominance 1.35:1, max window 420 ms; tap = forward hop.
  */
 import { Direction } from "@crossy-world/sdk";
+import { getSettings } from "../../lib/settings";
 
 export type GameAction = { kind: "move"; direction: Direction } | { kind: "kick" };
 
@@ -26,6 +36,18 @@ const SWIPE_MIN_PX = 24;
 const SWIPE_DOMINANCE = 1.35;
 const SWIPE_WINDOW_MS = 420;
 
+/**
+ * Long enough that a deliberate single tap never double-fires, short enough
+ * that a held key feels like it took effect immediately.
+ */
+const HOLD_DELAY_MS = 190;
+/**
+ * Paced just past the 120 ms hop so each repeat lands as the previous one
+ * finishes. Faster looks like a stutter; slower reintroduces the gap between
+ * steps that holding is meant to remove.
+ */
+const REPEAT_MS = 135;
+
 export interface InputHooks {
   /** Gameplay surface for touch gestures (gestures outside it are ignored). */
   surface?: HTMLElement;
@@ -36,15 +58,50 @@ export function attachInput(
   hooks: InputHooks = {},
 ): () => void {
   const down = new Set<string>();
+  /** Direction keys in press order; the newest one held is the one that runs. */
+  const heldDirections: string[] = [];
+  let repeatTimer = 0;
+
+  const stopRepeat = () => {
+    if (repeatTimer) {
+      window.clearTimeout(repeatTimer);
+      repeatTimer = 0;
+    }
+  };
+
+  const activeDirection = (): Direction | null => {
+    for (let i = heldDirections.length - 1; i >= 0; i--) {
+      const dir = KEY_DIRECTIONS[heldDirections[i]];
+      if (dir != null) return dir;
+    }
+    return null;
+  };
+
+  const scheduleRepeat = (delay: number) => {
+    stopRepeat();
+    if (!getSettings().holdToRun) return;
+    repeatTimer = window.setTimeout(() => {
+      repeatTimer = 0;
+      const dir = activeDirection();
+      if (dir == null) return;
+      onAction({ kind: "move", direction: dir });
+      scheduleRepeat(REPEAT_MS);
+    }, delay);
+  };
 
   const handler = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-    if (down.has(e.code)) return; // one action per physical press
+    // The browser's own auto-repeat is ignored; the timer below owns pacing.
+    if (down.has(e.code) || e.repeat) return;
     down.add(e.code);
     const dir = KEY_DIRECTIONS[e.code];
     if (dir != null) {
+      heldDirections.push(e.code);
       onAction({ kind: "move", direction: dir });
+      // Changing direction mid-run restarts the delay, so a quick correction
+      // is one hop rather than the start of a run the other way.
+      scheduleRepeat(HOLD_DELAY_MS);
       return;
     }
     if (e.code === "Space") {
@@ -54,9 +111,28 @@ export function attachInput(
   };
   const up = (e: KeyboardEvent) => {
     down.delete(e.code);
+    const at = heldDirections.indexOf(e.code);
+    if (at !== -1) heldDirections.splice(at, 1);
+    // Releasing one of two held keys hands the run to the other, without the
+    // initial delay — the player never stopped holding a direction.
+    if (activeDirection() == null) stopRepeat();
+  };
+  /**
+   * A key held while the tab loses focus never delivers its keyup, and the
+   * repeat would keep walking the player into traffic they cannot see.
+   */
+  const release = () => {
+    down.clear();
+    heldDirections.length = 0;
+    stopRepeat();
+  };
+  const onVisibility = () => {
+    if (document.hidden) release();
   };
   window.addEventListener("keydown", handler);
   window.addEventListener("keyup", up);
+  window.addEventListener("blur", release);
+  document.addEventListener("visibilitychange", onVisibility);
 
   // ---- touch / pointer gestures (tap = hop, swipe = directional hop) ----
   const surface = hooks.surface;
@@ -109,8 +185,11 @@ export function attachInput(
   }
 
   return () => {
+    stopRepeat();
     window.removeEventListener("keydown", handler);
     window.removeEventListener("keyup", up);
+    window.removeEventListener("blur", release);
+    document.removeEventListener("visibilitychange", onVisibility);
     if (surface) {
       surface.removeEventListener("pointerdown", pointerDown);
       surface.removeEventListener("pointerup", pointerUp);

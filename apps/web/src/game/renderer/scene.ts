@@ -156,6 +156,10 @@ type RigState =
       to: THREE.Vector3;
       start: number;
       skipAnticipation: boolean;
+      /** Body height carried over from a hop interrupted mid-air. */
+      liftOff: number;
+      /** Scaled by distance, so a multi-tile correction is not a lurch. */
+      duration: number;
     }
   | { name: "land"; start: number }
   | { name: "bump"; dir: THREE.Vector3; start: number }
@@ -243,15 +247,17 @@ class PlayerRig {
     if (this.state.name === "dead") return;
     if (facing != null) this.targetYaw = facingYaw(facing);
     const airborne = this.state.name === "hop";
-    // Grid discipline: a chained hop snap-finishes the previous one first,
-    // so every hop travels exactly tile-center → tile-center.
-    if (airborne) {
-      const prev = this.state as Extract<RigState, { name: "hop" }>;
-      this.root.position.copy(prev.to);
-      this.body.position.y = 0;
-    }
+    // Continue from where the rig actually IS. This used to snap-finish the
+    // previous hop first — teleporting a whole tile forward before starting
+    // the next one — which is what made a held direction read as a series of
+    // steps rather than a run. Grid discipline is a property of where a hop
+    // ENDS, and `to` is still the exact tile center.
     const from = this.root.position.clone();
     if (from.distanceToSquared(target) < 1e-6) return;
+    // A correction that spans several tiles (a reconcile, a revival placement)
+    // should not cross them in the same 120 ms a single hop takes; it reads as
+    // a lurch. Sub-linear so two tiles is livelier than two separate hops.
+    const tiles = from.distanceTo(target);
     this.state = {
       name: "hop",
       from,
@@ -259,6 +265,8 @@ class PlayerRig {
       start: performance.now(),
       // Chained hops keep momentum: no fresh anticipation mid-run.
       skipAnticipation: airborne,
+      liftOff: airborne ? this.body.position.y : 0,
+      duration: HOP_MS * Math.min(2.2, Math.max(1, Math.sqrt(tiles))),
     };
   }
 
@@ -272,6 +280,8 @@ class PlayerRig {
       to: here.clone(),
       start: performance.now(),
       skipAnticipation: true,
+      liftOff: 0,
+      duration: HOP_MS,
     };
   }
 
@@ -327,19 +337,25 @@ class PlayerRig {
         const k = clamp01(t / pre);
         this.setSquash(1 + (CHARGE_SQUASH.y - 1) * k, 1 + (CHARGE_SQUASH.xz - 1) * k);
       } else {
-        const k = clamp01((t - pre) / HOP_MS);
+        const k = clamp01((t - pre) / s.duration);
         // Linear horizontal + sine arc = the snappy Crossy hop; easing the
         // horizontal makes it feel like sliding, not hopping.
         this.root.position.lerpVectors(s.from, s.to, k);
         const a = arc(k);
-        this.body.position.y = a * HOP_HEIGHT;
+        // Carried height decays as the new arc takes over, so a hop
+        // interrupted mid-air never drops the body to the ground for a frame.
+        this.body.position.y = Math.max(a * HOP_HEIGHT, s.liftOff * (1 - k));
         // Stretch peaks at takeoff, relaxes toward landing.
         const stretch = 1 - k * 0.6;
         this.setSquash(
           1 + (STRETCH.y - 1) * a * stretch + (1 - a) * 0,
           1 + (STRETCH.xz - 1) * a * stretch,
         );
-        this.shadow.scale.setScalar(1 - a * 0.35);
+        // Follow the drawn height, not the arc, so an interrupted hop keeps
+        // its shadow small instead of popping back to full size.
+        this.shadow.scale.setScalar(
+          1 - clamp01(this.body.position.y / HOP_HEIGHT) * 0.35,
+        );
         if (k >= 1) {
           this.root.position.copy(s.to);
           this.body.position.y = 0;

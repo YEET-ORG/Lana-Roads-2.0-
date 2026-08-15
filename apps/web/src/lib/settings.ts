@@ -32,6 +32,15 @@ export interface Settings {
   /** Trim non-essential animation for motion sensitivity and weak GPUs. */
   reduceMotion: boolean;
   /**
+   * Hold a direction to keep hopping.
+   *
+   * Each repeat is an ordinary sequenced action through the same outbox, and
+   * the repeat interval is far slower than the program's one-move-per-slot
+   * limit, so this changes how it feels and nothing about what authority
+   * accepts. Off restores strict one-press-one-hop.
+   */
+  holdToRun: boolean;
+  /**
    * Draw the tiles traffic legally occupies right now.
    *
    * Cars are smoothed between the program's whole-second steps, so the
@@ -52,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showStatus: true,
   region: "auto",
   reduceMotion: false,
+  holdToRun: true,
   hazardMarks: true,
 };
 

@@ -103,7 +103,12 @@ export function PackSheet({
   onAgentRevealedRef.current = onAgentRevealed;
 
   const resumePull = useCallback((pull: PullSummary, list: VariantSummary[]) => {
-    if (pull.state === "pending") {
+    // `randomnessReady` sits between paying and being assigned: MagicBlock's
+    // VRF has answered but nothing has drawn the variant from it yet. It is
+    // still an open pack, so it resumes exactly like `pending` — and it MUST,
+    // because the profile holds one unresolved pull at a time, so dropping
+    // back to the shop would show a buy button that can only fail.
+    if (pull.state === "pending" || pull.state === "randomnessReady") {
       setSelectedTier(pull.tier);
       setStage({
         name: "opening",
@@ -176,7 +181,10 @@ export function PackSheet({
       if (stageRef.current.name === "shop") {
         const active = history.find(
           (p) =>
-            p.state === "pending" || p.state === "assigned" || p.state === "refundable",
+            p.state === "pending" ||
+            p.state === "randomnessReady" ||
+            p.state === "assigned" ||
+            p.state === "refundable",
         );
         if (active) queueMicrotask(() => resumePull(active, list));
       }
@@ -425,6 +433,7 @@ export function PackSheet({
                   );
                   const resumable =
                     pull.state === "pending" ||
+                    pull.state === "randomnessReady" ||
                     pull.state === "assigned" ||
                     pull.state === "refundable";
                   return (
