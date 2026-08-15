@@ -42,15 +42,26 @@ const SWIPE_WINDOW_MS = 420;
  */
 const HOLD_DELAY_MS = 190;
 /**
- * Paced just past the 120 ms hop so each repeat lands as the previous one
- * finishes. Faster looks like a stutter; slower reintroduces the gap between
- * steps that holding is meant to remove.
+ * Fallback repeat interval when the caller does not supply one.
+ *
+ * The caller SHOULD supply one: generating input faster than the chain
+ * accepts does not make the player move faster, it just fills a queue that
+ * has to be dropped, and the drop is what shows up as "too fast" while a
+ * direction is merely being held. The repeat should run at the same rate the
+ * outbox drains, whatever that currently is.
  */
 const REPEAT_MS = 135;
 
 export interface InputHooks {
   /** Gameplay surface for touch gestures (gestures outside it are ignored). */
   surface?: HTMLElement;
+  /**
+   * How often a held direction should repeat, in ms.
+   *
+   * Read fresh on every repeat rather than captured once, because the send
+   * pacing it mirrors adapts to the connection while the player is holding.
+   */
+  repeatMs?: () => number;
 }
 
 export function attachInput(
@@ -85,7 +96,7 @@ export function attachInput(
       const dir = activeDirection();
       if (dir == null) return;
       onAction({ kind: "move", direction: dir });
-      scheduleRepeat(REPEAT_MS);
+      scheduleRepeat(Math.max(60, hooks.repeatMs?.() ?? REPEAT_MS));
     }, delay);
   };
 

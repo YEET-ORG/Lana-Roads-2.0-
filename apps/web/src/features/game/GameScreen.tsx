@@ -1355,12 +1355,11 @@ export function GameScreen({
           // actions a second, input beyond that cannot land, and predicting
           // it only buys a bigger rollback — which is the rubber-band other
           // players see as lag.
-          if (outboxRef.current.length >= MAX_PENDING_ACTIONS) {
-            setHud((h) =>
-              h.lastRejection === "too fast" ? h : { ...h, lastRejection: "too fast" },
-            );
-            return;
-          }
+          // Backstop only. Input now repeats at the drain rate, so reaching
+          // this means genuine mashing far beyond what the chain can take.
+          // Drop it silently: telling someone they are "too fast" for holding
+          // a direction is blaming them for the client's pacing.
+          if (outboxRef.current.length >= MAX_PENDING_ACTIONS) return;
           // Optimistic: advance the local mirror + visual immediately.
           liveRun.current = {
             ...mine,
@@ -1431,7 +1430,15 @@ export function GameScreen({
           });
         }
       },
-      { surface: canvasRef.current ?? undefined },
+      {
+        surface: canvasRef.current ?? undefined,
+        // Hold-to-run repeats at whatever rate the outbox is currently
+        // draining. Generating input faster than that does not move the
+        // player faster — it fills a queue that then has to be dropped, and
+        // the drop is what surfaces as "too fast" while a direction is merely
+        // being held.
+        repeatMs: () => gapRef.current,
+      },
     );
     return detach;
     // eslint-disable-next-line react-hooks/exhaustive-deps
