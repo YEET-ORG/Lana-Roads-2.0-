@@ -162,7 +162,13 @@ pub fn request_chunk(
     }
 
     let generation = chunk.generation;
-    let mut callback_args = Vec::with_capacity(12);
+    // Argument ORDER must match `publish_chunk`'s signature exactly — this is
+    // a positional decode on the other side of an asynchronous callback, so a
+    // mismatch is not a type error anywhere. It reads `region` out of the low
+    // byte of `day` and every later field lands one slot off, which surfaces
+    // only as randomness that never arrives.
+    let mut callback_args = Vec::with_capacity(17);
+    region.serialize(&mut callback_args)?;
     day.serialize(&mut callback_args)?;
     chunk_index.serialize(&mut callback_args)?;
     generation.serialize(&mut callback_args)?;
@@ -172,6 +178,7 @@ pub fn request_chunk(
     let chunk_key = ctx.accounts.chunk.key();
     let caller_seed = keccak::hashv(&[
         b"lana-roads-chunk-vrf-v1",
+        &[region],
         &day_bytes,
         &index_bytes,
         &generation_bytes,
@@ -571,4 +578,34 @@ pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u32) -> Res
     }
     sector.blockers = blockers;
     Ok(())
+}
+
+#[cfg(test)]
+mod callback_args_tests {
+    use anchor_lang::prelude::*;
+
+    /// The VRF callback decodes its arguments POSITIONALLY, across an
+    /// asynchronous boundary, with no type checking between the two sides.
+    /// When `region` was added to `publish_chunk`'s signature but not to the
+    /// serialization in `request_chunk`, the callback read `region` from the
+    /// low byte of `day` and every later field landed one slot off — and the
+    /// only symptom was randomness that never arrived. This pins the order
+    /// against the handler signature: (region, day, chunk_index, generation).
+    #[test]
+    fn callback_args_match_publish_chunk_signature() {
+        let (region, day, chunk_index, generation) = (2u8, 20_681u64, 7u32, 3u16);
+        let mut args = Vec::new();
+        region.serialize(&mut args).unwrap();
+        day.serialize(&mut args).unwrap();
+        chunk_index.serialize(&mut args).unwrap();
+        generation.serialize(&mut args).unwrap();
+        assert_eq!(args.len(), 1 + 8 + 4 + 2);
+
+        let mut cursor = args.as_slice();
+        assert_eq!(u8::deserialize(&mut cursor).unwrap(), region);
+        assert_eq!(u64::deserialize(&mut cursor).unwrap(), day);
+        assert_eq!(u32::deserialize(&mut cursor).unwrap(), chunk_index);
+        assert_eq!(u16::deserialize(&mut cursor).unwrap(), generation);
+        assert!(cursor.is_empty(), "callback args carry nothing extra");
+    }
 }
