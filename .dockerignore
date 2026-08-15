@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+**/node_modules
+**/target
+**/dist
+apps
+assets
+docs
+examples
+SourceAssets
+VoxelAnimals
+*.log

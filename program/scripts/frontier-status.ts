@@ -5,8 +5,7 @@
  */
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3 } from "@coral-xyz/anchor";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { loadCrossyWorldIdl } from "./runtime-config";
 
 const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
@@ -45,10 +44,13 @@ const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM
 
 async function main() {
   const day = BigInt(process.env.DAY ?? Math.floor(Date.now() / 1000 / 86400));
-  const world = pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([MODE]), le8(day));
-  const idl = JSON.parse(
-    readFileSync(resolve(__dirname, "../target/idl/crossy_world.json"), "utf8"),
+  const world = pda(
+    Buffer.from("world"),
+    Buffer.from([REGION]),
+    Buffer.from([MODE]),
+    le8(day),
   );
+  const idl = loadCrossyWorldIdl(PROGRAM_ID.toBase58());
   const dummy = new anchor.Wallet(web3.Keypair.generate());
   const base = new Program(
     idl,
@@ -60,7 +62,19 @@ async function main() {
   ) as Program<any>;
 
   console.log(`day ${day} mode ${MODE} world ${world.toBase58()}`);
-  const live = await er.account.worldHeader.fetch(world);
+  let live: any;
+  try {
+    live = await er.account.worldHeader.fetch(world);
+  } catch (error: any) {
+    const raw = await er.provider.connection.getAccountInfo(world, "processed");
+    if (!raw) throw new Error("world is not open on the configured ER");
+    const detail = error?.message ?? String(error);
+    throw new Error(
+      `world exists (${raw.data.length} bytes) but the current IDL cannot decode it; ` +
+        `the deployed binary/account layout is stale. Redeploy, then open a fresh UTC-day ` +
+        `world (or migrate the existing accounts). Decoder error: ${detail}`,
+    );
+  }
   const committed = await base.account.worldHeader.fetchNullable(world).catch(() => null);
   console.log(
     `  ER: revealed ${live.revealedRows} rows, next chunk ${live.nextChunkIndex}, ` +

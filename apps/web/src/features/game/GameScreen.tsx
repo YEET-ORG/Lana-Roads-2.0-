@@ -369,7 +369,11 @@ export function GameScreen({
       const wallet = run.wallet.toBase58();
       const stateSequence = BigInt(run.stateSeq?.toString() ?? run.actionSeq.toString());
       const previousStateSequence = runStateSequences.get(wallet);
-      if (!force && previousStateSequence != null && stateSequence < previousStateSequence) {
+      if (
+        !force &&
+        previousStateSequence != null &&
+        stateSequence < previousStateSequence
+      ) {
         return;
       }
       runStateSequences.set(wallet, stateSequence);
@@ -423,7 +427,7 @@ export function GameScreen({
             score: run.score,
             facing: run.facing,
           };
-          scene?.setLocal(run.x, run.y);
+          scene?.setLocal(run.x, run.y, run.facing);
         }
         // Death/revive presentation: the world reacts before the overlay.
         if (state === "deadAwaitingRevive" || state === "ended") {
@@ -814,16 +818,10 @@ export function GameScreen({
       const target = slotTimeMs(slot);
       const error = target - scene.worldTimeMs();
       // A big gap means we just connected, or the tab was asleep: take the
-      // chain's word for it. Otherwise correct by a couple of milliseconds
-      // at a time. A step is 50ms now, so a correction of even a tenth of
-      // a step moves every car a visible fraction of a tile — and this
-      // fires twenty times a second. Bound the correction, not the
-      // fraction; the rate tracking is what actually keeps us aligned.
-      const nudge = Math.sign(error) * Math.min(Math.abs(error), 2);
-      scene.setWorldClock(
-        Math.abs(error) > 300 ? target : scene.worldTimeMs() + nudge,
-        rate,
-      );
+      // chain's word for it. Normal updates only move a target; WorldScene
+      // eases the phase error every frame instead of stepping all obstacles
+      // whenever a websocket notification arrives.
+      scene.setWorldClock(target, rate, Math.abs(error) > 300);
     };
     const stopSlots = boot.client.subscribeSlot(acceptSlot);
     // The subscription only speaks on the NEXT slot, so seed it once.
@@ -1140,6 +1138,30 @@ export function GameScreen({
             sceneRef.current?.bumpLocal(dx, dy);
             return;
           }
+          const turnIntoBlockedTile = (reason: string) => {
+            // A blocked move is still a valid turn-in-place action. Predict
+            // the facing immediately so kick direction feels responsive,
+            // then persist the same action through authority.
+            sceneRef.current?.setFacing(action.direction);
+            sceneRef.current?.bumpLocal(dx, dy);
+            liveRun.current = {
+              ...mine,
+              seq: mine.seq + 1,
+              facing: action.direction,
+            };
+            setHud((h) =>
+              h.lastRejection === reason ? h : { ...h, lastRejection: reason },
+            );
+            enqueueAction({
+              kind: "move",
+              seq: mine.seq,
+              attempt: mine.attempt,
+              x: mine.x,
+              y: mine.y,
+              direction: action.direction,
+              tries: 0,
+            });
+          };
           // Only static blockers refuse entry. Traffic, trains and unsupported
           // water are enterable and lethal, so authority records the death.
           const destLane = sceneRef.current?.laneAt(ny);
@@ -1149,18 +1171,14 @@ export function GameScreen({
             // where.
             const tMs = tickOf(sceneRef.current!.worldTimeMs());
             if (evaluateTile(destLane, nx, tMs) === "blocked") {
-              sceneRef.current?.bumpLocal(dx, dy);
-              setHud((h) =>
-                h.lastRejection === "blocked" ? h : { ...h, lastRejection: "blocked" },
-              );
+              turnIntoBlockedTile("blocked");
               return;
             }
           }
           // Prediction knows remote occupancy: don't send a doomed move.
           for (const r of occupiedRef.current.values()) {
             if (r.x === nx && r.y === ny) {
-              sceneRef.current?.bumpLocal(dx, dy);
-              setHud((h) => ({ ...h, lastRejection: "tile occupied" }));
+              turnIntoBlockedTile("tile occupied");
               return;
             }
           }

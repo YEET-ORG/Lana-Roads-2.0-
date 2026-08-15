@@ -30,6 +30,31 @@ DRY_RUN=1 npx tsx scripts/settle-day.ts  # what settling yesterday would do
 npx tsx scripts/settle-day.ts            # actually settle it
 ```
 
+The keeper is mandatory infrastructure: Solana programs do not execute on a
+timer by themselves. Run it under a process supervisor for the entire live
+day. It pre-reveals and prepares ten complete 16-row chunks beyond the leader
+(160 rows of lookahead), and immediately replaces one whenever the leader
+crosses a chunk boundary. From the repository root, Windows and local shells
+can use `pnpm --dir program keeper`; inspect the current frontier with
+`pnpm --dir program keeper:status`.
+
+For an always-on deployment, inject `KEEPER_SECRET_JSON` from a secret manager
+and run the restartable worker:
+
+```bash
+docker compose --env-file /secure/path/keeper.env \
+  -f docker-compose.keeper.yml up -d --build
+curl -f http://127.0.0.1:8787/healthz
+```
+
+The image uses the tracked SDK IDL, so it works from a clean clone without an
+ignored `program/target` directory. A binary/IDL mismatch is fatal and marks
+the worker unhealthy instead of leaving a live-looking process that does no
+generation. `keeper.env.example` documents the required non-secret values;
+never commit the real keypair bytes. The worker discovers the MagicBlock
+validator from `GlobalConfig`; set `VALIDATOR` only as an explicit safety
+override.
+
 Settlement is the other half of the day: audit every permanent `DailyBest`,
 claim the strict maximum, close and commit the worlds, reconcile pending
 payments, record the final base commit, then `finalize_day` (90% winner / 10%
@@ -42,8 +67,9 @@ operator.
 keeper calls the same routine itself when it finds no world on the rollup, so
 a UTC boundary rolls over without an operator. Both need the admin/keeper
 keypair (`ADMIN_KEYPAIR` / `KEEPER_KEYPAIR`, default
-`~/.config/solana/id.json`). Randomness comes only from authenticated
-MagicBlock scoped-VRF callbacks; there is no VRF signer keypair.
+`~/.config/solana/id.json`, or `KEEPER_SECRET_JSON` in the worker). Randomness
+comes only from authenticated MagicBlock scoped-VRF callbacks; there is no VRF
+signer keypair.
 
 ## Starter reference documentation
 

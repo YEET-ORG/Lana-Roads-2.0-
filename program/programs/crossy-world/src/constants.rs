@@ -103,9 +103,13 @@ pub const MAX_PLAYERS_PER_MODE: u16 = 500;
 /// Compiled safety maximum for the configurable player cap.
 pub const HARD_MAX_PLAYERS: u16 = 1_024;
 
-/// Request the next chunk when the leader is within this many rows of the
-/// revealed frontier.
-pub const CHUNK_REQUEST_MARGIN: u32 = 8;
+/// Keep this many complete chunks beyond the chunk containing the leader.
+///
+/// Solana programs cannot wake themselves, so the frontier keeper performs
+/// the requests. This constant is still enforced on-chain: it lets the
+/// permissionless keeper fill the buffer, but rejects unbounded generation.
+pub const CHUNK_LOOKAHEAD_CHUNKS: u32 = 10;
+pub const CHUNK_REQUEST_MARGIN: u32 = CHUNK_LOOKAHEAD_CHUNKS * CHUNK_ROWS as u32;
 /// A chunk VRF request may be permissionlessly retried after this timeout.
 pub const CHUNK_VRF_TIMEOUT_SECONDS: i64 = 90;
 

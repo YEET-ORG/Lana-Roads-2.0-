@@ -83,12 +83,21 @@ rebuild invalidates this checksum.
 - Live world/run/occupancy state is read from the ER first.
 - `state_seq`, `map_seq`, chunk index/hash, and contiguous snapshot loading
   detect missed subscriptions and restart gaps.
-- The keeper checkpoints the live world to base before a base-layer chunk
-  request and after frontier extension.
-- The JIT condition is exact: request one next chunk when
-  `record_score + 8 >= revealed_rows`.
-- The contract rejects skipped indices, stale predecessors, early requests,
-  stale generations, and unauthenticated callbacks.
+- The keeper checkpoints the live world to base before opening a base-layer
+  request window and after every frontier extension.
+- The lookahead condition is exact: maintain ten complete 16-row chunks beyond
+  the leader (`record_score + 160 >= revealed_rows` opens the next request).
+- The contract permits only the next bounded ten-chunk request window and
+  still requires each predecessor to be revealed, so requests cannot skip or
+  generate an unbounded map. Stale generations and unauthenticated callbacks
+  remain rejected.
+- The keeper first obtains immutable VRF results for the permitted window,
+  then creates/delegates occupancy sectors and extends each world in strict
+  order. Every stage is idempotent and resumes after process or RPC failure.
+- Production generation runs as the restartable keeper worker, reads the
+  tracked SDK IDL rather than ignored local build output, and exposes
+  `/healthz`. Three fully failed cycles or a stale ten-minute pipeline returns
+  HTTP 503; binary/IDL incompatibility terminates the process for supervision.
 - A restart rebuilds the visible map from chunk zero through the contiguous
   revealed frontier; a propagation hole closes the frontier instead of
   rendering empty traversable space.

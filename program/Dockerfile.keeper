@@ -1,0 +1,25 @@
+FROM node:22-bookworm-slim
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV NODE_ENV=production
+ENV KEEPER_HEALTH_PORT=8787
+
+RUN corepack enable
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY program/package.json ./program/package.json
+COPY packages/crossy-world-sdk/package.json ./packages/crossy-world-sdk/package.json
+RUN pnpm install --frozen-lockfile --filter @solsocket/program...
+
+COPY program ./program
+COPY packages/crossy-world-sdk/src/generated/crossy_world.json \
+  ./packages/crossy-world-sdk/src/generated/crossy_world.json
+
+EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8787/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+CMD ["pnpm", "--dir", "program", "keeper"]

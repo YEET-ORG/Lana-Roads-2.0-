@@ -15,6 +15,11 @@ import {
 } from "../src/time.js";
 import { sectorBit, sectorOf } from "../src/pda.js";
 import {
+  CHUNK_LOOKAHEAD_CHUNKS,
+  CHUNK_REQUEST_MARGIN,
+  CHUNK_ROWS,
+} from "../src/constants.js";
+import {
   LANE_ROAD,
   Lane,
   VEHICLE_ASSET_IDS,
@@ -32,6 +37,11 @@ import {
 } from "../src/hazards.js";
 
 describe("shared golden vectors", () => {
+  it("keeps ten complete chunks ahead of the leader", () => {
+    assert.equal(CHUNK_LOOKAHEAD_CHUNKS, 10);
+    assert.equal(CHUNK_REQUEST_MARGIN, CHUNK_ROWS * 10);
+  });
+
   it("utc day boundaries match kernel::time", () => {
     assert.equal(utcDayFromUnix(0), 0n);
     assert.equal(utcDayFromUnix(86_399), 0n);

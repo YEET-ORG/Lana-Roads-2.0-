@@ -20,22 +20,29 @@
  *
  * Sectors exist and are delegated *before* the frontier moves, so a player
  * can never reach a row whose accounts are missing. Run it alongside the
- * game. A new chunk is requested exactly when `leader + 8 >= revealed_rows`;
- * authenticated MagicBlock VRF then fixes its immutable layout.
+ * game. It continuously fills ten complete chunks beyond the leader;
+ * authenticated MagicBlock VRF fixes each immutable layout independently.
  */
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3, BN } from "@coral-xyz/anchor";
+import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
 import { assignPendingPulls } from "./assign-pulls";
+import { loadCrossyWorldIdl } from "./runtime-config";
+import {
+  CHUNK_LOOKAHEAD_CHUNKS,
+  CHUNK_ROWS,
+  chunksNeededForLookahead,
+} from "./frontier-policy";
 
 const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 /**
  * Rollup region. Each region runs its own world, pot and map, so this
- * selects which game the script is talking about — not just a transport.
+ * selects which game the keeper is running — not just a transport. One
+ * keeper process serves one region.
  */
 const REGION = Number(process.env.REGION ?? 0);
 /** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
@@ -51,15 +58,14 @@ const REGION_VALIDATOR = [
 ];
 
 const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
+/** The region names its validator; VALIDATOR only overrides it for testing. */
 const VALIDATOR = new web3.PublicKey(
   process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
 );
 const VRF_BASE_QUEUE = new web3.PublicKey(
   process.env.VRF_BASE_QUEUE ?? "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
 );
-const CHUNK_REQUEST_MARGIN = 8;
 const POLL_MS = Number(process.env.POLL_MS ?? 3_000);
-const CHUNK_ROWS = 16;
 const SECTOR_EDGE = 8;
 const MAX_CARRY_TILES = 8;
 /** Set CRANK_HAZARDS=0 to leave collision resolution entirely to clients. */
@@ -77,6 +83,15 @@ const ASSIGN = (process.env.ASSIGN ?? "1") !== "0";
  * reroll on a result that is already public on chain.
  */
 const ASSIGN_EVERY_MS = Number(process.env.ASSIGN_EVERY_MS ?? 4_000);
+const HEALTH_PORT = Number(process.env.KEEPER_HEALTH_PORT ?? 8_787);
+
+const health = {
+  startedAt: Date.now(),
+  lastActivityAt: Date.now(),
+  lastSuccessfulCycleAt: 0,
+  consecutiveFailedCycles: 0,
+  lastError: null as string | null,
+};
 
 const S = {
   config: Buffer.from("config"),
@@ -106,8 +121,10 @@ const chunkPda = (day: bigint, index: number) =>
 const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
   pda(S.sector, world.toBuffer(), Buffer.from([sx]), le4(sy));
 
-const log = (...a: unknown[]) =>
+const log = (...a: unknown[]) => {
+  health.lastActivityAt = Date.now();
   console.log(new Date().toISOString().slice(11, 19), ...a);
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -150,16 +167,50 @@ function loadKeypair(path: string): web3.Keypair {
   );
 }
 
-async function main() {
-  const keeper = loadKeypair(
-    process.env.KEEPER_KEYPAIR ?? `${process.env.HOME}/.config/solana/id.json`,
+function loadKeeper(): web3.Keypair {
+  const inline = process.env.KEEPER_SECRET_JSON;
+  if (inline) {
+    return web3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(inline)));
+  }
+  const defaultPath = process.env.USERPROFILE
+    ? `${process.env.USERPROFILE}/.config/solana/id.json`
+    : `${process.env.HOME}/.config/solana/id.json`;
+  return loadKeypair(process.env.KEEPER_KEYPAIR ?? defaultPath);
+}
+
+function startHealthServer() {
+  if (!Number.isInteger(HEALTH_PORT) || HEALTH_PORT <= 0) return;
+  const server = createServer((req, res) => {
+    if (req.url !== "/healthz") {
+      res.writeHead(404).end("not found");
+      return;
+    }
+    const staleForMs = Date.now() - health.lastActivityAt;
+    const healthy = health.consecutiveFailedCycles < 3 && staleForMs < 10 * 60_000;
+    res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ healthy, staleForMs, ...health }));
+  });
+  server.listen(HEALTH_PORT, "0.0.0.0", () =>
+    log(`health http://0.0.0.0:${HEALTH_PORT}/healthz`),
   );
+}
+
+function isFatalCompatibilityError(error: unknown): boolean {
+  const message = String((error as any)?.message ?? error);
+  return /Invalid bool|cannot decode|account discriminator|DeclaredProgramIdMismatch|IDL cannot decode|config\.admin|admin-only/i.test(
+    message,
+  );
+}
+
+async function main() {
+  startHealthServer();
+  const keeper = loadKeeper();
   const baseConn = new web3.Connection(BASE_RPC, "confirmed");
   const erConn = new web3.Connection(ER_RPC, "processed");
   const wallet = new anchor.Wallet(keeper);
-  const idl = JSON.parse(
-    readFileSync(resolve(__dirname, "../target/idl/crossy_world.json"), "utf8"),
-  );
+  // Production workers run from a clean checkout where `target/` is ignored.
+  // The SDK copy is tracked and is the same IDL consumed by the web client.
+  const idl = loadCrossyWorldIdl(PROGRAM_ID.toBase58());
   const baseProgram = new Program(
     idl,
     new anchor.AnchorProvider(baseConn, wallet, {
@@ -175,11 +226,13 @@ async function main() {
 
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
   log("keeper", keeper.publicKey.toBase58());
+  log("region", REGION, ER_RPC);
+  log("validator", VALIDATOR.toBase58());
   log("vrf_queue", VRF_BASE_QUEUE.toBase58());
   if (!cfg.validators[REGION].equals(VALIDATOR)) {
     throw new Error(
-      `config.validators[${REGION}] is ${cfg.validators[REGION].toBase58()} but keeper targets ` +
-        VALIDATOR.toBase58(),
+      `config.validators[${REGION}] is ${cfg.validators[REGION].toBase58()} ` +
+        `but keeper targets ${VALIDATOR.toBase58()}`,
     );
   }
 
@@ -202,12 +255,23 @@ async function main() {
   let assignAt = 0;
 
   for (;;) {
+    let failedModes = 0;
     for (const mode of modes) {
       try {
         await tick(mode);
       } catch (e: any) {
-        log(`mode ${mode} error:`, e?.message ?? e);
+        failedModes++;
+        const message = e?.message ?? String(e);
+        health.lastError = `mode ${mode}: ${message}`;
+        log(`mode ${mode} error:`, message);
+        if (isFatalCompatibilityError(e)) throw e;
       }
+    }
+    if (failedModes === modes.length) health.consecutiveFailedCycles++;
+    else {
+      health.consecutiveFailedCycles = 0;
+      health.lastSuccessfulCycleAt = Date.now();
+      health.lastError = null;
     }
     await assignOpenPulls();
     await settleYesterday();
@@ -324,12 +388,23 @@ async function main() {
     let live: any;
     try {
       live = await erProgram.account.worldHeader.fetch(world);
-    } catch {
+    } catch (error: any) {
+      // `fetch` also throws when an account exists but this IDL cannot decode
+      // it. Treating every exception as "not found" made the keeper attempt
+      // day setup, swallow that failure, and look healthy forever.
+      const raw = await erConn.getAccountInfo(world, "processed").catch(() => null);
+      if (raw) {
+        throw new Error(
+          `world ${world.toBase58()} exists (${raw.data.length} bytes) but the current ` +
+            `IDL cannot decode it: ${error?.message ?? error}`,
+        );
+      }
       // No world on the ER. At a UTC boundary that is simply the new day
       // arriving: the accounts for it do not exist until somebody makes
       // them, and until then the game looks like an outage to every client.
       // Build it here rather than waiting for an operator to notice.
-      await rollDay(mode, day);
+      const attempted = await rollDay(mode, day);
+      if (!attempted) throw new Error(`day setup for mode ${mode} is in retry backoff`);
       return;
     }
     // `world.record_score` only moves when someone calls claim_record, which
@@ -348,24 +423,44 @@ async function main() {
         .rpc({ skipPreflight: true, commitment: "processed" });
       live = await erProgram.account.worldHeader.fetch(world);
     }
-    if (leader.score + CHUNK_REQUEST_MARGIN < live.revealedRows) return;
-
-    const revealed: number = live.revealedRows;
-    const index: number = live.nextChunkIndex;
-    log(
-      `mode ${mode} day ${day}: leader row ${leader.score}, revealed ${revealed} ` +
-        `-> requesting chunk ${index}`,
+    const needed = chunksNeededForLookahead(
+      leader.score,
+      Number(live.revealedRows),
+      CHUNK_LOOKAHEAD_CHUNKS,
     );
+    if (needed === 0) return;
+
+    log(
+      `mode ${mode} day ${day}: leader row ${leader.score}, revealed ` +
+        `${live.revealedRows}; filling ${needed}/${CHUNK_LOOKAHEAD_CHUNKS} lookahead chunks`,
+    );
+    // request_chunk reads the committed cross-plane world on base. Seed the
+    // bounded lookahead request window from this ER snapshot. Reveal the
+    // whole immutable base-layer window first; account preparation and ER
+    // frontier publication can then resume independently after any failure.
     await checkpointWorld(world, Number(live.recordScore), Number(live.mapSeq));
-    await publishChunk(day, world, index);
-    await ensureSectors(worldPda(0, day), day, index);
-    await ensureSectors(worldPda(1, day), day, index);
-    await ensureChunkDelegated(day, index);
-    await markChunkReady(world, day, index);
-    await extendFrontier(world, index);
-    const after: any = await erProgram.account.worldHeader.fetch(world);
-    await checkpointWorld(world, Number(after.recordScore), Number(after.mapSeq));
-    log(`mode ${mode}: frontier now ${after.revealedRows} rows`);
+    const firstIndex = Number(live.nextChunkIndex);
+    for (let pass = 0; pass < needed; pass++) {
+      await publishChunk(day, world, firstIndex + pass);
+    }
+    for (let pass = 0; pass < needed; pass++) {
+      const index = Number(live.nextChunkIndex);
+      if (index !== firstIndex + pass) {
+        throw new Error(
+          `frontier advanced out of order: expected ${firstIndex + pass}, got ${index}`,
+        );
+      }
+      log(`  lookahead ${pass + 1}/${needed}: chunk ${index}`);
+      // `day` is the WORLD's day, not today's — see ensureSectors.
+      await ensureSectors(worldPda(0, day), day, index);
+      await ensureSectors(worldPda(1, day), day, index);
+      await ensureChunkDelegated(day, index);
+      await markChunkReady(world, day, index);
+      await extendFrontier(world, index);
+      live = await erProgram.account.worldHeader.fetch(world);
+      await checkpointWorld(world, Number(live.recordScore), Number(live.mapSeq));
+      log(`mode ${mode}: frontier now ${live.revealedRows} rows`);
+    }
   }
 
   /**
@@ -376,10 +471,10 @@ async function main() {
    * the burst forever if the cluster were merely busy. One attempt a minute
    * is fast enough for a boundary nobody is watching.
    */
-  async function rollDay(mode: number, day: bigint) {
+  async function rollDay(mode: number, day: bigint): Promise<boolean> {
     const key = `${mode}:${day}`;
     const last = dayRollAt.get(key) ?? 0;
-    if (Date.now() - last < 60_000) return;
+    if (Date.now() - last < 60_000) return false;
     dayRollAt.set(key, Date.now());
     log(`mode ${mode} day ${day}: no world on the ER — bringing the day online`);
     try {
@@ -387,7 +482,7 @@ async function main() {
         baseProgram,
         erProgram,
         admin: keeper,
-        validator: VALIDATOR,
+        validator,
         day,
         modes: [0, 1],
         log: (...a: any[]) => log(" ", ...a),
@@ -397,8 +492,10 @@ async function main() {
           `delegated=[${out.delegated.join(",")}] opened=${out.opened}` +
           (out.notes.length ? ` notes=${out.notes.join("; ")}` : ""),
       );
+      return true;
     } catch (e: any) {
       log(`mode ${mode} day ${day}: day setup failed:`, e?.message ?? e);
+      throw e;
     }
   }
 
@@ -427,9 +524,7 @@ async function main() {
       if (out.did.length) {
         log(`settlement day ${day}: ${out.did.join("; ")} -> ${out.status}`);
         if (out.winner)
-          log(
-            `  winner ${out.winner} paid ${out.winnerAmount}, team ${out.teamAmount}`,
-          );
+          log(`  winner ${out.winner} paid ${out.winnerAmount}, team ${out.teamAmount}`);
       }
       // Blockages are only worth saying when work was possible at all; a
       // day that is simply already settled says nothing.
@@ -461,7 +556,11 @@ async function main() {
   }
 
   /** Commit the ER world and wait until the exact checkpoint is visible on base. */
-  async function checkpointWorld(world: web3.PublicKey, recordScore: number, mapSeq: number) {
+  async function checkpointWorld(
+    world: web3.PublicKey,
+    recordScore: number,
+    mapSeq: number,
+  ) {
     await withRetry("commit world checkpoint", () =>
       erProgram.methods
         .commitState()
@@ -479,7 +578,9 @@ async function main() {
         return;
       await sleep(500);
     }
-    throw new Error(`world checkpoint did not reach base (record=${recordScore}, map=${mapSeq})`);
+    throw new Error(
+      `world checkpoint did not reach base (record=${recordScore}, map=${mapSeq})`,
+    );
   }
 
   async function publishChunk(day: bigint, world: web3.PublicKey, index: number) {
