@@ -523,8 +523,34 @@ export function GameScreen({
     // Drain the map in strict chunk order. A temporary hole must never move
     // `loadedChunks` forward, otherwise those sixteen rows stay wrong until
     // the player reloads the entire game.
+    /**
+     * How many chunks this screen wants, asked directly of the world.
+     *
+     * Every other path that sets `wantedChunks` is a push or a reconcile, and
+     * a subscription does NOT replay state that already exists — so on a cold
+     * reload nothing tells the map how big it is until something happens to
+     * change. If that first read also missed, the player stood in an empty
+     * world with no ground: "I restarted and there is no map, only me."
+     *
+     * Reading it here makes the loader self-sufficient. `getWorldAnywhere`
+     * falls back to base when the rollup read fails, so a single flaky read
+     * cannot leave the scene blank.
+     */
+    const wantChunksFromWorld = async () => {
+      if (wantedChunks > 0) return;
+      const world = await boot.client
+        .getWorldAnywhere(route.mode, route.day)
+        .catch(() => null);
+      if (!live || !world) return;
+      wantedChunks = Math.max(wantedChunks, Math.ceil(Number(world.revealedRows) / 16));
+    };
+
     const pumpChunks = async () => {
-      if (!live || !scene || chunkLoadRunning || loadedChunks >= wantedChunks) return;
+      if (!live || !scene || chunkLoadRunning) return;
+      if (loadedChunks >= wantedChunks) {
+        await wantChunksFromWorld();
+        if (!live || !scene || loadedChunks >= wantedChunks) return;
+      }
       chunkLoadRunning = true;
       const throughIndex = wantedChunks;
       try {
