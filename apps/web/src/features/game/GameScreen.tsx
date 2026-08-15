@@ -993,6 +993,27 @@ export function GameScreen({
    */
   const MIN_SEND_GAP_MS = 120;
   /**
+   * Where the optimistic gap starts, and how far it may drift.
+   *
+   * Confirmation is the only thing that PROVES the previous action applied,
+   * so a confirmed action releases the next one immediately with no gap at
+   * all — that path can never be refused. The gap below exists only for the
+   * case where confirmation has not arrived yet, and 120ms is what THIS
+   * machine measured against THIS rollup. Somebody further away, or on a
+   * worse link, would have a slower floor and would spend that difference on
+   * refusals and rubber-banding.
+   *
+   * So it is not a constant. It starts at a round trip — safe anywhere —
+   * and only walks down toward the measured floor while nothing is being
+   * refused. A refusal walks it straight back up. The player on the worst
+   * connection converges somewhere slow and correct; the player beside the
+   * rollup converges on 120ms.
+   */
+  const GAP_START_MS = 220;
+  const GAP_MAX_MS = 500;
+  /** Consecutive clean confirmations before trying a shorter gap. */
+  const GAP_TIGHTEN_AFTER = 6;
+  /**
    * How far prediction may run ahead of the chain.
    *
    * Input faster than the chain accepts cannot all land, so queueing it
@@ -1000,6 +1021,8 @@ export function GameScreen({
    * the screen honest.
    */
   const MAX_PENDING_ACTIONS = 2;
+  const gapRef = useRef(GAP_START_MS);
+  const cleanRunRef = useRef(0);
 
   function enqueueAction(action: Outbound) {
     outboxRef.current.push(action);
@@ -1022,14 +1045,18 @@ export function GameScreen({
    * the gap below guarantees. A send that loses its race is retried with the
    * same sequence and is idempotent by construction.
    */
-  function pumpOutbox() {
+  function pumpOutbox(confirmed = false) {
     const next = outboxRef.current.find((a) => !a.sent);
     if (!next) return;
-    const since = performance.now() - lastSendAtRef.current;
-    if (since < MIN_SEND_GAP_MS) {
-      window.clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = window.setTimeout(pumpOutbox, MIN_SEND_GAP_MS - since);
-      return;
+    // A confirmed predecessor is proof, not a guess: the sequence it needed
+    // has already advanced, so this can go out now.
+    if (!confirmed) {
+      const since = performance.now() - lastSendAtRef.current;
+      if (since < gapRef.current) {
+        window.clearTimeout(sendTimerRef.current);
+        sendTimerRef.current = window.setTimeout(() => pumpOutbox(), gapRef.current - since);
+        return;
+      }
     }
     lastSendAtRef.current = performance.now();
     next.sent = true;
@@ -1075,7 +1102,7 @@ export function GameScreen({
     ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
     if (outboxRef.current.some((a) => !a.sent)) {
       window.clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = window.setTimeout(pumpOutbox, MIN_SEND_GAP_MS);
+      sendTimerRef.current = window.setTimeout(() => pumpOutbox(), gapRef.current);
     }
   }
 
@@ -1092,14 +1119,30 @@ export function GameScreen({
       )
         outboxRef.current.shift();
       rejectedRunRef.current = 0;
+      // Nothing was refused, so the current gap is at least safe. Try a
+      // shorter one after a run of clean confirmations, never below the
+      // floor this rollup was measured at.
+      cleanRunRef.current += 1;
+      if (cleanRunRef.current >= GAP_TIGHTEN_AFTER) {
+        cleanRunRef.current = 0;
+        gapRef.current = Math.max(MIN_SEND_GAP_MS, gapRef.current - 20);
+      }
       if (outboxRef.current.length) {
         window.clearTimeout(ackTimerRef.current);
         ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
       }
-      pumpOutbox();
+      // Confirmed: the sequence the next action needs has already advanced,
+      // so it goes out now rather than waiting out a gap that only exists to
+      // guess at this moment.
+      pumpOutbox(true);
       return;
     }
     if (head.tries < ACTION_TRIES) {
+      // No acknowledgement inside the window: this client is sending faster
+      // than the chain is applying. Back the gap off before retrying, or the
+      // retry races the same way and the player rubber-bands again.
+      cleanRunRef.current = 0;
+      gapRef.current = Math.min(GAP_MAX_MS, gapRef.current + 60);
       // Resend this exact sequence. Everything queued behind it was numbered
       // on top of it, so it has to land before they can.
       head.sent = false;
