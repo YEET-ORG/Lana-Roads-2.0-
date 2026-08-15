@@ -57,6 +57,39 @@ function usdc(v: bigint | number): string {
   return `${(Number(v) / 1e6).toFixed(2)} USDC`;
 }
 
+/**
+ * Whether the season is open for business, and if not, when it will be.
+ *
+ * `request_pull` bounds every pull to `[start_day, end_day)`. Reading that
+ * here turns the one refusal a player can hit before paying into a countdown
+ * instead of `custom program error: 0x1795`.
+ */
+type SeasonWindow =
+  | { state: "open" }
+  | { state: "early"; opensAt: number }
+  | { state: "ended" }
+  | { state: "unknown" };
+
+function seasonWindow(season: any): SeasonWindow {
+  if (!season) return { state: "unknown" };
+  if (Object.keys(season.status ?? {})[0] !== "active") return { state: "unknown" };
+  const today = Math.floor(Date.now() / 1000 / 86400);
+  const start = Number(season.startDay.toString());
+  const end = Number(season.endDay.toString());
+  if (today < start) return { state: "early", opensAt: start * 86_400_000 };
+  if (today >= end) return { state: "ended" };
+  return { state: "open" };
+}
+
+function untilText(opensAt: number): string {
+  const left = Math.max(0, opensAt - Date.now());
+  const hours = Math.floor(left / 3_600_000);
+  const minutes = Math.floor((left % 3_600_000) / 60_000);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m`;
+  return "any moment";
+}
+
 function summaryFromAccount(
   pull: any,
   pullNonce: number,
@@ -96,6 +129,7 @@ export function PackSheet({
   );
   const [balance, setBalance] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [window_, setWindow] = useState<SeasonWindow>({ state: "unknown" });
   const tokenRef = useRef<PublicKey | null>(null);
   const stageRef = useRef(stage);
   const onAgentRevealedRef = useRef(onAgentRevealed);
@@ -137,7 +171,7 @@ export function PackSheet({
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [bannerRows, list, history, config, profile] = await Promise.all([
+      const [bannerRows, list, history, config, profile, season] = await Promise.all([
         Promise.all(
           [0, 1, 2].map((tier) => boot.client.getBanner(SEASON, tier).catch(() => null)),
         ),
@@ -145,7 +179,13 @@ export function PackSheet({
         boot.client.listPulls(),
         boot.client.getConfig(),
         boot.client.getProfile().catch(() => null),
+        boot.client.getSeason(SEASON).catch(() => null),
       ]);
+      // A season's odds are frozen before it opens, so `activate_season`
+      // demands a future start day and `request_pull` refuses until it
+      // arrives. Knowing that up front beats letting the player press buy
+      // and read a raw simulation failure.
+      setWindow(seasonWindow(season));
       const nextBanners = bannerRows.map((banner: any, tier) =>
         banner
           ? {
@@ -240,6 +280,17 @@ export function PackSheet({
   async function buy() {
     const banner = banners?.[selectedTier];
     if (!tokenRef.current || !banner) return;
+    // The window can close between render and click (a season ending at a UTC
+    // boundary, a stale sheet left open overnight). Refusing here costs the
+    // player nothing; letting it through costs a failed transaction.
+    if (window_.state === "early") {
+      setError(`Season 1 opens ${new Date(window_.opensAt).toUTCString()}.`);
+      return;
+    }
+    if (window_.state === "ended") {
+      setError("Season 1 has closed. No further packs can be opened.");
+      return;
+    }
     setError(null);
     setStage({ name: "paying", tier: selectedTier });
     sfx.click();
@@ -359,7 +410,10 @@ export function PackSheet({
           </div>
 
           <div className={`pack-stage pack-stage--${selectedTier}`}>
-            <PackCrate tier={selectedTier} onClick={() => void buy()} />
+            <PackCrate
+              tier={selectedTier}
+              onClick={window_.state === "open" ? () => void buy() : undefined}
+            />
             <div className="pack-stage__copy">
               <span className="pack-stage__eyebrow">{TIER_NAMES[selectedTier]} pack</span>
               <strong>{TIER_COPY[selectedTier].title} crate</strong>
@@ -409,15 +463,26 @@ export function PackSheet({
             size="giant"
             icon="spark"
             block
-            disabled={!banner || !canAfford}
+            disabled={!banner || !canAfford || window_.state !== "open"}
             onClick={() => void buy()}
           >
             {!banner
               ? "Pack unavailable"
-              : !canAfford
-                ? "Not enough USDC"
-                : `Open for ${usdc(shownPrice)}`}
+              : window_.state === "early"
+                ? `Opens in ${untilText(window_.opensAt)}`
+                : window_.state === "ended"
+                  ? "Season closed"
+                  : !canAfford
+                    ? "Not enough USDC"
+                    : `Open for ${usdc(shownPrice)}`}
           </Button>
+          {window_.state === "early" && (
+            <p className="pack-trustline">
+              <Icon name="lock" size={13} /> The odds above are already frozen on
+              chain. That is why the season cannot open until{" "}
+              {new Date(window_.opensAt).toUTCString()}.
+            </p>
+          )}
           <p className="pack-trustline">
             <Icon name="lock" size={13} /> Odds lock when you pay. Results come from
             MagicBlock VRF and cannot be rerolled.
