@@ -121,7 +121,7 @@ describeVrfE2e("crossy-world NFT + gameplay E2E (real mpl-core + MagicBlock VRF)
   const lockPda = (world: web3.PublicKey, w: web3.PublicKey, attempt: number) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(attempt));
   const receiptPda = (kind: number, day: number, w: web3.PublicKey, nonce: number) =>
-    pda(S.payment, Buffer.from([kind]), le64(day), w.toBuffer(), le32(nonce));
+    pda(S.payment, Buffer.from([kind]), Buffer.from([0]), le64(day), w.toBuffer(), le32(nonce));
 
   let day: number;
   let dailyPda: web3.PublicKey;
@@ -314,7 +314,7 @@ describeVrfE2e("crossy-world NFT + gameplay E2E (real mpl-core + MagicBlock VRF)
     casualWorld = pda(S.world, Buffer.from([1]), le64(day));
     spawnChunk = pda(S.chunk, le64(day), le32(0));
     await program.methods
-      .prepareDay(new BN(day))
+      .prepareDay(0, new BN(day))
       .accountsPartial({
         config: configPda,
         daily: dailyPda,
@@ -1217,7 +1217,7 @@ describeVrfE2e("crossy-world NFT + gameplay E2E (real mpl-core + MagicBlock VRF)
 
     // Request chunk 1 (frontier margin reached), reveal with the VRF key.
     await (program.methods as any)
-      .requestChunk(new BN(day), 1)
+      .requestChunk(0, new BN(day), 1)
       .accountsPartial({
         world: paidWorld,
         chunk: pda(S.chunk, le64(day), le32(1)),

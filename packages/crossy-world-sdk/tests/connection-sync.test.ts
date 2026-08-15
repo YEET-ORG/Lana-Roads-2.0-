@@ -66,7 +66,7 @@ describe("CrossyClient connection synchronization", () => {
         { headers: { "content-type": "application/json" } },
       );
     try {
-      await c.resolveErForWorld(pda.world(WorldMode.Casual, 1n));
+      await c.resolveErForWorld(pda.world(0, WorldMode.Casual, 1n));
     } finally {
       globalThis.fetch = originalFetch;
     }

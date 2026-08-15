@@ -20,7 +20,7 @@ use super::gameplay::{assert_sector, lane_for_row, world_time_ms};
 pub struct CheckHazard<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,

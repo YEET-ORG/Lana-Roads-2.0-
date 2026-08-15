@@ -179,6 +179,7 @@ pub fn init_run(
         let expected = Pubkey::find_program_address(
             &[
                 seeds::WORLD,
+                &[committed.region],
                 &[committed.mode as u8],
                 &committed.day.to_le_bytes(),
             ],
@@ -285,7 +286,7 @@ pub fn end_session(ctx: Context<RotateSession>) -> Result<()> {
 pub struct Spawn<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -404,6 +405,7 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
             &[
                 seeds::PAYMENT,
                 &[ReceiptKind::Entry as u8],
+                &[world.region],
                 &world.day.to_le_bytes(),
                 run.wallet.as_ref(),
                 &receipt_nonce,
@@ -546,7 +548,7 @@ pub struct MoveAction<'info> {
     /// world's active-player count.
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -751,7 +753,7 @@ pub fn move_action(
 pub struct ClaimRecord<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -803,7 +805,7 @@ pub fn claim_record(ctx: Context<ClaimRecord>) -> Result<()> {
 pub struct CompleteRevive<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
         constraint = world.mode == WorldMode::Paid @ CrossyError::InvalidTransition
     )]
@@ -883,6 +885,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
         &[
             seeds::PAYMENT,
             &[ReceiptKind::Revival as u8],
+            &[world.region],
             &world.day.to_le_bytes(),
             run.wallet.as_ref(),
             &receipt_nonce,
@@ -980,7 +983,7 @@ pub fn complete_revive(ctx: Context<CompleteRevive>) -> Result<()> {
 #[derive(Accounts)]
 pub struct ExpireRevival<'info> {
     #[account(
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -1027,7 +1030,7 @@ pub fn expire_revival(ctx: Context<ExpireRevival>) -> Result<()> {
 pub struct EndAttempt<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,

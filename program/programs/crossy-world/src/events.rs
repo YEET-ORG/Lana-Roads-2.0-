@@ -16,6 +16,7 @@ pub struct ConfigInitialized {
 
 #[event]
 pub struct ValidatorChanged {
+    pub region: u8,
     pub previous: Pubkey,
     pub validator: Pubkey,
 }

@@ -42,6 +42,8 @@ pub enum ChunkRequestState {
 #[account]
 #[derive(InitSpace)]
 pub struct WorldHeader {
+    /// Rollup region this world runs on; part of its own PDA seeds.
+    pub region: u8,
     pub day: u64,
     pub mode: WorldMode,
     pub status: WorldStatus,
@@ -156,6 +158,9 @@ pub enum ChunkStatus {
 #[account]
 #[derive(InitSpace)]
 pub struct ChunkDefinition {
+    /// Rollup region; regions generate independent maps because a chunk can
+    /// only be delegated to one validator at a time.
+    pub region: u8,
     pub day: u64,
     pub chunk_index: u32,
     /// First absolute row of this chunk (chunk_index * 16).

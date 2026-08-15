@@ -202,7 +202,7 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     const validatorMeta = { pubkey: validator, isSigner: false, isWritable: false };
     if (!alreadyDelegated) {
       await program.methods
-        .delegateWorld(1, new BN(day))
+        .delegateWorld(0, 1, new BN(day))
         .accountsPartial({ payer: admin.publicKey, pda: world })
         .remainingAccounts([validatorMeta])
         .rpc();
@@ -211,7 +211,7 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
         for (let sx = 0; sx < 8; sx++) {
           await program.methods
             .delegateSector(world, sx, sy)
-            .accountsPartial({ payer: admin.publicKey, pda: sectorPda(sx, sy) })
+            .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: sectorPda(sx, sy) })
             .remainingAccounts([validatorMeta])
             .rpc();
         }
@@ -219,12 +219,12 @@ describe("crossy-world MagicBlock ER delegation (devnet)", () => {
     }
     await program.methods
       .delegateRun(world, player.publicKey)
-      .accountsPartial({ payer: admin.publicKey, pda: runPda() })
+      .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: runPda() })
       .remainingAccounts([validatorMeta])
       .rpc();
     await program.methods
       .delegateBest(world, player.publicKey)
-      .accountsPartial({ payer: admin.publicKey, pda: bestPda() })
+      .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: bestPda() })
       .remainingAccounts([validatorMeta])
       .rpc();
 

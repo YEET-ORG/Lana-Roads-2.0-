@@ -30,6 +30,24 @@ pub mod seeds {
 /// Seconds in one UTC day; the day id is `floor(unix_ts / DAY_SECONDS)`.
 pub const DAY_SECONDS: i64 = 86_400;
 
+/// How many rollup regions the protocol can address.
+///
+/// A world is delegated to exactly one MagicBlock validator, and that
+/// validator is in exactly one place, so a single global world charges every
+/// distant player a permanent latency tax — measured at 280 ms from Europe to
+/// the Singapore rollup against 80 ms for someone beside it. Regions exist so
+/// each player's world runs next to them.
+///
+/// The slot is a seed component, so this bound is permanent for a given
+/// program: raising it later is a new deployment, and shrinking it strands
+/// accounts. Four leaves room without inviting a long tail of near-empty
+/// worlds — every extra region splits the player pool and the prize pot.
+pub const MAX_REGIONS: usize = 4;
+/// A region id must index the validator table.
+pub const fn is_valid_region(region: u8) -> bool {
+    (region as usize) < MAX_REGIONS
+}
+
 /// Upper bound on the cosmetic agent index a player may choose.
 ///
 /// The program has no opinion about the art roster — that is the client's —

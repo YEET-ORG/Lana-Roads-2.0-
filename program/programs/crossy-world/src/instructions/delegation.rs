@@ -31,13 +31,28 @@ pub struct DelegateWorld<'info> {
     pub pda: UncheckedAccount<'info>,
 }
 
-/// Delegate a world header to the ER using the validator pinned in config.
-pub fn delegate_world(ctx: Context<DelegateWorld>, mode: u8, day: u64) -> Result<()> {
+/// Delegate a world header to the rollup its own region names.
+///
+/// The validator comes from `config.validators[region]`, never from the
+/// caller: a world whose seeds say "eu" but which is hosted in Singapore
+/// would give European players the latency the region was created to remove,
+/// and nothing downstream would notice.
+pub fn delegate_world(
+    ctx: Context<DelegateWorld>,
+    region: u8,
+    mode: u8,
+    day: u64,
+) -> Result<()> {
+    let validator = ctx
+        .accounts
+        .config
+        .validator_for(region)
+        .ok_or(CrossyError::RegionClosed)?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
-        &[seeds::WORLD, &[mode], &day.to_le_bytes()],
+        &[seeds::WORLD, &[region], &[mode], &day.to_le_bytes()],
         DelegateConfig {
-            validator: Some(ctx.accounts.config.validator),
+            validator: Some(validator),
             ..Default::default()
         },
     )?;
@@ -53,6 +68,9 @@ pub struct DelegateSector<'info> {
         constraint = config.admin == payer.key() @ CrossyError::NotAdmin
     )]
     pub config: Box<Account<'info, GlobalConfig>>,
+    /// CHECK: the sector's world; normally already delegated, so it is read
+    /// cross-plane and validated against its own self-describing PDA.
+    pub world_account: UncheckedAccount<'info>,
     pub payer: Signer<'info>,
     /// CHECK: the sector PDA to delegate.
     #[account(mut, del)]
@@ -65,6 +83,11 @@ pub fn delegate_sector(
     sector_x: u8,
     sector_y: u32,
 ) -> Result<()> {
+    let validator = validator_for_world(
+        &ctx.accounts.config,
+        &ctx.accounts.world_account.to_account_info(),
+        world,
+    )?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[
@@ -74,11 +97,42 @@ pub fn delegate_sector(
             &sector_y.to_le_bytes(),
         ],
         DelegateConfig {
-            validator: Some(ctx.accounts.config.validator),
+            validator: Some(validator),
             ..Default::default()
         },
     )?;
     Ok(())
+}
+
+/// The validator a world's satellite accounts must be delegated to.
+///
+/// Sectors, runs and daily bests are addressed by the world's pubkey, which
+/// says nothing about where that world lives. Taking the region from a caller
+/// argument would let a run be delegated to a different rollup than the world
+/// it belongs to — the account would exist, on a validator that has no world
+/// to play in, and every action against it would fail for reasons pointing
+/// somewhere else entirely. So read the world and let it name its own region.
+fn validator_for_world(
+    config: &GlobalConfig,
+    world_info: &AccountInfo,
+    expected: Pubkey,
+) -> Result<Pubkey> {
+    require_keys_eq!(*world_info.key, expected, CrossyError::NotReconcilable);
+    let world = crate::cross_plane::read_committed_world_any(world_info)?;
+    let derived = Pubkey::find_program_address(
+        &[
+            seeds::WORLD,
+            &[world.region],
+            &[world.mode as u8],
+            &world.day.to_le_bytes(),
+        ],
+        &crate::ID,
+    )
+    .0;
+    require_keys_eq!(*world_info.key, derived, CrossyError::NotReconcilable);
+    config
+        .validator_for(world.region)
+        .ok_or(error!(CrossyError::RegionClosed))
 }
 
 #[delegate]
@@ -86,6 +140,9 @@ pub fn delegate_sector(
 pub struct DelegateRun<'info> {
     #[account(seeds = [seeds::CONFIG], bump = config.bump)]
     pub config: Box<Account<'info, GlobalConfig>>,
+    /// CHECK: the world this account belongs to; read cross-plane so the
+    /// delegation lands on the same rollup the world does.
+    pub world_account: UncheckedAccount<'info>,
     pub payer: Signer<'info>,
     /// CHECK: the run PDA to delegate.
     #[account(mut, del)]
@@ -94,11 +151,16 @@ pub struct DelegateRun<'info> {
 
 pub fn delegate_run(ctx: Context<DelegateRun>, world: Pubkey, wallet: Pubkey) -> Result<()> {
     require_keys_eq!(ctx.accounts.payer.key(), wallet, CrossyError::NotWallet);
+    let validator = validator_for_world(
+        &ctx.accounts.config,
+        &ctx.accounts.world_account.to_account_info(),
+        world,
+    )?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::RUN, world.as_ref(), wallet.as_ref()],
         DelegateConfig {
-            validator: Some(ctx.accounts.config.validator),
+            validator: Some(validator),
             ..Default::default()
         },
     )?;
@@ -110,6 +172,9 @@ pub fn delegate_run(ctx: Context<DelegateRun>, world: Pubkey, wallet: Pubkey) ->
 pub struct DelegateBest<'info> {
     #[account(seeds = [seeds::CONFIG], bump = config.bump)]
     pub config: Box<Account<'info, GlobalConfig>>,
+    /// CHECK: the world this account belongs to; read cross-plane so the
+    /// delegation lands on the same rollup the world does.
+    pub world_account: UncheckedAccount<'info>,
     pub payer: Signer<'info>,
     /// CHECK: the daily-best PDA to delegate.
     #[account(mut, del)]
@@ -118,11 +183,16 @@ pub struct DelegateBest<'info> {
 
 pub fn delegate_best(ctx: Context<DelegateBest>, world: Pubkey, wallet: Pubkey) -> Result<()> {
     require_keys_eq!(ctx.accounts.payer.key(), wallet, CrossyError::NotWallet);
+    let validator = validator_for_world(
+        &ctx.accounts.config,
+        &ctx.accounts.world_account.to_account_info(),
+        world,
+    )?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
         &[seeds::BEST, world.as_ref(), wallet.as_ref()],
         DelegateConfig {
-            validator: Some(ctx.accounts.config.validator),
+            validator: Some(validator),
             ..Default::default()
         },
     )?;
@@ -144,12 +214,23 @@ pub struct DelegateChunk<'info> {
     pub pda: UncheckedAccount<'info>,
 }
 
-pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u32) -> Result<()> {
+pub fn delegate_chunk(
+    ctx: Context<DelegateChunk>,
+    region: u8,
+    day: u64,
+    chunk_index: u32,
+) -> Result<()> {
+    // A chunk's seeds carry its region, so no world read is needed here.
+    let validator = ctx
+        .accounts
+        .config
+        .validator_for(region)
+        .ok_or(CrossyError::RegionClosed)?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
-        &[seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        &[seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
         DelegateConfig {
-            validator: Some(ctx.accounts.config.validator),
+            validator: Some(validator),
             ..Default::default()
         },
     )?;
@@ -200,7 +281,7 @@ pub struct CloseWorld<'info> {
     pub payer: Signer<'info>,
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,

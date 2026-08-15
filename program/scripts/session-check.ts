@@ -12,11 +12,28 @@ import { Program, web3, BN } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
-const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+/**
+ * Rollup region. Each region runs its own world, pot and map, so this
+ * selects which game the script is talking about — not just a transport.
+ */
+const REGION = Number(process.env.REGION ?? 0);
+/** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
+const REGION_RPC = [
+  "https://devnet-as.magicblock.app",
+  "https://devnet-eu.magicblock.app",
+  "https://devnet-us.magicblock.app",
+];
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
+const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
 const VALIDATOR = new web3.PublicKey(
-  process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
 );
 
 const le8 = (v: bigint | number) => {
@@ -50,7 +67,7 @@ async function main() {
     ),
   );
   const day = BigInt(Math.floor(Date.now() / 1000 / 86400));
-  const world = pda(Buffer.from("world"), Buffer.from([1]), le8(day));
+  const world = pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([1]), le8(day));
   const baseConn = new web3.Connection(BASE_RPC, "confirmed");
   const erConn = new web3.Connection(ER_RPC, "processed");
   const idl = JSON.parse(
@@ -142,12 +159,12 @@ async function main() {
         .instruction(),
       await base.methods
         .delegateRun(world, player.publicKey)
-        .accountsPartial({ payer: player.publicKey, pda: runPda })
+        .accountsPartial({ worldAccount: world, payer: player.publicKey, pda: runPda })
         .remainingAccounts([validatorMeta])
         .instruction(),
       await base.methods
         .delegateBest(world, player.publicKey)
-        .accountsPartial({ payer: player.publicKey, pda: bestPda })
+        .accountsPartial({ worldAccount: world, payer: player.publicKey, pda: bestPda })
         .remainingAccounts([validatorMeta])
         .instruction(),
     ),
@@ -185,7 +202,7 @@ async function main() {
         run: runPda,
         sourceSector: src,
         destSector: dst.equals(src) ? null : dst,
-        chunk: pda(Buffer.from("chunk"), le8(day), le4(Math.floor((run.y + 1) / 16))),
+        chunk: pda(Buffer.from("chunk"), Buffer.from([REGION]), le8(day), le4(Math.floor((run.y + 1) / 16))),
         best: bestPda,
         signer: signer.publicKey,
       })

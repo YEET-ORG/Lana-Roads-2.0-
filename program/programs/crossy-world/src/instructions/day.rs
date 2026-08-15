@@ -17,7 +17,7 @@ use crate::state::*;
 // ---------------------------------------------------------------------------
 
 #[derive(Accounts)]
-#[instruction(day: u64)]
+#[instruction(region: u8, day: u64)]
 pub struct PrepareDay<'info> {
     #[account(
         seeds = [seeds::CONFIG],
@@ -29,12 +29,12 @@ pub struct PrepareDay<'info> {
         init,
         payer = admin,
         space = 8 + DailyCompetition::INIT_SPACE,
-        seeds = [seeds::DAILY, &day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[region], &day.to_le_bytes()],
         bump
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     /// CHECK: vault authority PDA; only used as token authority.
-    #[account(seeds = [seeds::DAILY_VAULT, &day.to_le_bytes()], bump)]
+    #[account(seeds = [seeds::DAILY_VAULT, &[region], &day.to_le_bytes()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// Day vault token account owned by the vault authority PDA.
     #[account(
@@ -42,7 +42,7 @@ pub struct PrepareDay<'info> {
         payer = admin,
         token::mint = usdc_mint,
         token::authority = vault_authority,
-        seeds = [seeds::DAILY_VAULT, &day.to_le_bytes(), b"ata"],
+        seeds = [seeds::DAILY_VAULT, &[region], &day.to_le_bytes(), b"ata"],
         bump
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -52,7 +52,7 @@ pub struct PrepareDay<'info> {
         init,
         payer = admin,
         space = 8 + WorldHeader::INIT_SPACE,
-        seeds = [seeds::WORLD, &[WorldMode::Paid as u8], &day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[region], &[WorldMode::Paid as u8], &day.to_le_bytes()],
         bump
     )]
     pub paid_world: Box<Account<'info, WorldHeader>>,
@@ -60,7 +60,7 @@ pub struct PrepareDay<'info> {
         init,
         payer = admin,
         space = 8 + WorldHeader::INIT_SPACE,
-        seeds = [seeds::WORLD, &[WorldMode::Casual as u8], &day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[region], &[WorldMode::Casual as u8], &day.to_le_bytes()],
         bump
     )]
     pub casual_world: Box<Account<'info, WorldHeader>>,
@@ -69,7 +69,7 @@ pub struct PrepareDay<'info> {
         init,
         payer = admin,
         space = 8 + ChunkDefinition::INIT_SPACE,
-        seeds = [seeds::CHUNK, &day.to_le_bytes(), &0u32.to_le_bytes()],
+        seeds = [seeds::CHUNK, &[region], &day.to_le_bytes(), &0u32.to_le_bytes()],
         bump
     )]
     pub spawn_chunk: Box<Account<'info, ChunkDefinition>>,
@@ -83,7 +83,14 @@ pub struct PrepareDay<'info> {
     pub token_program: UncheckedAccount<'info>,
 }
 
-pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
+pub fn prepare_day(ctx: Context<PrepareDay>, region: u8, day: u64) -> Result<()> {
+    // A day may only be opened in a region that has somewhere to run. The
+    // alternative is a world nobody can delegate: created, paid into, and
+    // permanently stuck on the base layer.
+    require!(
+        ctx.accounts.config.validator_for(region).is_some(),
+        CrossyError::RegionClosed
+    );
     let now = Clock::get()?.unix_timestamp;
     let today = time::utc_day_from_unix(now).ok_or(CrossyError::Overflow)?;
     // May prepare today (late recovery) or a future day; never the past.
@@ -93,6 +100,7 @@ pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
     let end_ts = time::day_end(day).ok_or(CrossyError::Overflow)?;
 
     let daily = &mut ctx.accounts.daily;
+    daily.region = region;
     daily.day = day;
     daily.status = DayStatus::Prepared;
     daily.paid_world = ctx.accounts.paid_world.key();
@@ -114,6 +122,7 @@ pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
             config.max_casual_players,
         ),
     ] {
+        world.region = region;
         world.day = day;
         world.mode = mode;
         // Worlds are born Open: actual play is gated by authoritative time
@@ -149,6 +158,7 @@ pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
     // Deterministic hazard-free spawn chunk, shared by both modes.
     let layout = chunkgen::generate_chunk(&[0u8; 32], 0);
     let chunk = &mut ctx.accounts.spawn_chunk;
+    chunk.region = region;
     chunk.day = day;
     chunk.chunk_index = 0;
     chunk.row_start = 0;
@@ -183,20 +193,20 @@ pub struct ConsumeRollover<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &previous.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[previous.region], &previous.day.to_le_bytes()],
         bump = previous.bump,
     )]
     pub previous: Box<Account<'info, DailyCompetition>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
         constraint = daily.day == previous.day + 1 @ CrossyError::InvalidTransition
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     /// CHECK: previous day vault authority PDA (transfer signer).
     #[account(
-        seeds = [seeds::DAILY_VAULT, &previous.day.to_le_bytes()],
+        seeds = [seeds::DAILY_VAULT, &[previous.region], &previous.day.to_le_bytes()],
         bump = previous.vault_authority_bump
     )]
     pub previous_vault_authority: UncheckedAccount<'info>,
@@ -237,8 +247,10 @@ pub fn consume_rollover(ctx: Context<ConsumeRollover>) -> Result<()> {
     daily.assert_solvency(ctx.accounts.vault.amount)?;
 
     let day_bytes = previous.day.to_le_bytes();
+    let region_byte = [previous.region];
     let signer_seeds: &[&[&[u8]]] = &[&[
         seeds::DAILY_VAULT,
+        &region_byte,
         &day_bytes,
         &[previous.vault_authority_bump],
     ]];
@@ -294,7 +306,7 @@ pub struct OpenDay<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
@@ -330,7 +342,7 @@ pub fn open_day(ctx: Context<OpenDay>) -> Result<()> {
 pub struct CloseDay<'info> {
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
@@ -358,7 +370,7 @@ pub fn close_day(ctx: Context<CloseDay>) -> Result<()> {
 pub struct CloseWorldBase<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -391,7 +403,7 @@ pub fn close_world_base(ctx: Context<CloseWorldBase>) -> Result<()> {
 pub struct RecordFinalCommit<'info> {
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
@@ -447,13 +459,13 @@ pub struct FinalizeDay<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     /// CHECK: vault authority PDA (transfer signer).
     #[account(
-        seeds = [seeds::DAILY_VAULT, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY_VAULT, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.vault_authority_bump
     )]
     pub vault_authority: UncheckedAccount<'info>,
@@ -539,8 +551,10 @@ pub fn finalize_day(ctx: Context<FinalizeDay>) -> Result<()> {
     }
 
     let day_bytes = daily.day.to_le_bytes();
+    let region_byte = [daily.region];
     let signer_seeds: &[&[&[u8]]] = &[&[
         seeds::DAILY_VAULT,
+        &region_byte,
         &day_bytes,
         &[daily.vault_authority_bump],
     ]];
@@ -629,7 +643,7 @@ pub struct VoidDay<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,

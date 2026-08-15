@@ -30,7 +30,7 @@ pub struct BeginPaidAttempt<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
         constraint = daily.status == DayStatus::Open @ CrossyError::DayNotOpen
     )]
@@ -63,6 +63,7 @@ pub struct BeginPaidAttempt<'info> {
         seeds = [
             seeds::PAYMENT,
             &[ReceiptKind::Entry as u8],
+            &[daily.region],
             &daily.day.to_le_bytes(),
             wallet.key().as_ref(),
             &profile.receipt_count.to_le_bytes(),
@@ -74,7 +75,7 @@ pub struct BeginPaidAttempt<'info> {
         init_if_needed,
         payer = wallet,
         space = 8 + DailyContribution::INIT_SPACE,
-        seeds = [seeds::CONTRIBUTION, &daily.day.to_le_bytes(), wallet.key().as_ref()],
+        seeds = [seeds::CONTRIBUTION, &[daily.region], &daily.day.to_le_bytes(), wallet.key().as_ref()],
         bump
     )]
     pub contribution: Box<Account<'info, DailyContribution>>,
@@ -187,7 +188,7 @@ pub struct BeginRevive<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
         constraint = matches!(daily.status, DayStatus::Open) @ CrossyError::DayNotOpen
     )]
@@ -218,6 +219,7 @@ pub struct BeginRevive<'info> {
         seeds = [
             seeds::PAYMENT,
             &[ReceiptKind::Revival as u8],
+            &[daily.region],
             &daily.day.to_le_bytes(),
             wallet.key().as_ref(),
             &profile.receipt_count.to_le_bytes(),
@@ -328,7 +330,7 @@ pub fn begin_revive(ctx: Context<BeginRevive>) -> Result<()> {
 pub struct ReconcileReceipt<'info> {
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
@@ -342,7 +344,7 @@ pub struct ReconcileReceipt<'info> {
     pub run: UncheckedAccount<'info>,
     #[account(
         mut,
-        seeds = [seeds::CONTRIBUTION, &daily.day.to_le_bytes(), receipt.wallet.as_ref()],
+        seeds = [seeds::CONTRIBUTION, &[daily.region], &daily.day.to_le_bytes(), receipt.wallet.as_ref()],
         bump = contribution.bump,
     )]
     pub contribution: Box<Account<'info, DailyContribution>>,
@@ -482,13 +484,13 @@ pub struct RefundReceipt<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     /// CHECK: vault authority PDA (transfer signer).
     #[account(
-        seeds = [seeds::DAILY_VAULT, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY_VAULT, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.vault_authority_bump
     )]
     pub vault_authority: UncheckedAccount<'info>,
@@ -522,8 +524,10 @@ pub fn refund_receipt(ctx: Context<RefundReceipt>) -> Result<()> {
     let receipt = &mut ctx.accounts.receipt;
 
     let day_bytes = daily.day.to_le_bytes();
+    let region_byte = [daily.region];
     let signer_seeds: &[&[&[u8]]] = &[&[
         seeds::DAILY_VAULT,
+        &region_byte,
         &day_bytes,
         &[daily.vault_authority_bump],
     ]];
@@ -570,14 +574,14 @@ pub struct ClaimVoidRefund<'info> {
     pub config: Box<Account<'info, GlobalConfig>>,
     #[account(
         mut,
-        seeds = [seeds::DAILY, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.bump,
         constraint = daily.status == DayStatus::Voided @ CrossyError::InvalidTransition
     )]
     pub daily: Box<Account<'info, DailyCompetition>>,
     /// CHECK: vault authority PDA (transfer signer).
     #[account(
-        seeds = [seeds::DAILY_VAULT, &daily.day.to_le_bytes()],
+        seeds = [seeds::DAILY_VAULT, &[daily.region], &daily.day.to_le_bytes()],
         bump = daily.vault_authority_bump
     )]
     pub vault_authority: UncheckedAccount<'info>,
@@ -585,7 +589,7 @@ pub struct ClaimVoidRefund<'info> {
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [seeds::CONTRIBUTION, &daily.day.to_le_bytes(), contribution.wallet.as_ref()],
+        seeds = [seeds::CONTRIBUTION, &[daily.region], &daily.day.to_le_bytes(), contribution.wallet.as_ref()],
         bump = contribution.bump,
     )]
     pub contribution: Box<Account<'info, DailyContribution>>,
@@ -620,8 +624,10 @@ pub fn claim_void_refund(ctx: Context<ClaimVoidRefund>) -> Result<()> {
     require!(claimable > 0, CrossyError::AlreadyTerminal);
 
     let day_bytes = daily.day.to_le_bytes();
+    let region_byte = [daily.region];
     let signer_seeds: &[&[&[u8]]] = &[&[
         seeds::DAILY_VAULT,
+        &region_byte,
         &day_bytes,
         &[daily.vault_authority_bump],
     ]];

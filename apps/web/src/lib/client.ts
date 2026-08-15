@@ -11,6 +11,7 @@ import {
 } from "@solana/web3.js";
 import { PublicKey } from "@solana/web3.js";
 import { getSettings } from "./settings";
+import { DEFAULT_REGION, detectRegion, regionById } from "./regions";
 import {
   BrowserSessionStore,
   CROSSY_WORLD_PROGRAM_ID,
@@ -60,6 +61,8 @@ export interface Bootstrapped {
   wallet: Keypair;
   session: Keypair;
   cluster: string;
+  /** The rollup region this session is playing in. */
+  region: number;
 }
 
 /** Build the game client around the resolved identity keypair (burner or
@@ -69,14 +72,21 @@ export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
     wsEndpoint: BASE_WS,
     commitment: "confirmed",
   });
-  // A pinned region replaces the build's default rollup AND suppresses
-  // router resolution: the point of pinning is to stop something else
-  // choosing for you. Pinning the wrong one means playing alone, which the
-  // settings sheet says out loud.
-  const pinned = getSettings().region;
-  const erUrl = pinned !== "auto" ? pinned.replace(/\/$/, "") : ER_RPC;
+  // Which region — and therefore which world, pot and player pool. "auto"
+  // measures the round trip to each rollup and takes the nearest; anything
+  // else is the player pinning a region on purpose, which is allowed and
+  // means playing with the people there rather than the people near them.
+  const setting = getSettings().region;
+  const regionId =
+    setting === "auto"
+      ? await detectRegion().catch(() => DEFAULT_REGION)
+      : (Number(setting) ?? DEFAULT_REGION);
+  const region = regionById(Number.isFinite(regionId) ? regionId : DEFAULT_REGION);
+  // On devnet the region's own rollup is authoritative for its world. A local
+  // cluster has one node and no directory, so the build's endpoint stands.
+  const erUrl = CLUSTER === "devnet" ? region.fqdn : ER_RPC;
   const erConnection = new Connection(erUrl, {
-    wsEndpoint: pinned !== "auto" ? erUrl.replace(/^http/, "ws") : ER_WS,
+    wsEndpoint: CLUSTER === "devnet" ? erUrl.replace(/^http/, "ws") : ER_WS,
     commitment: "processed",
   });
   const session = await loadOrCreateSession(new BrowserSessionStore(), {
@@ -87,11 +97,16 @@ export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
   const client = new CrossyClient({
     connection,
     erConnection,
-    validator: VALIDATOR,
-    routerUrl: pinned === "auto" ? ROUTER : undefined,
+    // The world for this region is delegated to this region's validator, so
+    // pin it rather than letting the router resolve to whichever rollup
+    // happens to answer.
+    validator:
+      CLUSTER === "devnet" ? new PublicKey(region.validator) : VALIDATOR,
+    routerUrl: ROUTER,
+    region: region.id,
     wallet: new KeypairWallet(wallet),
   });
-  return { client, wallet, session, cluster: CLUSTER };
+  return { client, wallet, session, cluster: CLUSTER, region: region.id };
 }
 
 export async function ensureFunded(b: Bootstrapped): Promise<void> {

@@ -27,7 +27,24 @@ import { Program, web3 } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
+/**
+ * Rollup region. Each region runs its own world, pot and map, so this
+ * selects which game the script is talking about — not just a transport.
+ */
+const REGION = Number(process.env.REGION ?? 0);
+/** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
+const REGION_RPC = [
+  "https://devnet-as.magicblock.app",
+  "https://devnet-eu.magicblock.app",
+  "https://devnet-us.magicblock.app",
+];
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
 const TOKEN_PROGRAM = new web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ASSOCIATED_TOKEN_PROGRAM = new web3.PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
@@ -44,11 +61,11 @@ const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const configPda = () => pda(Buffer.from("config"));
-export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), le8(day));
+export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
 export const worldPda = (mode: number, day: bigint) =>
-  pda(Buffer.from("world"), Buffer.from([mode]), le8(day));
+  pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([mode]), le8(day));
 export const vaultAuthorityPda = (day: bigint) =>
-  pda(Buffer.from("daily_vault"), le8(day));
+  pda(Buffer.from("daily_vault"), Buffer.from([REGION]), le8(day));
 export const contributionPda = (day: bigint, wallet: web3.PublicKey) =>
   pda(Buffer.from("contribution"), le8(day), wallet.toBuffer());
 
@@ -550,7 +567,7 @@ export function loadKeypair(path: string) {
 
 async function main() {
   const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
-  const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+  const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
   const admin = loadKeypair(
     process.env.ADMIN_KEYPAIR ?? `${process.env.HOME}/.config/solana/id.json`,
   );

@@ -143,7 +143,7 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     if (!(await base.connection.getAccountInfo(pda(S.daily, le64(day))))) {
       const config = await program.account.globalConfig.fetch(configPda);
       await program.methods
-        .prepareDay(new BN(day))
+        .prepareDay(0, new BN(day))
         .accountsPartial({
           config: configPda,
           daily: pda(S.daily, le64(day)),
@@ -213,7 +213,7 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     const worldOwner = (await base.connection.getAccountInfo(world))!.owner;
     if (!worldOwner.equals(DELEGATION_PROGRAM)) {
       await program.methods
-        .delegateWorld(1, new BN(day))
+        .delegateWorld(0, 1, new BN(day))
         .accountsPartial({ payer: admin.publicKey, pda: world })
         .remainingAccounts([validatorMeta])
         .rpc();
@@ -221,7 +221,7 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
         for (let sx = 0; sx < 8; sx++) {
           await program.methods
             .delegateSector(world, sx, sy)
-            .accountsPartial({ payer: admin.publicKey, pda: sectorPda(sx, sy) })
+            .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: sectorPda(sx, sy) })
             .remainingAccounts([validatorMeta])
             .rpc();
         }
@@ -230,12 +230,12 @@ describe("crossy-world concurrent multiplayer on the ER (devnet)", () => {
     for (const p of [playerA, playerB]) {
       await program.methods
         .delegateRun(world, p.publicKey)
-        .accountsPartial({ payer: admin.publicKey, pda: runPda(p.publicKey) })
+        .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: runPda(p.publicKey) })
         .remainingAccounts([validatorMeta])
         .rpc();
       await program.methods
         .delegateBest(world, p.publicKey)
-        .accountsPartial({ payer: admin.publicKey, pda: bestPda(p.publicKey) })
+        .accountsPartial({ worldAccount: world, payer: admin.publicKey, pda: bestPda(p.publicKey) })
         .remainingAccounts([validatorMeta])
         .rpc();
     }

@@ -82,7 +82,7 @@ export function EntryFlow({
       // router-selected world can never be spawned on the default/wrong ER.
       if (boot.client.routerUrl) {
         const status = await boot.client.resolveErForWorld(
-          pda.world(WorldMode.Paid, day),
+          pda.world(boot.client.region, WorldMode.Paid, day),
         );
         if (!status.isDelegated || !status.fqdn)
           throw new Error("paid world is not delegated to a live rollup");

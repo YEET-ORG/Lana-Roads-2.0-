@@ -24,9 +24,12 @@ export interface Settings {
   /** The live player count and rollup latency chips. */
   showStatus: boolean;
   /**
-   * Which ephemeral rollup to play on: "auto" lets the Magic Router pick the
-   * one holding the world; anything else pins an FQDN from its directory.
-   * Changing it rebuilds the client, so it is applied on the next boot.
+   * Which rollup REGION to play in: "auto" measures round-trip time to each
+   * and picks the nearest; otherwise a region id from lib/regions.
+   *
+   * This is not a transport preference. Each region runs its own world, so it
+   * decides which players you meet and which prize pot you play for. Changing
+   * it rebuilds the client, so it applies on the next boot.
    */
   region: string;
   /** Trim non-essential animation for motion sensitivity and weak GPUs. */

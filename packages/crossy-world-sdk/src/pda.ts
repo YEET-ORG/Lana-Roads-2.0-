@@ -45,14 +45,17 @@ export const pda = {
   identity: (wallet: PublicKey) => find([SEEDS.identity, wallet.toBuffer()]),
   pull: (wallet: PublicKey, pullNonce: number) =>
     find([SEEDS.pull, wallet.toBuffer(), le32(pullNonce)]),
-  daily: (day: bigint | number) => find([SEEDS.daily, le64(day)]),
-  dailyVaultAuthority: (day: bigint | number) => find([SEEDS.dailyVault, le64(day)]),
-  dailyVault: (day: bigint | number) =>
-    find([SEEDS.dailyVault, le64(day), Buffer.from("ata")]),
-  contribution: (day: bigint | number, wallet: PublicKey) =>
-    find([SEEDS.contribution, le64(day), wallet.toBuffer()]),
+  daily: (region: number, day: bigint | number) =>
+    find([SEEDS.daily, Buffer.from([region]), le64(day)]),
+  dailyVaultAuthority: (region: number, day: bigint | number) =>
+    find([SEEDS.dailyVault, Buffer.from([region]), le64(day)]),
+  dailyVault: (region: number, day: bigint | number) =>
+    find([SEEDS.dailyVault, Buffer.from([region]), le64(day), Buffer.from("ata")]),
+  contribution: (region: number, day: bigint | number, wallet: PublicKey) =>
+    find([SEEDS.contribution, Buffer.from([region]), le64(day), wallet.toBuffer()]),
   receipt: (
     kind: ReceiptKind,
+    region: number,
     day: bigint | number,
     wallet: PublicKey,
     receiptNonce: number,
@@ -60,6 +63,7 @@ export const pda = {
     find([
       SEEDS.payment,
       Buffer.from([kind]),
+      Buffer.from([region]),
       le64(day),
       wallet.toBuffer(),
       le32(receiptNonce),
@@ -68,10 +72,10 @@ export const pda = {
     find([SEEDS.agentLock, world.toBuffer(), wallet.toBuffer(), le32(attemptNonce)]),
   assetMap: (asset: PublicKey) => find([SEEDS.assetMap, asset.toBuffer()]),
   listing: (asset: PublicKey) => find([SEEDS.listing, asset.toBuffer()]),
-  world: (mode: WorldMode, day: bigint | number) =>
-    find([SEEDS.world, Buffer.from([mode]), le64(day)]),
-  chunk: (day: bigint | number, chunkIndex: number) =>
-    find([SEEDS.chunk, le64(day), le32(chunkIndex)]),
+  world: (region: number, mode: WorldMode, day: bigint | number) =>
+    find([SEEDS.world, Buffer.from([region]), Buffer.from([mode]), le64(day)]),
+  chunk: (region: number, day: bigint | number, chunkIndex: number) =>
+    find([SEEDS.chunk, Buffer.from([region]), le64(day), le32(chunkIndex)]),
   sector: (world: PublicKey, sectorX: number, sectorY: number) =>
     find([SEEDS.sector, world.toBuffer(), Buffer.from([sectorX]), le32(sectorY)]),
   run: (world: PublicKey, wallet: PublicKey) =>

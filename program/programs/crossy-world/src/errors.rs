@@ -94,6 +94,8 @@ pub enum CrossyError {
     AlreadyTerminal,
     #[msg("day is not prepared/open for this operation")]
     DayNotOpen,
+    #[msg("no validator is configured for this rollup region")]
+    RegionClosed,
     #[msg("day is voided")]
     DayVoided,
     #[msg("subsystem is paused")]

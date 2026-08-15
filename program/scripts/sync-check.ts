@@ -30,9 +30,26 @@ import {
   worldTimeMs,
 } from "../../packages/crossy-world-sdk/src/hazards.js";
 
-const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
-const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+/**
+ * Rollup region. Each region runs its own world, pot and map, so this
+ * selects which game the script is talking about — not just a transport.
+ */
+const REGION = Number(process.env.REGION ?? 0);
+/** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
+const REGION_RPC = [
+  "https://devnet-as.magicblock.app",
+  "https://devnet-eu.magicblock.app",
+  "https://devnet-us.magicblock.app",
+];
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
+const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
 const MODE = Number(process.env.MODE ?? 1);
 /** Samples inside one authoritative step. */
 const STEPS = 20;
@@ -51,7 +68,7 @@ const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM
 
 async function main() {
   const day = BigInt(process.env.DAY ?? Math.floor(Date.now() / 1000 / 86400));
-  const world = pda(Buffer.from("world"), Buffer.from([MODE]), le8(day));
+  const world = pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([MODE]), le8(day));
   const idl = JSON.parse(
     readFileSync(resolve(__dirname, "../target/idl/crossy_world.json"), "utf8"),
   );
@@ -84,7 +101,7 @@ async function main() {
   const randomness: Uint8Array[] = [];
   for (let c = 0; c < chunks; c++) {
     const chunk: any = await base.account.chunkDefinition.fetch(
-      pda(Buffer.from("chunk"), le8(day), le4(c)),
+      pda(Buffer.from("chunk"), Buffer.from([REGION]), le8(day), le4(c)),
     );
     for (const l of chunk.lanes) {
       lanes.push(l);

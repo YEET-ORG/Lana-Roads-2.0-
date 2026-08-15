@@ -24,6 +24,8 @@ pub enum DayStatus {
 #[account]
 #[derive(InitSpace)]
 pub struct DailyCompetition {
+    /// Rollup region; each region runs an independent competition and pot.
+    pub region: u8,
     pub day: u64,
     pub status: DayStatus,
     /// Paid world PDA (delegated gameplay root).

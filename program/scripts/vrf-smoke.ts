@@ -173,7 +173,7 @@ async function main() {
     if (day < 0n) throw new Error("VRF_SMOKE_DAY is required");
     if (mode !== 0 && mode !== 1) throw new Error("VRF_SMOKE_MODE must be 0 or 1");
 
-    const worldPda = pda(S.world, Buffer.from([mode]), le64(day));
+    const worldPda = pda(S.world, Buffer.from([REGION]), Buffer.from([mode]), le64(day));
     const worldInfo = await provider.connection.getAccountInfo(worldPda, "confirmed");
     if (!worldInfo)
       throw new Error(`world ${worldPda.toBase58()} does not exist on base`);
@@ -184,13 +184,13 @@ async function main() {
         `world is not JIT-eligible: record ${world.recordScore}, revealed ${world.revealedRows}`,
       );
     }
-    const chunkPda = pda(S.chunk, le64(day), le32(index));
+    const chunkPda = pda(S.chunk, Buffer.from([REGION]), le64(day), le32(index));
     const signature = await program.methods
-      .requestChunk(new BN(day.toString()), index)
+      .requestChunk(REGION, new BN(day.toString()), index)
       .accountsPartial({
         config: pda(S.config),
         world: worldPda,
-        prevChunk: pda(S.chunk, le64(day), le32(index - 1)),
+        prevChunk: pda(S.chunk, Buffer.from([REGION]), le64(day), le32(index - 1)),
         chunk: chunkPda,
         payer: wallet,
         oracleQueue: QUEUE,

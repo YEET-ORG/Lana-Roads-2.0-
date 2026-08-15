@@ -35,7 +35,7 @@ enum SectorSlot {
 #[derive(Accounts)]
 pub struct Kick<'info> {
     #[account(
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -246,7 +246,7 @@ pub struct AbilityArgs {
 #[derive(Accounts)]
 pub struct UseAbility<'info> {
     #[account(
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,

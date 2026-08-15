@@ -40,15 +40,31 @@ import { publicKey as umiPk } from "@metaplex-foundation/umi";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 /** Test USDC on devnet: six decimals, classic SPL, mint authority is ours. */
 const USDC_MINT = new web3.PublicKey(
   process.env.USDC_MINT ?? "4TLcFzJ8KEJCmxKLnsFRF7fWEMuRE27kqBYdChYV9J6E",
 );
-const VALIDATOR = new web3.PublicKey(
-  process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
-);
+/** Region id -> MagicBlock validator. Must match apps/web/src/lib/regions.ts. */
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
+/**
+ * Every region this deployment opens, in region-id order.
+ *
+ * `initialize_config` seeds region 0 only, so a fresh chain would otherwise
+ * have exactly one playable region and `prepare_day` would refuse the rest.
+ */
+const REGIONS: { id: number; key: string; validator: web3.PublicKey }[] = [
+  { id: 0, key: "as", validator: new web3.PublicKey(REGION_VALIDATOR[0]) },
+  { id: 1, key: "eu", validator: new web3.PublicKey(REGION_VALIDATOR[1]) },
+  { id: 2, key: "us", validator: new web3.PublicKey(REGION_VALIDATOR[2]) },
+];
+const VALIDATOR = REGIONS[0].validator;
 const MAX_PAID_PLAYERS = Number(process.env.MAX_PAID_PLAYERS ?? 500);
 const MAX_CASUAL_PLAYERS = Number(process.env.MAX_CASUAL_PLAYERS ?? 500);
 const COLLECTION_NAME = process.env.COLLECTION_NAME ?? "Lana Roads Agents";
@@ -122,6 +138,27 @@ async function main() {
   if (existing) {
     console.log("\nconfig already initialized — verifying it");
     await verifyConfig(program, configPda, existing, mintAuthority);
+    // Regions can be opened after the fact, so a re-run tops up any that are
+    // missing rather than reporting a bootstrapped chain that cannot host
+    // two thirds of its worlds.
+    for (const region of REGIONS) {
+      const current: web3.PublicKey = existing.validators[region.id];
+      if (current && current.equals(region.validator)) {
+        ok(`region ${region.id} (${region.key})`, "already open");
+        continue;
+      }
+      if (dry) {
+        console.log(`  would open region ${region.id} (${region.key})`);
+        continue;
+      }
+      await withRetry(`set_validator ${region.key}`, () =>
+        program.methods
+          .setValidator(region.id, region.validator)
+          .accountsPartial({ config: configPda, admin: admin.publicKey })
+          .rpc(),
+      );
+      ok(`region ${region.id} (${region.key})`, region.validator.toBase58());
+    }
     console.log("\nchain is already bootstrapped.");
     return;
   }
@@ -224,7 +261,21 @@ async function main() {
       .rpc(),
   );
 
-  // ---- 6. read back ----------------------------------------------------
+  // ---- 6. open the remaining regions -----------------------------------
+  // Each region runs its own world on its own rollup, so every one needs a
+  // validator before a day can be prepared there.
+  console.log("\nopening regions");
+  for (const region of REGIONS.slice(1)) {
+    await withRetry(`set_validator ${region.key}`, () =>
+      program.methods
+        .setValidator(region.id, region.validator)
+        .accountsPartial({ config: configPda, admin: admin.publicKey })
+        .rpc(),
+    );
+    ok(`region ${region.id} (${region.key})`, region.validator.toBase58());
+  }
+
+  // ---- 7. read back ----------------------------------------------------
   console.log("\nverifying what landed on chain");
   const written = await program.account.globalConfig.fetch(configPda);
   await verifyConfig(program, configPda, written, mintAuthority, {
@@ -262,7 +313,7 @@ async function verifyConfig(
   console.log(`  config pda: ${configPda.toBase58()}`);
   check("usdc mint", config.usdcMint, USDC_MINT);
   check("token program", config.tokenProgram, TOKEN_PROGRAM_ID);
-  check("validator", config.validator, VALIDATOR);
+  check("validator (region 0)", config.validators[0], VALIDATOR);
   check("collection authority", config.collectionAuthority, mintAuthority);
   check("winner bps", config.winnerBps, 9000);
   check("team bps", config.teamBps, 1000);

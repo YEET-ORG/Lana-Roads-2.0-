@@ -24,7 +24,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+declare_id!("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 
 #[ephemeral]
 #[program]
@@ -52,8 +52,12 @@ pub mod crossy_world {
         instructions::admin::accept_admin(ctx)
     }
 
-    pub fn set_validator(ctx: Context<AdminOnly>, new_validator: Pubkey) -> Result<()> {
-        instructions::admin::set_validator(ctx, new_validator)
+    pub fn set_validator(
+        ctx: Context<AdminOnly>,
+        region: u8,
+        new_validator: Pubkey,
+    ) -> Result<()> {
+        instructions::admin::set_validator(ctx, region, new_validator)
     }
 
     pub fn set_pause(ctx: Context<AdminOnly>, scope: u16, paused: bool) -> Result<()> {
@@ -159,8 +163,8 @@ pub mod crossy_world {
     }
 
     // ---- day lifecycle --------------------------------------------------
-    pub fn prepare_day(ctx: Context<PrepareDay>, day: u64) -> Result<()> {
-        instructions::day::prepare_day(ctx, day)
+    pub fn prepare_day(ctx: Context<PrepareDay>, region: u8, day: u64) -> Result<()> {
+        instructions::day::prepare_day(ctx, region, day)
     }
 
     pub fn consume_rollover(ctx: Context<ConsumeRollover>) -> Result<()> {
@@ -297,18 +301,24 @@ pub mod crossy_world {
     }
 
     // ---- chunks (ER) ----------------------------------------------------
-    pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> Result<()> {
-        instructions::chunks::request_chunk(ctx, day, chunk_index)
+    pub fn request_chunk(
+        ctx: Context<RequestChunk>,
+        region: u8,
+        day: u64,
+        chunk_index: u32,
+    ) -> Result<()> {
+        instructions::chunks::request_chunk(ctx, region, day, chunk_index)
     }
 
     pub fn publish_chunk(
         ctx: Context<PublishChunk>,
         randomness: [u8; 32],
+        region: u8,
         day: u64,
         chunk_index: u32,
         generation: u16,
     ) -> Result<()> {
-        instructions::chunks::publish_chunk(ctx, randomness, day, chunk_index, generation)
+        instructions::chunks::publish_chunk(ctx, randomness, region, day, chunk_index, generation)
     }
 
     pub fn extend_frontier(ctx: Context<ExtendFrontier>) -> Result<()> {
@@ -365,8 +375,13 @@ pub mod crossy_world {
     }
 
     // ---- delegation / commits -------------------------------------------
-    pub fn delegate_world(ctx: Context<DelegateWorld>, mode: u8, day: u64) -> Result<()> {
-        instructions::delegation::delegate_world(ctx, mode, day)
+    pub fn delegate_world(
+        ctx: Context<DelegateWorld>,
+        region: u8,
+        mode: u8,
+        day: u64,
+    ) -> Result<()> {
+        instructions::delegation::delegate_world(ctx, region, mode, day)
     }
 
     pub fn delegate_sector(
@@ -386,8 +401,13 @@ pub mod crossy_world {
         instructions::delegation::delegate_best(ctx, world, wallet)
     }
 
-    pub fn delegate_chunk(ctx: Context<DelegateChunk>, day: u64, chunk_index: u32) -> Result<()> {
-        instructions::delegation::delegate_chunk(ctx, day, chunk_index)
+    pub fn delegate_chunk(
+        ctx: Context<DelegateChunk>,
+        region: u8,
+        day: u64,
+        chunk_index: u32,
+    ) -> Result<()> {
+        instructions::delegation::delegate_chunk(ctx, region, day, chunk_index)
     }
 
     pub fn commit_state<'info>(ctx: Context<'info, CommitAccounts<'info>>) -> Result<()> {

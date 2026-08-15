@@ -174,7 +174,7 @@ describe(`crossy-world ${PLAYERS}-player concurrency`, () => {
     world = pda(S.world, Buffer.from([1]), le64(day));
     spawnChunk = pda(S.chunk, le64(day), le32(0));
     await program.methods
-      .prepareDay(new BN(day))
+      .prepareDay(0, new BN(day))
       .accountsPartial({
         config: configPda,
         daily: pda(S.daily, le64(day)),

@@ -34,7 +34,7 @@ use crate::state::*;
 
 #[vrf]
 #[derive(Accounts)]
-#[instruction(day: u64, chunk_index: u32)]
+#[instruction(region: u8, day: u64, chunk_index: u32)]
 pub struct RequestChunk<'info> {
     #[account(seeds = [seeds::CONFIG], bump = config.bump)]
     pub config: Box<Account<'info, GlobalConfig>>,
@@ -46,7 +46,7 @@ pub struct RequestChunk<'info> {
         init_if_needed,
         payer = payer,
         space = 8 + ChunkDefinition::INIT_SPACE,
-        seeds = [seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        seeds = [seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
         bump
     )]
     pub chunk: Box<Account<'info, ChunkDefinition>>,
@@ -65,13 +65,18 @@ pub struct RequestChunk<'info> {
 /// Permissionless: open (or retry) the VRF request for the next chunk once
 /// the frontier margin is reached. `WorldHeader` holds exactly one live
 /// request, preventing gaps and selective skipping.
-pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> Result<()> {
+pub fn request_chunk(
+    ctx: Context<RequestChunk>,
+    region: u8,
+    day: u64,
+    chunk_index: u32,
+) -> Result<()> {
     require!(chunk_index >= 1, CrossyError::BadChunkState);
     let now = Clock::get()?.unix_timestamp;
     let world =
         crate::cross_plane::read_committed_world_any(&ctx.accounts.world.to_account_info())?;
     let expected_world = Pubkey::find_program_address(
-        &[seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        &[seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         &crate::ID,
     )
     .0;
@@ -81,6 +86,9 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
         CrossyError::NotReconcilable
     );
     require!(world.day == day, CrossyError::BadChunkState);
+    // The chunk belongs to the region whose world is asking for it, so a
+    // world can never advance its frontier over another region's terrain.
+    require!(world.region == region, CrossyError::BadChunkState);
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
     require!(
@@ -97,6 +105,7 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
     );
     let previous = crate::cross_plane::read_committed_chunk(
         &ctx.accounts.prev_chunk.to_account_info(),
+        region,
         day,
         chunk_index - 1,
     )?;
@@ -113,6 +122,7 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
     match chunk.status {
         ChunkStatus::Uninitialized => {
             // Fresh request.
+            chunk.region = region;
             chunk.day = world.day;
             chunk.chunk_index = chunk_index;
             chunk.row_start = chunk_index
@@ -196,11 +206,11 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
 
 #[vrf_callback]
 #[derive(Accounts)]
-#[instruction(randomness: [u8; 32], day: u64, chunk_index: u32)]
+#[instruction(randomness: [u8; 32], region: u8, day: u64, chunk_index: u32)]
 pub struct PublishChunk<'info> {
     #[account(
         mut,
-        seeds = [seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        seeds = [seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
         bump = chunk.bump,
     )]
     pub chunk: Box<Account<'info, ChunkDefinition>>,
@@ -213,6 +223,7 @@ pub struct PublishChunk<'info> {
 pub fn publish_chunk(
     ctx: Context<PublishChunk>,
     randomness: [u8; 32],
+    region: u8,
     day: u64,
     chunk_index: u32,
     generation: u16,
@@ -224,7 +235,7 @@ pub fn publish_chunk(
         CrossyError::BadChunkState
     );
     require!(
-        chunk.day == day && chunk.chunk_index == chunk_index,
+        chunk.day == day && chunk.chunk_index == chunk_index && chunk.region == region,
         CrossyError::BadChunkState
     );
     require!(chunk.generation == generation, CrossyError::BadGeneration);
@@ -259,7 +270,7 @@ pub fn publish_chunk(
 pub struct ExtendFrontier<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
@@ -267,6 +278,7 @@ pub struct ExtendFrontier<'info> {
     #[account(
         seeds = [
             seeds::CHUNK,
+            &[world.region],
             &world.day.to_le_bytes(),
             &world.next_chunk_index.to_le_bytes(),
         ],
@@ -282,13 +294,14 @@ pub struct ExtendFrontier<'info> {
 pub struct MarkChunkReady<'info> {
     #[account(
         mut,
-        seeds = [seeds::WORLD, &[world.mode as u8], &world.day.to_le_bytes()],
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
         bump = world.bump,
     )]
     pub world: Box<Account<'info, WorldHeader>>,
     #[account(
         seeds = [
             seeds::CHUNK,
+            &[world.region],
             &world.day.to_le_bytes(),
             &chunk_index.to_le_bytes(),
         ],
@@ -313,6 +326,7 @@ pub fn mark_chunk_ready<'info>(
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
     require!(chunk.day == world.day, CrossyError::BadChunkState);
+    require!(chunk.region == world.region, CrossyError::BadChunkState);
     require!(chunk.chunk_index == chunk_index, CrossyError::BadChunkState);
     if chunk_index == 0 {
         require!(chunk.row_start == 0, CrossyError::BadChunkState);
@@ -372,6 +386,7 @@ pub fn extend_frontier(ctx: Context<ExtendFrontier>) -> Result<()> {
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
     require!(chunk.day == world.day, CrossyError::BadChunkState);
+    require!(chunk.region == world.region, CrossyError::BadChunkState);
     require!(
         world.ready_chunk_index == chunk.chunk_index
             && world.ready_chunk_hash == chunk.randomness_hash,
@@ -468,6 +483,7 @@ pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u32) -> Res
     let expected_world = Pubkey::find_program_address(
         &[
             seeds::WORLD,
+            &[committed.region],
             &[committed.mode as u8],
             &committed.day.to_le_bytes(),
         ],
@@ -485,6 +501,7 @@ pub fn init_sector(ctx: Context<InitSector>, sector_x: u8, sector_y: u32) -> Res
     let expected_chunk = Pubkey::find_program_address(
         &[
             seeds::CHUNK,
+            &[committed.region],
             &committed.day.to_le_bytes(),
             &chunk_index.to_le_bytes(),
         ],

@@ -1,5 +1,5 @@
 {
-  "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha",
+  "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx",
   "metadata": {
     "name": "crossy_world",
     "version": "0.1.0",
@@ -398,26 +398,7 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault",
@@ -468,37 +449,7 @@
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "wallet"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "wallet",
@@ -548,26 +499,7 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault",
@@ -1171,54 +1103,10 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "name": "vault_authority"
         },
         {
           "name": "vault",
@@ -1226,38 +1114,7 @@
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "contribution.wallet",
-                "account": "DailyContribution"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "wallet_token",
@@ -1290,26 +1147,7 @@
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1562,77 +1400,14 @@
         },
         {
           "name": "previous",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "previous.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "previous_vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "previous.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "name": "previous_vault_authority"
         },
         {
           "name": "previous_vault",
@@ -2134,6 +1909,12 @@
           }
         },
         {
+          "name": "world_account",
+          "docs": [
+            "delegation lands on the same rollup the world does."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2161,38 +1942,38 @@
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2274,7 +2055,7 @@
         },
         {
           "name": "owner_program",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegation_program",
@@ -2355,38 +2136,38 @@
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2468,7 +2249,7 @@
         },
         {
           "name": "owner_program",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegation_program",
@@ -2480,6 +2261,10 @@
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -2522,6 +2307,12 @@
           }
         },
         {
+          "name": "world_account",
+          "docs": [
+            "delegation lands on the same rollup the world does."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2549,38 +2340,38 @@
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2662,7 +2453,7 @@
         },
         {
           "name": "owner_program",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegation_program",
@@ -2716,6 +2507,12 @@
           }
         },
         {
+          "name": "world_account",
+          "docs": [
+            "cross-plane and validated against its own self-describing PDA."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2743,38 +2540,38 @@
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2856,7 +2653,7 @@
         },
         {
           "name": "owner_program",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegation_program",
@@ -2941,38 +2738,38 @@
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -3054,7 +2851,7 @@
         },
         {
           "name": "owner_program",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegation_program",
@@ -3066,6 +2863,10 @@
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "mode",
           "type": "u8"
@@ -3377,31 +3178,7 @@
           "name": "chunk",
           "docs": [
             "The next chunk, already revealed on base and read cross-plane here."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "WorldHeader"
-              },
-              {
-                "kind": "account",
-                "path": "world.next_chunk_index",
-                "account": "WorldHeader"
-              }
-            ]
-          }
+          ]
         },
         {
           "name": "signer",
@@ -3443,54 +3220,10 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "name": "vault_authority"
         },
         {
           "name": "vault",
@@ -3726,7 +3459,11 @@
           "name": "collection_authority"
         },
         {
-          "name": "validator"
+          "name": "validator",
+          "docs": [
+            "Further regions are added with `set_validator`, so a deployment starts",
+            "playable in one place rather than requiring every rollup up front."
+          ]
         },
         {
           "name": "admin",
@@ -4285,30 +4022,7 @@
           "writable": true
         },
         {
-          "name": "chunk",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "WorldHeader"
-              },
-              {
-                "kind": "arg",
-                "path": "chunk_index"
-              }
-            ]
-          }
+          "name": "chunk"
         },
         {
           "name": "signer",
@@ -4473,26 +4187,7 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "admin",
@@ -4534,91 +4229,17 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              }
-            ]
-          }
+          "name": "vault_authority"
         },
         {
           "name": "vault",
           "docs": [
             "Day vault token account owned by the vault authority PDA."
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  116,
-                  97
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "usdc_mint"
@@ -4636,34 +4257,7 @@
           "docs": [
             "The safe/spawn chunk (index 0) is deterministic — created revealed."
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  0,
-                  0,
-                  0,
-                  0
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "commit_payer"
@@ -4682,6 +4276,10 @@
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -4860,29 +4458,7 @@
         },
         {
           "name": "chunk",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunk_index"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": [
@@ -4894,6 +4470,10 @@
               32
             ]
           }
+        },
+        {
+          "name": "region",
+          "type": "u8"
         },
         {
           "name": "day",
@@ -4924,26 +4504,7 @@
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "receipt",
@@ -4954,38 +4515,7 @@
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "receipt.wallet",
-                "account": "PaymentReceipt"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -5005,26 +4535,7 @@
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "paid_world",
@@ -5225,54 +4736,10 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "name": "vault_authority"
         },
         {
           "name": "vault",
@@ -5338,29 +4805,7 @@
         },
         {
           "name": "chunk",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunk_index"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "payer",
@@ -5405,6 +4850,10 @@
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -5827,6 +5276,10 @@
       ],
       "args": [
         {
+          "name": "region",
+          "type": "u8"
+        },
+        {
           "name": "new_validator",
           "type": "pubkey"
         }
@@ -6242,26 +5695,7 @@
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "DailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "admin",
@@ -7300,141 +6734,146 @@
     },
     {
       "code": 6038,
+      "name": "RegionClosed",
+      "msg": "no validator is configured for this rollup region"
+    },
+    {
+      "code": 6039,
       "name": "DayVoided",
       "msg": "day is voided"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "Paused",
       "msg": "subsystem is paused"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "BadActionSequence",
       "msg": "duplicate or out-of-order action sequence"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "BadAttemptNonce",
       "msg": "attempt nonce mismatch"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "BadRunState",
       "msg": "run is not in the required state"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "WorldNotOpen",
       "msg": "world is not open"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "AttemptStillActive",
       "msg": "another attempt is still active for this wallet"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "TileOccupied",
       "msg": "destination tile is occupied"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "OutOfBounds",
       "msg": "destination is out of bounds"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "Blocked",
       "msg": "destination terrain is not traversable"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "WorldFull",
       "msg": "world is full"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "Cooldown",
       "msg": "cooldown has not elapsed"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "NoTarget",
       "msg": "no valid target"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "Immobilized",
       "msg": "player is stunned or immobilized"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "TooFast",
       "msg": "movement cadence exceeded for this slot"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "InvalidName",
       "msg": "Display name is empty, too long, or contains characters that cannot be shown"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "StaleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "LethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "EffectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "BadAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "FrontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "FrontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "WrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "BadGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "BadChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "NotReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6064,
+      "code": 6065,
       "name": "BadVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6065,
+      "code": 6066,
       "name": "CapacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -7941,6 +7380,14 @@
         "kind": "struct",
         "fields": [
           {
+            "name": "region",
+            "docs": [
+              "Rollup region; regions generate independent maps because a chunk can",
+              "only be delegated to one validator at a time."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "day",
             "type": "u64"
           },
@@ -8320,6 +7767,13 @@
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "region",
+            "docs": [
+              "Rollup region; each region runs an independent competition and pot."
+            ],
+            "type": "u8"
+          },
           {
             "name": "day",
             "type": "u64"
@@ -8860,11 +8314,21 @@
             "type": "pubkey"
           },
           {
-            "name": "validator",
+            "name": "validators",
             "docs": [
-              "MagicBlock validator that must host every delegated gameplay account."
+              "MagicBlock validator per region; `Pubkey::default()` = region closed.",
+              "",
+              "Indexed by the region id in the world PDA, so a world can only ever be",
+              "delegated to the validator its own region names. A single field would",
+              "have let any world land on any rollup, which is how a European world",
+              "ends up hosted in Singapore and the whole point is lost."
             ],
-            "type": "pubkey"
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
           },
           {
             "name": "pause_flags",
@@ -10348,6 +9812,10 @@
         "kind": "struct",
         "fields": [
           {
+            "name": "region",
+            "type": "u8"
+          },
+          {
             "name": "previous",
             "type": "pubkey"
           },
@@ -10502,6 +9970,13 @@
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "region",
+            "docs": [
+              "Rollup region this world runs on; part of its own PDA seeds."
+            ],
+            "type": "u8"
+          },
           {
             "name": "day",
             "type": "u64"

@@ -17,11 +17,12 @@ use crate::state::{ChunkDefinition, PlayerRun, WorldHeader};
 
 pub fn read_committed_chunk(
     account: &AccountInfo,
+    region: u8,
     day: u64,
     chunk_index: u32,
 ) -> Result<ChunkDefinition> {
     let (expected, _) = Pubkey::find_program_address(
-        &[seeds::CHUNK, &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        &[seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
         &crate::ID,
     );
     require_keys_eq!(*account.key, expected, CrossyError::NotReconcilable);

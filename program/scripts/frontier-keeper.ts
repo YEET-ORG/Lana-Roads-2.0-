@@ -31,11 +31,28 @@ import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
 import { assignPendingPulls } from "./assign-pulls";
 
-const PROGRAM_ID = new web3.PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
-const ER_RPC = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+/**
+ * Rollup region. Each region runs its own world, pot and map, so this
+ * selects which game the script is talking about — not just a transport.
+ */
+const REGION = Number(process.env.REGION ?? 0);
+/** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
+const REGION_RPC = [
+  "https://devnet-as.magicblock.app",
+  "https://devnet-eu.magicblock.app",
+  "https://devnet-us.magicblock.app",
+];
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
+const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
 const VALIDATOR = new web3.PublicKey(
-  process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
 );
 const VRF_BASE_QUEUE = new web3.PublicKey(
   process.env.VRF_BASE_QUEUE ?? "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
@@ -83,8 +100,9 @@ const pda = (...seeds: Buffer[]) =>
 
 const configPda = () => pda(S.config);
 const worldPda = (mode: number, day: bigint) =>
-  pda(S.world, Buffer.from([mode]), le8(day));
-const chunkPda = (day: bigint, index: number) => pda(S.chunk, le8(day), le4(index));
+  pda(S.world, Buffer.from([REGION]), Buffer.from([mode]), le8(day));
+const chunkPda = (day: bigint, index: number) =>
+  pda(S.chunk, Buffer.from([REGION]), le8(day), le4(index));
 const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
   pda(S.sector, world.toBuffer(), Buffer.from([sx]), le4(sy));
 
@@ -158,9 +176,9 @@ async function main() {
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
   log("keeper", keeper.publicKey.toBase58());
   log("vrf_queue", VRF_BASE_QUEUE.toBase58());
-  if (!cfg.validator.equals(VALIDATOR)) {
+  if (!cfg.validators[REGION].equals(VALIDATOR)) {
     throw new Error(
-      `config.validator is ${cfg.validator.toBase58()} but keeper targets ` +
+      `config.validators[${REGION}] is ${cfg.validators[REGION].toBase58()} but keeper targets ` +
         VALIDATOR.toBase58(),
     );
   }
@@ -478,7 +496,7 @@ async function main() {
     if (retryDue) {
       const sig = await withRetry(`request chunk ${index}`, () =>
         baseProgram.methods
-          .requestChunk(new BN(day.toString()), index)
+          .requestChunk(REGION, new BN(day.toString()), index)
           .accountsPartial({
             config: configPda(),
             world,
@@ -564,6 +582,7 @@ async function main() {
               .delegateSector(world, sx, sy)
               .accountsPartial({
                 config: configPda(),
+                worldAccount: world,
                 payer: keeper.publicKey,
                 pda: sectorPda(world, sx, sy),
               })
@@ -588,7 +607,7 @@ async function main() {
     if (info.owner.equals(PROGRAM_ID)) {
       await withRetry(`delegate chunk ${index}`, () =>
         baseProgram.methods
-          .delegateChunk(new BN(day.toString()), index)
+          .delegateChunk(REGION, new BN(day.toString()), index)
           .accountsPartial({ config: configPda(), payer: keeper.publicKey, pda: chunk })
           .rpc(),
       );

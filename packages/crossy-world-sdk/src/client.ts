@@ -52,6 +52,16 @@ export interface CrossyClientOptions {
    * WS binds to an arbitrary ER, so it is only used for resolution).
    */
   routerUrl?: string;
+  /**
+   * Rollup region this client plays in. Defaults to 0.
+   *
+   * A world is delegated to exactly one validator, so a region is not a
+   * preference layered over a shared game — it selects WHICH world, pot and
+   * leaderboard you are in. Every region-scoped PDA below reads it, which is
+   * why it lives on the client rather than being threaded through forty call
+   * signatures that would all have to agree.
+   */
+  region?: number;
   wallet: WalletSigner;
 }
 
@@ -214,6 +224,8 @@ export class CrossyClient {
   readonly wallet: WalletSigner;
   readonly validator?: PublicKey;
   readonly routerUrl?: string;
+  /** Rollup region this client plays in; see `CrossyClientOptions.region`. */
+  region: number;
   /** Account subscriptions on the active ER connection. */
   subscriptions: SubscriptionHub;
   /** Immutable map chunks remain on base and use its websocket. */
@@ -227,6 +239,7 @@ export class CrossyClient {
     this.wallet = opts.wallet;
     this.validator = opts.validator;
     this.routerUrl = opts.routerUrl;
+    this.region = opts.region ?? 0;
     const baseProvider = new anchor.AnchorProvider(
       this.connection,
       opts.wallet as anchor.Wallet,
@@ -468,11 +481,11 @@ export class CrossyClient {
   }
 
   async getDaily(day: bigint) {
-    return this.program.account.dailyCompetition.fetch(pda.daily(day));
+    return this.program.account.dailyCompetition.fetch(pda.daily(this.region, day));
   }
 
   async getWorld(mode: WorldMode, day: bigint) {
-    return this.erProgram.account.worldHeader.fetch(pda.world(mode, day));
+    return this.erProgram.account.worldHeader.fetch(pda.world(this.region, mode, day));
   }
 
   /**
@@ -483,7 +496,7 @@ export class CrossyClient {
    * all. A screen that shows past days has to ask both.
    */
   async getWorldAnywhere(mode: WorldMode, day: bigint) {
-    const address = pda.world(mode, day);
+    const address = pda.world(this.region, mode, day);
     const live = await this.erProgram.account.worldHeader
       .fetchNullable(address)
       .catch(() => null);
@@ -693,7 +706,7 @@ export class CrossyClient {
   async getChunk(day: bigint, chunkIndex: number) {
     // Visible chunks are delegated with the live world, so map bootstrap has
     // one authoritative low-latency source.
-    const address = pda.chunk(day, chunkIndex);
+    const address = pda.chunk(this.region, day, chunkIndex);
     const er = await this.erProgram.account.chunkDefinition
       .fetchNullable(address)
       .catch(() => null);
@@ -739,7 +752,7 @@ export class CrossyClient {
       throw new Error("invalid first chunk index");
     if (!Number.isInteger(count) || count < 0) throw new Error("invalid chunk count");
     const addresses = Array.from({ length: count }, (_, offset) =>
-      pda.chunk(day, fromIndex + offset),
+      pda.chunk(this.region, day, fromIndex + offset),
     );
     const chunks: Array<any | null> = [];
     for (let start = 0; start < addresses.length; start += 100) {
@@ -797,7 +810,7 @@ export class CrossyClient {
     chunkIndex: number,
     onChunk: (chunk: any, slot: number) => void,
   ): () => void {
-    return this.baseSubscriptions.onAccount(pda.chunk(day, chunkIndex), (info, slot) => {
+    return this.baseSubscriptions.onAccount(pda.chunk(this.region, day, chunkIndex), (info, slot) => {
       try {
         const chunk = this.program.coder.accounts.decode(
           "chunkDefinition",
@@ -1035,7 +1048,7 @@ export class CrossyClient {
     sessionExpiry: number;
   }): Promise<TransactionReview & { attemptNonce: number }> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(WorldMode.Paid, params.day);
+    const world = pda.world(this.region, WorldMode.Paid, params.day);
     const runAddr = pda.run(world, wallet);
     const instructions: TransactionInstruction[] = [];
 
@@ -1086,20 +1099,20 @@ export class CrossyClient {
         .instruction(),
     );
 
-    const daily = pda.daily(params.day);
+    const daily = pda.daily(this.region, params.day);
     instructions.push(
       await this.program.methods
         .beginPaidAttempt()
         .accountsPartial({
           config: pda.config(),
           daily,
-          vault: pda.dailyVault(params.day),
+          vault: pda.dailyVault(this.region, params.day),
           profile: pda.profile(wallet),
           run: runAddr,
           payerToken: params.payerToken,
           usdcMint: params.usdcMint,
-          receipt: pda.receipt(ReceiptKind.Entry, params.day, wallet, receiptNonce),
-          contribution: pda.contribution(params.day, wallet),
+          receipt: pda.receipt(ReceiptKind.Entry, this.region, params.day, wallet, receiptNonce),
+          contribution: pda.contribution(this.region, params.day, wallet),
           wallet,
           tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
         })
@@ -1111,7 +1124,7 @@ export class CrossyClient {
       usdcTransfers: [
         {
           from: params.payerToken.toBase58(),
-          to: pda.dailyVault(params.day).toBase58(),
+          to: pda.dailyVault(this.region, params.day).toBase58(),
           amount: ENTRY_PRICE,
         },
       ],
@@ -1142,10 +1155,10 @@ export class CrossyClient {
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
     const mode = params.mode ?? WorldMode.Paid;
-    const world = pda.world(mode, params.day);
+    const world = pda.world(this.region, mode, params.day);
     const receipt =
       mode === WorldMode.Paid
-        ? pda.receipt(ReceiptKind.Entry, params.day, wallet, params.receiptNonce)
+        ? pda.receipt(ReceiptKind.Entry, this.region, params.day, wallet, params.receiptNonce)
         : world;
     const builder = this.erProgram.methods
       .spawn(params.attemptNonce)
@@ -1174,20 +1187,19 @@ export class CrossyClient {
     kind: ReceiptKind;
     receiptNonce: number;
   }): Promise<string> {
-    const world = pda.world(WorldMode.Paid, params.day);
+    const world = pda.world(this.region, WorldMode.Paid, params.day);
     return this.track("Receipt", "base", () =>
       this.program.methods
         .reconcileReceipt()
         .accountsPartial({
-          daily: pda.daily(params.day),
-          receipt: pda.receipt(
-            params.kind,
+          daily: pda.daily(this.region, params.day),
+          receipt: pda.receipt(params.kind, this.region,
             params.day,
             params.wallet,
             params.receiptNonce,
           ),
           run: pda.run(world, params.wallet),
-          contribution: pda.contribution(params.day, params.wallet),
+          contribution: pda.contribution(this.region, params.day, params.wallet),
         })
         .rpc(),
     );
@@ -1219,7 +1231,7 @@ export class CrossyClient {
     sessionExpiry: number;
   }): Promise<{ attemptNonce: number; sessionRotation?: number }> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(WorldMode.Casual, params.day);
+    const world = pda.world(this.region, WorldMode.Casual, params.day);
     const runAddr = pda.run(world, wallet);
     const bestAddr = pda.best(world, wallet);
 
@@ -1275,11 +1287,24 @@ export class CrossyClient {
       instructions.push(
         await this.program.methods
           .delegateRun(world, wallet)
-          .accountsPartial({ config: pda.config(), payer: wallet, pda: runAddr })
+          // The world is read on chain to decide which rollup this run is
+          // delegated to; a run on a different validator than its world is an
+          // account nobody can play.
+          .accountsPartial({
+            config: pda.config(),
+            worldAccount: world,
+            payer: wallet,
+            pda: runAddr,
+          })
           .instruction(),
         await this.program.methods
           .delegateBest(world, wallet)
-          .accountsPartial({ config: pda.config(), payer: wallet, pda: bestAddr })
+          .accountsPartial({
+            config: pda.config(),
+            worldAccount: world,
+            payer: wallet,
+            pda: bestAddr,
+          })
           .instruction(),
       );
     }
@@ -1309,7 +1334,7 @@ export class CrossyClient {
     deathNonce: number;
     deadline: number;
   } | null> {
-    const world = pda.world(WorldMode.Paid, day);
+    const world = pda.world(this.region, WorldMode.Paid, day);
     const run = await this.getRun(world);
     if (!run || !("deadAwaitingRevive" in (run.state as object))) return null;
     const price = revivePrice(run.successfulRevives);
@@ -1331,18 +1356,18 @@ export class CrossyClient {
     if (!quote) throw new Error("run is not awaiting revival");
     const profile = await this.getProfile();
     const receiptNonce = profile?.receiptCount ?? 0;
-    const world = pda.world(WorldMode.Paid, params.day);
+    const world = pda.world(this.region, WorldMode.Paid, params.day);
     const ix = await this.program.methods
       .beginRevive()
       .accountsPartial({
         config: pda.config(),
-        daily: pda.daily(params.day),
-        vault: pda.dailyVault(params.day),
+        daily: pda.daily(this.region, params.day),
+        vault: pda.dailyVault(this.region, params.day),
         profile: pda.profile(wallet),
         run: pda.run(world, wallet),
         payerToken: params.payerToken,
         usdcMint: params.usdcMint,
-        receipt: pda.receipt(ReceiptKind.Revival, params.day, wallet, receiptNonce),
+        receipt: pda.receipt(ReceiptKind.Revival, this.region, params.day, wallet, receiptNonce),
         wallet,
         tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
       })
@@ -1352,7 +1377,7 @@ export class CrossyClient {
       usdcTransfers: [
         {
           from: params.payerToken.toBase58(),
-          to: pda.dailyVault(params.day).toBase58(),
+          to: pda.dailyVault(this.region, params.day).toBase58(),
           amount: quote.price,
         },
       ],
@@ -1373,13 +1398,13 @@ export class CrossyClient {
     session?: Keypair;
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(WorldMode.Paid, params.day);
+    const world = pda.world(this.region, WorldMode.Paid, params.day);
     const run = await this.getRun(world);
     if (!run) throw new Error("run missing");
     const builder = this.erProgram.methods.completeRevive().accountsPartial({
       world,
       run: pda.run(world, wallet),
-      receipt: pda.receipt(ReceiptKind.Revival, params.day, wallet, params.receiptNonce),
+      receipt: pda.receipt(ReceiptKind.Revival, this.region, params.day, wallet, params.receiptNonce),
       safeSector: sectorForTile(world, run.safeX, run.safeY),
       signer: params.session?.publicKey ?? wallet,
     });
@@ -1397,7 +1422,7 @@ export class CrossyClient {
     session: Keypair;
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     const run = await this.getRun(world);
     if (!run) throw new Error("run missing");
     let [nx, ny] = [run.x, run.y];
@@ -1424,7 +1449,7 @@ export class CrossyClient {
         run: pda.run(world, wallet),
         sourceSector: src,
         destSector: dst.equals(src) ? null : dst,
-        chunk: pda.chunk(params.day, chunkIndex),
+        chunk: pda.chunk(this.region, params.day, chunkIndex),
         best: pda.best(world, wallet),
         signer: params.session.publicKey,
       })
@@ -1440,7 +1465,7 @@ export class CrossyClient {
     session: Keypair;
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     const run = await this.getRun(world);
     const target = await this.getRun(world, params.targetWallet);
     if (!run || !target) throw new Error("run missing");
@@ -1465,7 +1490,7 @@ export class CrossyClient {
         target: pda.run(world, params.targetWallet),
         targetSector,
         destSector: destSector.equals(targetSector) ? null : destSector,
-        chunk: pda.chunk(params.day, Math.floor(Math.max(0, dy) / 16)),
+        chunk: pda.chunk(this.region, params.day, Math.floor(Math.max(0, dy) / 16)),
         signer: params.session.publicKey,
       })
       .signers([params.session])
@@ -1474,7 +1499,7 @@ export class CrossyClient {
 
   /** Propagate a record-beating score into the world header. */
   async claimRecord(day: bigint, mode: WorldMode = WorldMode.Paid): Promise<string> {
-    const world = pda.world(mode, day);
+    const world = pda.world(this.region, mode, day);
     return this.erProgram.methods
       .claimRecord()
       .accountsPartial({ world, best: pda.best(world, this.wallet.publicKey) })
@@ -1556,7 +1581,7 @@ export class CrossyClient {
     actionSeq: number;
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     let [nx, ny] = [params.x, params.y];
     if (params.direction === Direction.Forward) ny += 1;
     else if (params.direction === Direction.Backward) ny -= 1;
@@ -1577,7 +1602,7 @@ export class CrossyClient {
         run: pda.run(world, wallet),
         sourceSector: src,
         destSector: dst.equals(src) ? null : dst,
-        chunk: pda.chunk(params.day, Math.floor(ny / 16)),
+        chunk: pda.chunk(this.region, params.day, Math.floor(ny / 16)),
         best: pda.best(world, wallet),
         signer: params.session.publicKey,
       })
@@ -1614,7 +1639,7 @@ export class CrossyClient {
     target?: { wallet: PublicKey; x: number; y: number };
   }): Promise<string> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     // Knockback destination: one tile beyond the target, same direction.
     // Without a target the program is handed nothing to displace and simply
     // burns the swing, so the client never has to be sure a target is there.
@@ -1637,7 +1662,7 @@ export class CrossyClient {
           target: pda.run(world, params.target.wallet),
           targetSector,
           destSector: destSector.equals(targetSector) ? null : destSector,
-          chunk: pda.chunk(params.day, Math.floor(dy / 16)),
+          chunk: pda.chunk(this.region, params.day, Math.floor(dy / 16)),
         };
       }
     }
@@ -1698,7 +1723,7 @@ export class CrossyClient {
     ownedRotation?: number;
   }): Promise<SessionClaim> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     const runAddr = pda.run(world, wallet);
     const run = await this.erProgram.account.playerRun
       .fetchNullable(runAddr)
@@ -1742,7 +1767,7 @@ export class CrossyClient {
    */
   async endSession(params: { day: bigint; mode?: WorldMode }): Promise<boolean> {
     const wallet = this.wallet.publicKey;
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     const runAddr = pda.run(world, wallet);
     const run = await this.erProgram.account.playerRun
       .fetchNullable(runAddr)
@@ -1768,7 +1793,7 @@ export class CrossyClient {
     mode?: WorldMode;
     session: Keypair;
   }): Promise<string> {
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     const ix = await this.erProgram.methods
       .claimRecord()
       .accountsPartial({ world, best: pda.best(world, this.wallet.publicKey) })
@@ -1802,7 +1827,7 @@ export class CrossyClient {
     /** +1 / -1 when standing on a river, so a log can carry the player. */
     driftDirection?: number;
   }): Promise<string> {
-    const world = pda.world(params.mode ?? WorldMode.Paid, params.day);
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
     // A river carries the player downstream, by as many tiles as the log
     // moved since it last checked — so hand over the sector at the far end
     // of the longest carry it could make. Together with the player's own
@@ -1818,7 +1843,7 @@ export class CrossyClient {
         run: pda.run(world, params.wallet ?? this.wallet.publicKey),
         sector,
         driftSector: driftSector.equals(sector) ? null : driftSector,
-        chunk: pda.chunk(params.day, Math.floor(params.y / 16)),
+        chunk: pda.chunk(this.region, params.day, Math.floor(params.y / 16)),
       })
       .instruction();
     const tx = new anchor.web3.Transaction().add(ix);

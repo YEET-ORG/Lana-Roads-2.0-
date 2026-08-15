@@ -36,7 +36,7 @@ import idlJson from "../target/idl/crossy_world.json";
 
 process.env.BPF_OUT_DIR = process.env.BPF_OUT_DIR ?? `${process.cwd()}/target/deploy`;
 
-const PROGRAM_ID = new PublicKey("AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha");
+const PROGRAM_ID = new PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
 const S = {
   config: Buffer.from("config"),
   season: Buffer.from("season"),
@@ -120,7 +120,7 @@ describe("crossy-world compressed-clock lifecycle (bankrun)", () => {
   const lockPda = (world: PublicKey, w: PublicKey, attempt: number) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(attempt));
   const receiptPda = (kind: number, day: bigint, w: PublicKey, nonce: number) =>
-    pda(S.payment, Buffer.from([kind]), le64(day), w.toBuffer(), le32(nonce));
+    pda(S.payment, Buffer.from([kind]), Buffer.from([0]), le64(day), w.toBuffer(), le32(nonce));
 
   const dayPdas = (day: bigint) => ({
     daily: pda(S.daily, le64(day)),
@@ -316,7 +316,7 @@ describe("crossy-world compressed-clock lifecycle (bankrun)", () => {
     await send(
       [
         await program.methods
-          .prepareDay(new BN(day.toString()))
+          .prepareDay(0, new BN(day.toString()))
           .accountsPartial({
             config: configPda,
             daily: d.daily,

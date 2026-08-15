@@ -144,7 +144,7 @@ export function GameScreen({
   /** No gameplay listener may attach until the router has selected one ER. */
   const [erReady, setErReady] = useState(!boot.client.routerUrl);
   const settings = useSettings();
-  const world = pda.world(route.mode, route.day);
+  const world = pda.world(boot.client.region, route.mode, route.day);
 
   // Resolve the authoritative ER before subscribing, reading a run, or
   // sending an action. This used to race the live-state effect: that effect

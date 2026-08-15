@@ -68,7 +68,7 @@ export function LeaderboardSheet({
   const me = boot.wallet.publicKey.toBase58();
 
   const load = useCallback(async () => {
-    const world = pda.world(mode, day);
+    const world = pda.world(boot.client.region, mode, day);
     try {
       const [board, header, daily] = await Promise.all([
         boot.client.leaderboard(world),

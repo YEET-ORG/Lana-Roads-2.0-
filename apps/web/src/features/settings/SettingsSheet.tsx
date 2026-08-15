@@ -6,8 +6,7 @@
  * a settings screen is not a shield, so the sheet says so rather than
  * pretending otherwise.
  */
-import { useEffect, useState } from "react";
-import type { ErRoute } from "@crossy-world/sdk";
+import { useState } from "react";
 import { Button, Notice, Sheet } from "../../design-system";
 import type { Bootstrapped } from "../../lib/client";
 import {
@@ -18,6 +17,12 @@ import {
   type ToastMode,
 } from "../../lib/settings";
 import { sfx } from "../../game/audio";
+import {
+  clearRegionProbe,
+  lastProbe,
+  OPEN_REGIONS,
+  regionById,
+} from "../../lib/regions";
 
 /** One row: a label, an explanation, and a set of mutually exclusive picks. */
 function Choice<T extends string | number | boolean>({
@@ -58,12 +63,6 @@ function Choice<T extends string | number | boolean>({
   );
 }
 
-/** "https://devnet-as.magicblock.app/" -> "as" */
-function hostTag(fqdn: string): string {
-  const host = fqdn.replace(/^https?:\/\//, "").split(/[./]/)[0] ?? fqdn;
-  return host.replace(/^devnet-/, "");
-}
-
 const ON_OFF = [
   { value: true, label: "On" },
   { value: false, label: "Off" },
@@ -77,22 +76,9 @@ export function SettingsSheet({
   onClose: () => void;
 }) {
   const s = useSettings();
-  const [routes, setRoutes] = useState<ErRoute[] | null>(null);
   const [regionChanged, setRegionChanged] = useState(false);
-
-  // The rollup directory is live: which regions exist is the router's
-  // answer, not a list baked into this build.
-  useEffect(() => {
-    if (!boot?.client.routerUrl) return;
-    let live = true;
-    boot.client
-      .getRoutes()
-      .then((r) => live && setRoutes(r))
-      .catch(() => live && setRoutes([]));
-    return () => {
-      live = false;
-    };
-  }, [boot]);
+  // Last latency probe, for showing the player what "Auto" actually decided.
+  const probe = lastProbe();
 
   const set =
     <K extends keyof Settings>(k: K) =>
@@ -185,21 +171,20 @@ export function SettingsSheet({
       <h3 className="setting-group">Connection</h3>
       <div className="setting">
         <div className="setting__text">
-          <span className="setting__label">Rollup region</span>
+          <span className="setting__label">Region</span>
           <span className="setting__hint">
-            Every move is answered by an ephemeral rollup. The nearest one is the fastest
-            — but a world lives on exactly one, so pinning the wrong region means playing
-            alone.
+            Each region runs its own world on its own rollup. Playing in the nearest one
+            is the difference between a move landing in 80 ms and 280 ms — but it also
+            decides who you play with and which prize pot you play for. Auto measures the
+            round trip and picks the nearest.
           </span>
         </div>
         <div className="setting__choices setting__choices--wrap">
           {[
             { value: "auto", label: "Auto" },
-            // Two rollups can share a country, so the country code alone is
-            // an ambiguous label. The host name is what distinguishes them.
-            ...(routes ?? []).map((r) => ({
-              value: r.fqdn,
-              label: `${r.countryCode} · ${hostTag(r.fqdn)}`,
+            ...OPEN_REGIONS.map((r) => ({
+              value: String(r.id),
+              label: `${r.label} · ${r.place}`,
             })),
           ].map((o) => (
             <button
@@ -208,6 +193,10 @@ export function SettingsSheet({
               aria-pressed={o.value === s.region}
               onClick={() => {
                 sfx.click();
+                // A pin must not be silently overridden by yesterday's
+                // measurement, and switching back to Auto should measure
+                // again rather than trust a probe taken elsewhere.
+                clearRegionProbe();
                 setSetting("region", o.value);
                 setRegionChanged(true);
               }}
@@ -215,13 +204,22 @@ export function SettingsSheet({
               {o.label}
             </button>
           ))}
-          {routes == null && <span className="setting__hint">loading regions…</span>}
         </div>
+        {boot && (
+          <p className="setting__hint">
+            Playing in {regionById(boot.region).label} ({regionById(boot.region).place})
+            {probe?.pings
+              ? ` — measured ${Object.entries(probe.pings)
+                  .map(([k, v]) => `${k} ${Math.round(v)}ms`)
+                  .join(", ")}`
+              : ""}
+          </p>
+        )}
       </div>
       {regionChanged && (
         <Notice tone="warn">
-          The region applies on reload — the client holds one connection for the whole
-          session.
+          The region applies on reload — it selects the world, so the client rebuilds
+          around it.
           <div className="row">
             <Button variant="info" onClick={() => window.location.reload()}>
               Reload now

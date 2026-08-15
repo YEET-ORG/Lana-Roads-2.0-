@@ -21,8 +21,25 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const PROGRAM_ID = new web3.PublicKey(
-  "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha",
+  "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx",
 );
+/**
+ * Rollup region. Each region runs its own world, pot and map, so this
+ * selects which game the script is talking about — not just a transport.
+ */
+const REGION = Number(process.env.REGION ?? 0);
+/** Region id -> the rollup that hosts it. Must match apps/web/src/lib/regions.ts. */
+const REGION_RPC = [
+  "https://devnet-as.magicblock.app",
+  "https://devnet-eu.magicblock.app",
+  "https://devnet-us.magicblock.app",
+];
+const REGION_VALIDATOR = [
+  "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+  "MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e",
+  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd",
+];
+
 const DELEGATION_PROGRAM = new web3.PublicKey(
   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
 );
@@ -47,10 +64,10 @@ const pda = (...s: (Buffer | Uint8Array)[]) =>
   web3.PublicKey.findProgramAddressSync(s as Buffer[], PROGRAM_ID)[0];
 
 export const worldPda = (mode: number, day: bigint) =>
-  pda(Buffer.from("world"), Buffer.from([mode]), le8(day));
-export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), le8(day));
+  pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([mode]), le8(day));
+export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
 export const chunkPda = (day: bigint, index: number) =>
-  pda(Buffer.from("chunk"), le8(day), le4(index));
+  pda(Buffer.from("chunk"), Buffer.from([REGION]), le8(day), le4(index));
 export const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
   pda(Buffer.from("sector"), world.toBuffer(), Buffer.from([sx]), le4(sy));
 
@@ -126,10 +143,18 @@ export async function ensureDayReady(opts: {
         `${admin.publicKey.toBase58()}; day setup is admin-only`,
     );
   }
-  if (!config.validator.equals(validator)) {
+  // Each region names its own validator, so a mismatch here means this
+  // script and the chain disagree about where region REGION actually runs.
+  const configured = config.validators?.[REGION];
+  if (!configured || configured.equals(web3.PublicKey.default)) {
     throw new Error(
-      `config.validator is ${config.validator.toBase58()} but setup targets ` +
-        validator.toBase58(),
+      `region ${REGION} has no validator configured; run scripts/bootstrap.ts`,
+    );
+  }
+  if (!configured.equals(validator)) {
+    throw new Error(
+      `config.validators[${REGION}] is ${configured.toBase58()} but setup ` +
+        `targets ${validator.toBase58()}`,
     );
   }
 
@@ -138,12 +163,12 @@ export async function ensureDayReady(opts: {
     log(`day ${day}: preparing (daily + both worlds + spawn chunk)`);
     await withRetry("prepare_day", () =>
       baseProgram.methods
-      .prepareDay(new BN(day.toString()))
+      .prepareDay(REGION, new BN(day.toString()))
       .accountsPartial({
         config: pda(Buffer.from("config")),
         daily,
-        vaultAuthority: pda(Buffer.from("daily_vault"), le8(day)),
-        vault: pda(Buffer.from("daily_vault"), le8(day), Buffer.from("ata")),
+        vaultAuthority: pda(Buffer.from("daily_vault"), Buffer.from([REGION]), le8(day)),
+        vault: pda(Buffer.from("daily_vault"), Buffer.from([REGION]), le8(day), Buffer.from("ata")),
         usdcMint: config.usdcMint,
         paidWorld: worldPda(0, day),
         casualWorld: worldPda(1, day),
@@ -201,7 +226,7 @@ export async function ensureDayReady(opts: {
       log(`  mode ${mode}: delegating the world`);
       await withRetry("delegate_world", () =>
         baseProgram.methods
-          .delegateWorld(mode, new BN(day.toString()))
+          .delegateWorld(REGION, mode, new BN(day.toString()))
           .accountsPartial({
             config: pda(Buffer.from("config")),
             payer: admin.publicKey,
@@ -234,6 +259,7 @@ export async function ensureDayReady(opts: {
               .delegateSector(world, sx, sy)
               .accountsPartial({
                 config: pda(Buffer.from("config")),
+                worldAccount: world,
                 payer: admin.publicKey,
                 pda: sectorPda(world, sx, sy),
               })
@@ -260,7 +286,7 @@ export async function ensureDayReady(opts: {
     if (chunkInfo?.owner.equals(PROGRAM_ID)) {
       await withRetry("delegate spawn chunk", () =>
         baseProgram.methods
-          .delegateChunk(new BN(day.toString()), 0)
+          .delegateChunk(REGION, new BN(day.toString()), 0)
           .accountsPartial({
             config: pda(Buffer.from("config")),
             payer: admin.publicKey,
@@ -348,7 +374,7 @@ export function loadKeypair(path: string) {
 async function main() {
   const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
   const validator = new web3.PublicKey(
-    process.env.VALIDATOR ?? "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+    process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
   );
   const admin = loadKeypair(
     process.env.ADMIN_KEYPAIR ?? `${process.env.HOME}/.config/solana/id.json`,
@@ -366,7 +392,10 @@ async function main() {
       { commitment: "confirmed" },
     ),
   ) as Program<any>;
-  const erRpc = process.env.ER_RPC ?? "https://devnet-as.magicblock.app";
+  // The world is delegated to THIS region's validator, so the ER calls
+  // below have to go to that region's rollup. Talking to the wrong one
+  // finds no world at all and reports it as an opaque send failure.
+  const erRpc = process.env.ER_RPC ?? REGION_RPC[REGION];
   const erProgram = new Program(
     idl,
     new anchor.AnchorProvider(

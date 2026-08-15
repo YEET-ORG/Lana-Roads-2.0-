@@ -114,7 +114,7 @@ describe("crossy-world lifecycle", () => {
   const lockPda = (world: web3.PublicKey, w: web3.PublicKey, attempt: number) =>
     pda(S.agentLock, world.toBuffer(), w.toBuffer(), le32(attempt));
   const receiptPda = (kind: number, day: number, w: web3.PublicKey, nonce: number) =>
-    pda(S.payment, Buffer.from([kind]), le64(day), w.toBuffer(), le32(nonce));
+    pda(S.payment, Buffer.from([kind]), Buffer.from([0]), le64(day), w.toBuffer(), le32(nonce));
 
   async function airdrop(to: web3.PublicKey, sol = 10) {
     const sig = await conn.requestAirdrop(to, sol * web3.LAMPORTS_PER_SOL);
@@ -448,7 +448,7 @@ describe("crossy-world lifecycle", () => {
     spawnChunk = pda(S.chunk, le64(day), le32(0));
 
     await program.methods
-      .prepareDay(new BN(day))
+      .prepareDay(0, new BN(day))
       .accountsPartial({
         config: configPda,
         daily: dailyPda,

@@ -42,7 +42,9 @@ pub struct InitializeConfig<'info> {
     pub collection: UncheckedAccount<'info>,
     /// CHECK: collection update / mint authority (program PDA or ops key).
     pub collection_authority: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock validator identity pinned for all delegation CPIs.
+    /// CHECK: MagicBlock validator for region 0, the first region opened.
+    /// Further regions are added with `set_validator`, so a deployment starts
+    /// playable in one place rather than requiring every rollup up front.
     pub validator: UncheckedAccount<'info>,
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -95,7 +97,8 @@ pub fn initialize_config(
     config.team_treasury = ctx.accounts.team_treasury.key();
     config.collection = ctx.accounts.collection.key();
     config.collection_authority = ctx.accounts.collection_authority.key();
-    config.validator = ctx.accounts.validator.key();
+    config.validators = [Pubkey::default(); crate::constants::MAX_REGIONS];
+    config.validators[0] = ctx.accounts.validator.key();
     config.pause_flags = 0;
     config.winner_bps = WINNER_BPS;
     config.team_bps = TEAM_BPS;
@@ -109,7 +112,7 @@ pub fn initialize_config(
         usdc_mint: config.usdc_mint,
         treasury: config.team_treasury,
         collection: config.collection,
-        validator: config.validator,
+        validator: config.validators[0],
     });
     Ok(())
 }
@@ -169,14 +172,22 @@ pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     Ok(())
 }
 
-pub fn set_validator(ctx: Context<AdminOnly>, new_validator: Pubkey) -> Result<()> {
+pub fn set_validator(ctx: Context<AdminOnly>, region: u8, new_validator: Pubkey) -> Result<()> {
+    require!(
+        crate::constants::is_valid_region(region),
+        CrossyError::RegionClosed
+    );
+    // Closing a region is deliberate and separate: clearing a validator
+    // while its worlds are delegated would strand them, so `set_validator`
+    // only ever points a region somewhere real.
     require!(
         new_validator != Pubkey::default(),
         CrossyError::NotReconcilable
     );
-    let previous = ctx.accounts.config.validator;
-    ctx.accounts.config.validator = new_validator;
+    let previous = ctx.accounts.config.validators[region as usize];
+    ctx.accounts.config.validators[region as usize] = new_validator;
     emit!(ValidatorChanged {
+        region,
         previous,
         validator: new_validator,
     });

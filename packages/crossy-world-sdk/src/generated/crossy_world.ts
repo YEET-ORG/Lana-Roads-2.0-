@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/crossy_world.json`.
  */
 export type CrossyWorld = {
-  "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha",
+  "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx",
   "metadata": {
     "name": "crossyWorld",
     "version": "0.1.0",
@@ -404,26 +404,7 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault",
@@ -474,37 +455,7 @@ export type CrossyWorld = {
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "wallet"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "wallet",
@@ -554,26 +505,7 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault",
@@ -1177,54 +1109,10 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "name": "vaultAuthority"
         },
         {
           "name": "vault",
@@ -1232,38 +1120,7 @@ export type CrossyWorld = {
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "contribution.wallet",
-                "account": "dailyContribution"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "walletToken",
@@ -1296,26 +1153,7 @@ export type CrossyWorld = {
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1568,77 +1406,14 @@ export type CrossyWorld = {
         },
         {
           "name": "previous",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "previous.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "previousVaultAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "previous.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "name": "previousVaultAuthority"
         },
         {
           "name": "previousVault",
@@ -2140,6 +1915,12 @@ export type CrossyWorld = {
           }
         },
         {
+          "name": "worldAccount",
+          "docs": [
+            "delegation lands on the same rollup the world does."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2167,38 +1948,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2280,7 +2061,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegationProgram",
@@ -2361,38 +2142,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2474,7 +2255,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegationProgram",
@@ -2486,6 +2267,10 @@ export type CrossyWorld = {
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -2528,6 +2313,12 @@ export type CrossyWorld = {
           }
         },
         {
+          "name": "worldAccount",
+          "docs": [
+            "delegation lands on the same rollup the world does."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2555,38 +2346,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2668,7 +2459,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegationProgram",
@@ -2722,6 +2513,12 @@ export type CrossyWorld = {
           }
         },
         {
+          "name": "worldAccount",
+          "docs": [
+            "cross-plane and validated against its own self-describing PDA."
+          ]
+        },
+        {
           "name": "payer",
           "signer": true
         },
@@ -2749,38 +2546,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -2862,7 +2659,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegationProgram",
@@ -2947,38 +2744,38 @@ export type CrossyWorld = {
             "program": {
               "kind": "const",
               "value": [
-                147,
-                24,
-                169,
-                188,
-                55,
-                225,
-                28,
-                194,
-                33,
-                98,
-                42,
-                226,
-                221,
-                188,
-                200,
-                133,
-                2,
-                172,
+                63,
+                16,
+                148,
+                230,
+                60,
+                29,
+                57,
+                216,
+                248,
                 87,
-                17,
-                167,
-                75,
-                18,
-                170,
-                184,
-                173,
-                151,
+                161,
+                210,
+                114,
                 232,
-                93,
-                235,
-                88,
-                213
+                17,
+                80,
+                15,
+                65,
+                234,
+                116,
+                35,
+                31,
+                44,
+                144,
+                115,
+                76,
+                107,
+                220,
+                38,
+                71,
+                168,
+                93
               ]
             }
           }
@@ -3060,7 +2857,7 @@ export type CrossyWorld = {
         },
         {
           "name": "ownerProgram",
-          "address": "AuCk8jXEWWDiSunY5LgdmjR1p2qFB9vESCyNtMj6qWha"
+          "address": "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx"
         },
         {
           "name": "delegationProgram",
@@ -3072,6 +2869,10 @@ export type CrossyWorld = {
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "mode",
           "type": "u8"
@@ -3383,31 +3184,7 @@ export type CrossyWorld = {
           "name": "chunk",
           "docs": [
             "The next chunk, already revealed on base and read cross-plane here."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "worldHeader"
-              },
-              {
-                "kind": "account",
-                "path": "world.next_chunk_index",
-                "account": "worldHeader"
-              }
-            ]
-          }
+          ]
         },
         {
           "name": "signer",
@@ -3449,54 +3226,10 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "name": "vaultAuthority"
         },
         {
           "name": "vault",
@@ -3732,7 +3465,11 @@ export type CrossyWorld = {
           "name": "collectionAuthority"
         },
         {
-          "name": "validator"
+          "name": "validator",
+          "docs": [
+            "Further regions are added with `set_validator`, so a deployment starts",
+            "playable in one place rather than requiring every rollup up front."
+          ]
         },
         {
           "name": "admin",
@@ -4291,30 +4028,7 @@ export type CrossyWorld = {
           "writable": true
         },
         {
-          "name": "chunk",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "world.day",
-                "account": "worldHeader"
-              },
-              {
-                "kind": "arg",
-                "path": "chunkIndex"
-              }
-            ]
-          }
+          "name": "chunk"
         },
         {
           "name": "signer",
@@ -4479,26 +4193,7 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "admin",
@@ -4540,91 +4235,17 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              }
-            ]
-          }
+          "name": "vaultAuthority"
         },
         {
           "name": "vault",
           "docs": [
             "Day vault token account owned by the vault authority PDA."
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  116,
-                  97
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "usdcMint"
@@ -4642,34 +4263,7 @@ export type CrossyWorld = {
           "docs": [
             "The safe/spawn chunk (index 0) is deterministic — created revealed."
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  0,
-                  0,
-                  0,
-                  0
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "commitPayer"
@@ -4688,6 +4282,10 @@ export type CrossyWorld = {
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -4866,29 +4464,7 @@ export type CrossyWorld = {
         },
         {
           "name": "chunk",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunkIndex"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": [
@@ -4900,6 +4476,10 @@ export type CrossyWorld = {
               32
             ]
           }
+        },
+        {
+          "name": "region",
+          "type": "u8"
         },
         {
           "name": "day",
@@ -4930,26 +4510,7 @@ export type CrossyWorld = {
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "receipt",
@@ -4960,38 +4521,7 @@ export type CrossyWorld = {
         },
         {
           "name": "contribution",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  116,
-                  114,
-                  105,
-                  98,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              },
-              {
-                "kind": "account",
-                "path": "receipt.wallet",
-                "account": "paymentReceipt"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -5011,26 +4541,7 @@ export type CrossyWorld = {
       "accounts": [
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "paidWorld",
@@ -5231,54 +4742,10 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "name": "vaultAuthority"
         },
         {
           "name": "vault",
@@ -5344,29 +4811,7 @@ export type CrossyWorld = {
         },
         {
           "name": "chunk",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  104,
-                  117,
-                  110,
-                  107
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day"
-              },
-              {
-                "kind": "arg",
-                "path": "chunkIndex"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "payer",
@@ -5411,6 +4856,10 @@ export type CrossyWorld = {
         }
       ],
       "args": [
+        {
+          "name": "region",
+          "type": "u8"
+        },
         {
           "name": "day",
           "type": "u64"
@@ -5833,6 +5282,10 @@ export type CrossyWorld = {
       ],
       "args": [
         {
+          "name": "region",
+          "type": "u8"
+        },
+        {
           "name": "newValidator",
           "type": "pubkey"
         }
@@ -6248,26 +5701,7 @@ export type CrossyWorld = {
         },
         {
           "name": "daily",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  97,
-                  105,
-                  108,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "daily.day",
-                "account": "dailyCompetition"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "admin",
@@ -7306,141 +6740,146 @@ export type CrossyWorld = {
     },
     {
       "code": 6038,
+      "name": "regionClosed",
+      "msg": "no validator is configured for this rollup region"
+    },
+    {
+      "code": 6039,
       "name": "dayVoided",
       "msg": "day is voided"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "paused",
       "msg": "subsystem is paused"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "badActionSequence",
       "msg": "duplicate or out-of-order action sequence"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "badAttemptNonce",
       "msg": "attempt nonce mismatch"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "badRunState",
       "msg": "run is not in the required state"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "worldNotOpen",
       "msg": "world is not open"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "attemptStillActive",
       "msg": "another attempt is still active for this wallet"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "tileOccupied",
       "msg": "destination tile is occupied"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "outOfBounds",
       "msg": "destination is out of bounds"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "blocked",
       "msg": "destination terrain is not traversable"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "worldFull",
       "msg": "world is full"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "cooldown",
       "msg": "cooldown has not elapsed"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "noTarget",
       "msg": "no valid target"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "immobilized",
       "msg": "player is stunned or immobilized"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "tooFast",
       "msg": "movement cadence exceeded for this slot"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "invalidName",
       "msg": "Display name is empty, too long, or contains characters that cannot be shown"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "staleHazardNonce",
       "msg": "hazard nonce is stale"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "lethalTile",
       "msg": "tile is lethal at the authoritative time"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "effectSlotsFull",
       "msg": "effect slots are full"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "badAbility",
       "msg": "ability not available for this class/version"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "frontierClosed",
       "msg": "chunk frontier is closed; wait for reveal"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "frontierNotReached",
       "msg": "chunk request margin not reached"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "wrongSector",
       "msg": "wrong sector account for these coordinates"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "badGeneration",
       "msg": "VRF request generation mismatch"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "badChunkState",
       "msg": "chunk is not in the required state"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "notReconcilable",
       "msg": "delegated/committed state unavailable for reconciliation"
     },
     {
-      "code": 6064,
+      "code": 6065,
       "name": "badVersion",
       "msg": "account version is unsupported"
     },
     {
-      "code": 6065,
+      "code": 6066,
       "name": "capacityExceeded",
       "msg": "bounded capacity exceeded"
     }
@@ -7947,6 +7386,14 @@ export type CrossyWorld = {
         "kind": "struct",
         "fields": [
           {
+            "name": "region",
+            "docs": [
+              "Rollup region; regions generate independent maps because a chunk can",
+              "only be delegated to one validator at a time."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "day",
             "type": "u64"
           },
@@ -8326,6 +7773,13 @@ export type CrossyWorld = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "region",
+            "docs": [
+              "Rollup region; each region runs an independent competition and pot."
+            ],
+            "type": "u8"
+          },
           {
             "name": "day",
             "type": "u64"
@@ -8866,11 +8320,21 @@ export type CrossyWorld = {
             "type": "pubkey"
           },
           {
-            "name": "validator",
+            "name": "validators",
             "docs": [
-              "MagicBlock validator that must host every delegated gameplay account."
+              "MagicBlock validator per region; `Pubkey::default()` = region closed.",
+              "",
+              "Indexed by the region id in the world PDA, so a world can only ever be",
+              "delegated to the validator its own region names. A single field would",
+              "have let any world land on any rollup, which is how a European world",
+              "ends up hosted in Singapore and the whole point is lost."
             ],
-            "type": "pubkey"
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
           },
           {
             "name": "pauseFlags",
@@ -10354,6 +9818,10 @@ export type CrossyWorld = {
         "kind": "struct",
         "fields": [
           {
+            "name": "region",
+            "type": "u8"
+          },
+          {
             "name": "previous",
             "type": "pubkey"
           },
@@ -10508,6 +9976,13 @@ export type CrossyWorld = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "region",
+            "docs": [
+              "Rollup region this world runs on; part of its own PDA seeds."
+            ],
+            "type": "u8"
+          },
           {
             "name": "day",
             "type": "u64"
