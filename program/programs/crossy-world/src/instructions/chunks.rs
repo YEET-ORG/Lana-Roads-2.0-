@@ -1,8 +1,8 @@
 //! Just-in-time chunk generation.
 //!
-//! When the leader is within eight rows of the revealed frontier, anyone may
-//! request the next chunk. The boundary stays closed and safe until an
-//! authenticated callback publishes the chunk; there is no client fallback
+//! The permissionless keeper may maintain ten complete chunks beyond the
+//! chunk containing the leader. The boundary stays closed and safe until an
+//! authenticated callback publishes each chunk; there is no client fallback
 //! map. Retry after an objective timeout increments the generation; a late
 //! callback from an invalidated generation fails; the first valid
 //! current-generation callback permanently determines the chunk (a valid
@@ -22,7 +22,9 @@ use ephemeral_rollups_sdk::{
 };
 use solana_keccak_hasher as keccak;
 
-use crate::constants::{seeds, CHUNK_REQUEST_MARGIN, CHUNK_ROWS, CHUNK_VRF_TIMEOUT_SECONDS};
+use crate::constants::{
+    seeds, CHUNK_LOOKAHEAD_CHUNKS, CHUNK_REQUEST_MARGIN, CHUNK_ROWS, CHUNK_VRF_TIMEOUT_SECONDS,
+};
 use crate::errors::CrossyError;
 use crate::events::*;
 use crate::kernel::chunkgen;
@@ -62,9 +64,9 @@ pub struct RequestChunk<'info> {
     pub oracle_queue: UncheckedAccount<'info>,
 }
 
-/// Permissionless: open (or retry) the VRF request for the next chunk once
-/// the frontier margin is reached. `WorldHeader` holds exactly one live
-/// request, preventing gaps and selective skipping.
+/// Permissionless: open (or retry) the VRF request for the next contiguous
+/// chunk while the ten-chunk lookahead buffer needs filling. The bounded
+/// request window plus the previous revealed chunk prevent gaps and skips.
 pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> Result<()> {
     require!(chunk_index >= 1, CrossyError::BadChunkState);
     let now = Clock::get()?.unix_timestamp;
@@ -84,7 +86,7 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
     require!(now < world.end_ts, CrossyError::CutoffPassed);
     require!(
-        chunk_index == world.next_chunk_index,
+        chunk_in_request_window(world.next_chunk_index, chunk_index),
         CrossyError::BadChunkState
     );
     require!(
@@ -188,6 +190,33 @@ pub fn request_chunk(ctx: Context<RequestChunk>, day: u64, chunk_index: u32) -> 
         generation,
     });
     Ok(())
+}
+
+/// The keeper may pre-reveal a bounded contiguous window on base while the
+/// ER frontier is still preparing earlier chunks. Continuity is separately
+/// enforced by the required revealed `prev_chunk` account.
+fn chunk_in_request_window(next_chunk_index: u32, chunk_index: u32) -> bool {
+    next_chunk_index
+        .checked_add(CHUNK_LOOKAHEAD_CHUNKS)
+        .is_some_and(|exclusive_end| chunk_index >= next_chunk_index && chunk_index < exclusive_end)
+}
+
+#[cfg(test)]
+mod request_window_tests {
+    use super::chunk_in_request_window;
+
+    #[test]
+    fn permits_exactly_ten_chunks_from_the_frontier() {
+        assert!(chunk_in_request_window(1, 1));
+        assert!(chunk_in_request_window(1, 10));
+        assert!(!chunk_in_request_window(1, 11));
+        assert!(!chunk_in_request_window(1, 0));
+    }
+
+    #[test]
+    fn fails_closed_on_index_overflow() {
+        assert!(!chunk_in_request_window(u32::MAX - 5, u32::MAX - 5));
+    }
 }
 
 // ---------------------------------------------------------------------------

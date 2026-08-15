@@ -25,7 +25,8 @@ export const CHUNK_ROWS = 16;
 export const SAFE_ZONE_ROWS = 16;
 export const SECTOR_EDGE = 8;
 export const SECTORS_PER_ROW = 8;
-export const CHUNK_REQUEST_MARGIN = 8;
+export const CHUNK_LOOKAHEAD_CHUNKS = 10;
+export const CHUNK_REQUEST_MARGIN = CHUNK_LOOKAHEAD_CHUNKS * CHUNK_ROWS;
 export const DEFAULT_VRF_BASE_QUEUE = new PublicKey(
   "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
 );

@@ -22,7 +22,7 @@ import {
 import { agentId, instantiate, pickDeterministic, ROCK_POOL } from "./assets";
 import { BlockDust, type Surface } from "./effects";
 import { sfx } from "../audio";
-import { arc, clamp01, easeOutBack, noise1d, smoothFactor } from "./tween";
+import { arc, clamp01, easeOutBack, easeOutCubic, noise1d, smoothFactor } from "./tween";
 import { getSettings, haptic } from "../../lib/settings";
 
 export interface RemotePlayer {
@@ -155,10 +155,12 @@ type RigState =
       from: THREE.Vector3;
       to: THREE.Vector3;
       start: number;
+      duration: number;
+      fromBodyY: number;
+      fromScale: THREE.Vector3;
       skipAnticipation: boolean;
     }
   | { name: "land"; start: number }
-  | { name: "bump"; dir: THREE.Vector3; start: number }
   | { name: "dead"; cause: "impact" | "water"; start: number };
 
 /**
@@ -174,6 +176,9 @@ class PlayerRig {
   targetYaw = 0; // facing Forward (-z)
   private idlePhase = Math.random() * Math.PI * 2;
   private landed: ((at: THREE.Vector3) => void) | null = null;
+  /** Recoil is additive body motion and must not replace a running hop. */
+  private bumpStart = -Infinity;
+  private bumpDir = new THREE.Vector3();
 
   private model: THREE.Object3D;
   private modelScale: number;
@@ -243,20 +248,23 @@ class PlayerRig {
     if (this.state.name === "dead") return;
     if (facing != null) this.targetYaw = facingYaw(facing);
     const airborne = this.state.name === "hop";
-    // Grid discipline: a chained hop snap-finishes the previous one first,
-    // so every hop travels exactly tile-center → tile-center.
-    if (airborne) {
-      const prev = this.state as Extract<RigState, { name: "hop" }>;
-      this.root.position.copy(prev.to);
-      this.body.position.y = 0;
-    }
+    // The authoritative destination is still a tile center, but the visual
+    // path starts exactly where the previous frame left the model. Snapping
+    // an unfinished 120ms hop whenever input arrived at 60ms was the source
+    // of the conspicuous stair-step movement under fast swipes.
     const from = this.root.position.clone();
     if (from.distanceToSquared(target) < 1e-6) return;
+    const distance = from.distanceTo(target);
     this.state = {
       name: "hop",
       from,
       to: target.clone(),
       start: performance.now(),
+      // Keep near-constant visual speed while allowing a slightly longer
+      // catch-up when several accepted grid moves arrive during one hop.
+      duration: Math.min(190, Math.max(90, HOP_MS * distance)),
+      fromBodyY: this.body.position.y,
+      fromScale: this.body.scale.clone(),
       // Chained hops keep momentum: no fresh anticipation mid-run.
       skipAnticipation: airborne,
     };
@@ -271,6 +279,9 @@ class PlayerRig {
       from: here,
       to: here.clone(),
       start: performance.now(),
+      duration: HOP_MS,
+      fromBodyY: this.body.position.y,
+      fromScale: this.body.scale.clone(),
       skipAnticipation: true,
     };
   }
@@ -284,13 +295,17 @@ class PlayerRig {
   teleport(target: THREE.Vector3) {
     this.root.position.copy(target);
     this.state = { name: "idle" };
+    this.bumpStart = -Infinity;
+    this.body.position.x = 0;
+    this.body.position.z = 0;
     this.body.position.y = 0;
     this.body.scale.set(1, 1, 1);
   }
 
   bump(dir: THREE.Vector3) {
     if (this.state.name === "dead") return;
-    this.state = { name: "bump", dir: dir.clone().normalize(), start: performance.now() };
+    this.bumpDir.copy(dir).normalize();
+    this.bumpStart = performance.now();
   }
 
   die(cause: "impact" | "water") {
@@ -301,6 +316,8 @@ class PlayerRig {
     if (this.state.name === "dead") {
       this.state = { name: "idle" };
       this.body.scale.set(1, 1, 1);
+      this.body.position.x = 0;
+      this.body.position.z = 0;
       this.body.position.y = 0;
       this.body.visible = true;
       this.shadow.visible = true;
@@ -325,19 +342,27 @@ class PlayerRig {
       if (t < pre) {
         // Anticipation: squash down before takeoff.
         const k = clamp01(t / pre);
-        this.setSquash(1 + (CHARGE_SQUASH.y - 1) * k, 1 + (CHARGE_SQUASH.xz - 1) * k);
+        this.setSquash(
+          THREE.MathUtils.lerp(s.fromScale.y, CHARGE_SQUASH.y, k),
+          THREE.MathUtils.lerp(s.fromScale.x, CHARGE_SQUASH.xz, k),
+        );
       } else {
-        const k = clamp01((t - pre) / HOP_MS);
+        const k = clamp01((t - pre) / s.duration);
         // Linear horizontal + sine arc = the snappy Crossy hop; easing the
         // horizontal makes it feel like sliding, not hopping.
         this.root.position.lerpVectors(s.from, s.to, k);
         const a = arc(k);
-        this.body.position.y = a * HOP_HEIGHT;
+        // Retargeting mid-air preserves current height and eases it into the
+        // next arc, removing the vertical pop between chained hops.
+        this.body.position.y = s.fromBodyY * (1 - easeOutCubic(k)) + a * HOP_HEIGHT;
         // Stretch peaks at takeoff, relaxes toward landing.
         const stretch = 1 - k * 0.6;
+        const blend = easeOutCubic(clamp01(k * 2));
+        const hopY = 1 + (STRETCH.y - 1) * a * stretch;
+        const hopXZ = 1 + (STRETCH.xz - 1) * a * stretch;
         this.setSquash(
-          1 + (STRETCH.y - 1) * a * stretch + (1 - a) * 0,
-          1 + (STRETCH.xz - 1) * a * stretch,
+          THREE.MathUtils.lerp(s.fromScale.y, hopY, blend),
+          THREE.MathUtils.lerp(s.fromScale.x, hopXZ, blend),
         );
         this.shadow.scale.setScalar(1 - a * 0.35);
         if (k >= 1) {
@@ -360,18 +385,6 @@ class PlayerRig {
         this.setSquash(1, 1);
         this.state = { name: "idle" };
       }
-    } else if (s.name === "bump") {
-      const k = clamp01((now - s.start) / BUMP_MS);
-      const out = arc(k) * 0.22; // quarter-tile nudge, out and back
-      this.body.position.x = s.dir.x * out;
-      this.body.position.z = s.dir.z * out;
-      this.setSquash(1 - arc(k) * 0.12, 1 + arc(k) * 0.08);
-      if (k >= 1) {
-        this.body.position.x = 0;
-        this.body.position.z = 0;
-        this.setSquash(1, 1);
-        this.state = { name: "idle" };
-      }
     } else if (s.name === "dead") {
       const k = clamp01((now - s.start) / 90);
       if (s.cause === "impact") {
@@ -388,6 +401,22 @@ class PlayerRig {
       // Idle: subtle breathe (scaleY 1↔1.02, ~1.5 s).
       const b = 1 + Math.sin(now / 240 + this.idlePhase) * 0.012;
       this.setSquash(b, 1 / Math.sqrt(b));
+    }
+
+    // Directional recoil is layered over the current hop/land/idle pose.
+    // Cancelling locomotion here used to strand the root between tiles when
+    // a blocked input or kick arrived during an unfinished hop.
+    const bumpK = clamp01((now - this.bumpStart) / BUMP_MS);
+    if (bumpK < 1 && s.name !== "dead") {
+      const amount = arc(bumpK);
+      this.body.position.x = this.bumpDir.x * amount * 0.22;
+      this.body.position.z = this.bumpDir.z * amount * 0.22;
+      this.body.scale.y *= 1 - amount * 0.12;
+      this.body.scale.x *= 1 + amount * 0.08;
+      this.body.scale.z *= 1 + amount * 0.08;
+    } else {
+      this.body.position.x = 0;
+      this.body.position.z = 0;
     }
   }
 
@@ -440,6 +469,9 @@ export class WorldScene {
   lastDeathCause: DeathCause = "impact";
   /** Offset between authoritative world time and performance.now(). */
   worldTimeOffsetMs = 0;
+  /** Offset the slot servo converges toward without stepping the scene. */
+  private targetWorldTimeOffsetMs = 0;
+  private worldClockReady = false;
 
   // ---- shared static resources (never disposed per lane) ----
   private unitBox = new THREE.BoxGeometry(1, 1, 1);
@@ -501,14 +533,23 @@ export class WorldScene {
    */
   private worldRate = 1;
 
-  setWorldClock(nowMs: number, rate = this.worldRate) {
+  setWorldClock(nowMs: number, rate = this.worldRate, hard = false) {
+    const elapsed = performance.now() - this.startMs;
+    // Changing the measured slot rate must not change displayed time. Rebase
+    // first, then let phase correction converge independently every frame.
+    const current = elapsed * this.worldRate + this.worldTimeOffsetMs;
     this.worldRate = rate;
-    this.worldTimeOffsetMs = nowMs - (performance.now() - this.startMs) * rate;
+    this.worldTimeOffsetMs = current - elapsed * rate;
+    this.targetWorldTimeOffsetMs = nowMs - elapsed * rate;
+    if (!this.worldClockReady || hard) {
+      this.worldTimeOffsetMs = this.targetWorldTimeOffsetMs;
+      this.worldClockReady = true;
+    }
   }
 
   /** Practice mode: no chain, so world time simply runs at wall rate. */
   setWorldElapsed(elapsedMs: number) {
-    this.setWorldClock(elapsedMs, 1);
+    this.setWorldClock(elapsedMs, 1, true);
   }
 
   laneAt(row: number): Lane | undefined {
@@ -531,8 +572,33 @@ export class WorldScene {
     const w = window as unknown as {
       __crossyClock?: () => number;
       __crossyRemotes?: () => unknown[];
+      __crossyMotion?: () => unknown;
+      __crossyMap?: () => unknown;
     };
     w.__crossyClock = () => this.worldTimeMs();
+    w.__crossyMotion = () => ({
+      state: this.local.state.name,
+      visual: {
+        x: this.local.root.position.x,
+        y: this.local.body.position.y,
+        z: this.local.root.position.z,
+      },
+      target: {
+        x: this.localTarget.x,
+        y: this.localTarget.y,
+        z: this.localTarget.z,
+      },
+      worldTimeMs: this.worldTimeMs(),
+    });
+    w.__crossyMap = () => {
+      let firstRow: number | null = null;
+      let lastRow: number | null = null;
+      for (const row of this.lanes.keys()) {
+        firstRow = firstRow == null ? row : Math.min(firstRow, row);
+        lastRow = lastRow == null ? row : Math.max(lastRow, row);
+      }
+      return { loadedRows: this.lanes.size, firstRow, lastRow };
+    };
     // Who the world thinks the other players are. Whether a remote is drawn
     // as the agent they CHOSE is not visible from a screenshot when they
     // are off camera, and it is exactly the thing that used to be wrong.
@@ -1011,15 +1077,18 @@ export class WorldScene {
   /** Authoritative/predicted local tile: the rig hops to it. */
   setLocal(x: number, y: number, facing?: number) {
     const target = new THREE.Vector3(x + 0.5, 0, -y);
-    const dist = this.local.root.position.distanceTo(target);
     // Whether the TILE changed, not whether the mesh has caught up to it.
     // Authority repeats the same position several times a second (the
     // hazard crank rewrites the run), and mid-hop the rig is by definition
     // not at its target — restarting the hop on every one of those made
     // the player stutter in place and chirp on each repeat.
     const sameTile = this.localTarget.distanceToSquared(target) < 1e-9;
+    // A visual can legitimately trail several predicted inputs. Only the
+    // authoritative target-to-target delta identifies a real correction.
+    const authoritativeJump = this.localTarget.distanceTo(target);
     this.localTarget.copy(target);
-    if (dist > 2.5) {
+    if (facing != null) this.local.targetYaw = facingYaw(facing);
+    if (authoritativeJump > 2.5) {
       // Large correction / spawn: ground snap with a network pulse.
       this.local.teleport(target);
       this.dust.burst(target, {
@@ -1227,11 +1296,20 @@ export class WorldScene {
     const dt = Math.min(0.05, this.clock.getDelta());
     const dtMs = dt * 1000;
     const now = performance.now();
-    const tMs = now - this.startMs + this.worldTimeOffsetMs;
 
+    // Slot notifications update a target. Rendering closes the phase error
+    // continuously, so cars, logs and trains never receive a clock step.
+    if (this.worldClockReady) {
+      this.worldTimeOffsetMs +=
+        (this.targetWorldTimeOffsetMs - this.worldTimeOffsetMs) * smoothFactor(0.1, dtMs);
+    }
     // Hit-stop: rewind the hazard clock by the frame delta so the world
     // freezes for a beat while the player animation keeps running.
-    if (now < this.hitStopUntil) this.worldTimeOffsetMs -= dtMs;
+    if (now < this.hitStopUntil) {
+      this.worldTimeOffsetMs -= dtMs;
+      this.targetWorldTimeOffsetMs -= dtMs;
+    }
+    const tMs = this.worldTimeMs();
 
     this.local.update(dtMs, now);
     for (const rig of this.players.values()) rig.update(dtMs, now);

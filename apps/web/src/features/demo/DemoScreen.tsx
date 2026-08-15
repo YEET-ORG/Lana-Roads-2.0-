@@ -15,17 +15,14 @@ import {
   demoSeed,
   makeLane,
 } from "../../game/simulation/demoLanes";
-import { Direction } from "@crossy-world/sdk";
-import {
-  Button,
-  Confetti,
-  CountUp,
-  IconButton,
-  Modal,
-} from "../../design-system";
+import { CHUNK_LOOKAHEAD_CHUNKS, CHUNK_ROWS, Direction } from "@crossy-world/sdk";
+import { Button, Confetti, CountUp, IconButton, Modal } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
 import { haptic } from "../../lib/settings";
 import { deathHeadline, type DeathCause } from "../../game/renderer/scene";
+
+const practiceFrontierRow = (playerRow: number) =>
+  (Math.floor(playerRow / CHUNK_ROWS) + 1 + CHUNK_LOOKAHEAD_CHUNKS) * CHUNK_ROWS - 1;
 
 export function DemoScreen({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,7 +68,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
       });
       sceneRef.current = scene;
       scene.resize();
-      reveal(28);
+      reveal(practiceFrontierRow(0));
       scene.setLocal(32, 0);
     });
 
@@ -131,11 +128,12 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
           s.bumpLocal(dx, dy);
           return;
         }
-        reveal(ny + 26);
+        reveal(practiceFrontierRow(ny));
         const destLane = s.laneAt(ny);
         if (destLane) {
           const t = s.worldTimeMs();
           if (!demoIsTraversable(destLane, nx, t)) {
+            s.setFacing(action.direction);
             s.bumpLocal(dx, dy);
             const why = demoBlockedReason(destLane, nx, t);
             setRejection(why);
