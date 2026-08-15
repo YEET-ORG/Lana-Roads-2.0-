@@ -191,6 +191,8 @@ export interface RunSummary {
   score: number;
   state: string;
   hazardNonce: number;
+  /** Monotonic counter of authoritative mutations (`PlayerRun.state_seq`). */
+  stateSeq: bigint;
 }
 
 /** Human-readable review returned before any financial signature. */
@@ -616,6 +618,11 @@ export class CrossyClient {
       score: account.score as number,
       state: (Object.keys(account.state)[0] ?? "?") as string,
       hazardNonce: account.hazardNonce as number,
+      // Every authoritative mutation bumps this, including ones that change
+      // nothing a client can see. Comparing it against what the realtime
+      // feed last reported is how a caller proves the feed missed something,
+      // rather than guessing from a silence that may just be a quiet world.
+      stateSeq: BigInt(account.stateSeq?.toString() ?? account.actionSeq.toString()),
     }));
   }
 

@@ -47,6 +47,19 @@ function agentIndexFromModelId(id: string): number {
   return Number(id.slice(-2));
 }
 
+/**
+ * A publishable name for a player who has not chosen one.
+ *
+ * `set_identity` carries both the name and the agent, and the program will
+ * not accept a name shorter than two characters — so without something here,
+ * an unnamed player could never publish which animal they are. The address
+ * prefix is recognisable, valid under the program's character rules, and
+ * obviously a placeholder to replace.
+ */
+function fallbackName(wallet: { toBase58(): string }): string {
+  return wallet.toBase58().slice(0, 6);
+}
+
 /** Live-world telemetry shown before the player commits to a run. */
 interface Presence {
   players: number;
@@ -86,6 +99,14 @@ export function Home({
   const menuSceneRef = useRef<WorldScene | null>(null);
   const swipeRef = useRef<{ x: number; t: number } | null>(null);
   const agentSaveRef = useRef(0);
+  /**
+   * The agent currently published on chain, or null if nothing is.
+   *
+   * Kept so joining only writes when the published choice actually differs
+   * from the local one — publishing on every PLAY would be a transaction per
+   * game for no change.
+   */
+  const chainAgentRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!boot) {
@@ -216,6 +237,7 @@ export function Home({
         setMyName(id.name);
         setAgentIdx(id.agent);
         setAgentChoice(id.agent);
+        chainAgentRef.current = id.agent;
         menuSceneRef.current?.setLocalModel(agentId(id.agent));
       })
       .catch(() => {});
@@ -245,10 +267,23 @@ export function Home({
     sfx.hop();
     // A choice kept in this browser is a choice nobody else can see. Publish
     // it — debounced, because the picker is a thing you flick through.
-    if (!boot || myName == null) return;
+    //
+    // This used to bail when the player had no name yet, which meant the
+    // agent was published only by people who had already named themselves.
+    // Everyone else picked an animal that existed nowhere but their own
+    // screen, and other clients fell back to hashing their wallet — the
+    // "I chose a fox and my friend sees a duck" bug. The program requires a
+    // name of at least two characters, so unnamed players get a placeholder
+    // from their address until they choose one.
+    if (!boot) return;
     window.clearTimeout(agentSaveRef.current);
     agentSaveRef.current = window.setTimeout(() => {
-      void boot.client.setIdentity({ name: myName, agent: next }).catch(() => {});
+      void boot.client
+        .setIdentity({ name: myName ?? fallbackName(boot.wallet.publicKey), agent: next })
+        .then(() => {
+          chainAgentRef.current = next;
+        })
+        .catch(() => {});
     }, 1200);
   }
 
@@ -258,6 +293,7 @@ export function Home({
     setNameError(null);
     try {
       await boot.client.setIdentity({ name: nameDraft.trim(), agent: agentIdx });
+      chainAgentRef.current = agentIdx;
       setMyName(nameDraft.trim());
       setNameOpen(false);
       sfx.confirm();
@@ -376,6 +412,25 @@ export function Home({
               if (!boot || !info || !info.casualReady) {
                 onPlay({ name: "demo" });
                 return;
+              }
+              // Nobody else can see an agent that was only ever chosen in
+              // this browser. A player who never opened the picker has
+              // published nothing, so every other client falls back to
+              // hashing their wallet and draws a different animal than the
+              // one on their own screen. Publishing on the way in is the
+              // last point where that can still be fixed silently.
+              if (chainAgentRef.current !== agentIdx) {
+                chainAgentRef.current = agentIdx;
+                void boot.client
+                  .setIdentity({
+                    name: myName ?? fallbackName(boot.wallet.publicKey),
+                    agent: agentIdx,
+                  })
+                  .catch(() => {
+                    // Let the next join try again rather than pretending it
+                    // landed; an unpublished agent is the whole bug.
+                    chainAgentRef.current = null;
+                  });
               }
               onPlay({
                 name: "play",

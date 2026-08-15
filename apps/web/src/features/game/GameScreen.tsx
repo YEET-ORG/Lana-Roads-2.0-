@@ -312,6 +312,37 @@ export function GameScreen({
      */
     const identities = new Map<string, { name: string; agent: number }>();
     const runStateSequences = new Map<string, bigint>();
+    /**
+     * Wallets whose identity is already being fetched.
+     *
+     * Runs push about five times a second each, so without this a newly
+     * visible player would queue one identity read per push until the first
+     * one answered.
+     */
+    const identityInFlight = new Set<string>();
+
+    /**
+     * Learn who a player is the moment they appear, not on the next sweep.
+     *
+     * Identity used to be read only by the 5 s roster sweep, so a player who
+     * arrived between sweeps was drawn from `hashWallet` — a different animal
+     * than the one they picked — and then silently swapped once the sweep
+     * caught up. That is the "wrong character" everyone sees.
+     */
+    const learnIdentity = (wallet: string) => {
+      if (identities.has(wallet) || identityInFlight.has(wallet)) return;
+      identityInFlight.add(wallet);
+      void boot.client
+        .getIdentities([new PublicKey(wallet)])
+        .then((found) => {
+          identityInFlight.delete(wallet);
+          const id = found.get(wallet);
+          if (!id || !live) return;
+          identities.set(wallet, { name: id.name, agent: id.agent });
+          drawRemotes();
+        })
+        .catch(() => identityInFlight.delete(wallet));
+    };
     const drawRemotes = () =>
       scene?.setRemotes(
         [...remotes.entries()].map(([w, r]) => ({
@@ -445,14 +476,15 @@ export function GameScreen({
           );
         }
       } else {
-        if (state === "active")
+        if (state === "active") {
           remotes.set(wallet, {
             x: run.x,
             y: run.y,
             state,
             hazardNonce: run.hazardNonce,
           });
-        else remotes.delete(wallet);
+          learnIdentity(wallet);
+        } else remotes.delete(wallet);
         drawRemotes();
       }
       syncPresence();
@@ -539,16 +571,38 @@ export function GameScreen({
     };
 
     // The realtime feed: every run/sector of this world + the world header.
-    const unsubscribe = boot.client.subscribeWorldRealtime({
-      world,
-      onRun: (run) => live && applyRun(run),
-      onWorld: (w) => {
-        if (!live) return;
-        hudRecordRef.current = w.recordScore;
-        setHud((h) => (h.record === w.recordScore ? h : { ...h, record: w.recordScore }));
-        loadChunks(w.revealedRows);
-      },
-    });
+    // Measured at ~200 ms end to end on the rollup, so this — not the sweep
+    // below — is what makes other players move.
+    let dropFeed: (() => void) | null = null;
+    const openFeed = () => {
+      dropFeed?.();
+      dropFeed = boot.client.subscribeWorldRealtime({
+        world,
+        onRun: (run) => live && applyRun(run),
+        onWorld: (w) => {
+          if (!live) return;
+          hudRecordRef.current = w.recordScore;
+          setHud((h) =>
+            h.record === w.recordScore ? h : { ...h, record: w.recordScore },
+          );
+          loadChunks(w.revealedRows);
+        },
+      });
+    };
+    openFeed();
+    const unsubscribe = () => dropFeed?.();
+
+    /**
+     * Consecutive sweeps that found state the feed should have delivered.
+     *
+     * A silently dead websocket is indistinguishable from a quiet world by
+     * timeout alone — nobody moving is not a fault. But a sweep that reads a
+     * run STRICTLY ahead of anything the feed reported is proof a change was
+     * missed. Two in a row and the socket is rebuilt, which is the difference
+     * between multiplayer degrading to 5 s polling for the rest of the
+     * session and recovering on its own.
+     */
+    let feedMisses = 0;
 
     // Bootstrap + 5s reconciliation sweep (sequence-gap safety net, per the
     // spec: subscriptions are the fast path, refetch heals any gap).
@@ -573,25 +627,46 @@ export function GameScreen({
       // snapshot is the only thing that makes both true on screen.
       const roster = await boot.client.listRuns(world).catch(() => null);
       if (roster && live) {
+        // Did the feed miss anything? Only counts other players: our own run
+        // is written by us, so it is ahead of the feed by design.
+        let missed = false;
         remotes.clear();
         for (const r of roster) {
           if (r.state !== "active") continue;
           const w = r.wallet.toBase58();
           if (w === me) continue;
+          const seen = runStateSequences.get(w);
+          if (seen != null && r.stateSeq > seen) missed = true;
           remotes.set(w, {
             x: r.x,
             y: r.y,
             state: r.state,
             hazardNonce: r.hazardNonce,
           });
+          runStateSequences.set(w, r.stateSeq);
         }
-        // Names and agents for anyone new, then draw.
-        const unknown = [...remotes.keys()].filter((w) => !identities.has(w));
-        if (unknown.length) {
+        feedMisses = missed ? feedMisses + 1 : 0;
+        if (feedMisses >= 2) {
+          feedMisses = 0;
+          console.warn("realtime feed missed changes twice; resubscribing");
+          openFeed();
+        }
+        // Names and agents for EVERYONE present, not just wallets we have
+        // never seen. A player can change agent or name mid-session, and
+        // caching only-on-first-sight meant that change never reached anyone
+        // else — they kept drawing whatever that wallet was when it arrived.
+        // It is one getMultipleAccounts for the whole roster either way.
+        const present = [...remotes.keys()];
+        if (present.length) {
           const found = await boot.client
-            .getIdentities(unknown.map((w) => new PublicKey(w)))
+            .getIdentities(present.map((w) => new PublicKey(w)))
             .catch(() => null);
-          if (found) for (const [w, id] of found) identities.set(w, id);
+          if (found) {
+            for (const [w, id] of found) identities.set(w, id);
+            // Someone who cleared their identity should stop being drawn
+            // under the old one.
+            for (const w of present) if (!found.has(w)) identities.delete(w);
+          }
         }
         drawRemotes();
         syncPresence();
