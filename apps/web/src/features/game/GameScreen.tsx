@@ -1502,7 +1502,11 @@ export function GameScreen({
           });
         } else if (action.kind === "kick") {
           const now = performance.now();
-          const coolLeft = 5000 - (now - lastKickAtRef.current);
+          // The program's cooldown was mirrored here so a swing that authority
+          // would refuse never left the client. Casual no longer has one, and
+          // a client-side copy of a rule the chain has dropped is just the old
+          // rule with a nicer error message.
+          const coolLeft = freeMoves ? 0 : 5000 - (now - lastKickAtRef.current);
           if (coolLeft > 0) {
             setHud((h) => ({
               ...h,
