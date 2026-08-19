@@ -30,7 +30,7 @@ import { readFileSync } from "node:fs";
 import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
 import { assignPendingPulls } from "./assign-pulls";
-import { loadCrossyWorldIdl } from "./runtime-config";
+import { loadCrossyWorldIdl, retryingFetch } from "./runtime-config";
 import {
   CHUNK_LOOKAHEAD_CHUNKS,
   CHUNK_ROWS,
@@ -195,9 +195,20 @@ function startHealthServer() {
   );
 }
 
+/**
+ * Errors that mean this process can never succeed again, so it should die and
+ * let the supervisor start a fresh one.
+ *
+ * "Program is not deployed" belongs here for a reason that cost five days of
+ * downtime: after a close-and-redeploy the running keeper still holds the old
+ * PROGRAM_ID from the source it imported at boot, and `run-keeper.sh` only
+ * re-execs on exit. Every tick failed, every failure was caught and logged,
+ * and the day never opened — with the process looking perfectly alive. Exiting
+ * turns that silent stall into a restart that reloads the current source.
+ */
 function isFatalCompatibilityError(error: unknown): boolean {
   const message = String((error as any)?.message ?? error);
-  return /Invalid bool|cannot decode|account discriminator|DeclaredProgramIdMismatch|IDL cannot decode|config\.admin|admin-only/i.test(
+  return /Invalid bool|cannot decode|account discriminator|DeclaredProgramIdMismatch|IDL cannot decode|config\.admin|admin-only|Program is not deployed|Unsupported program id/i.test(
     message,
   );
 }
@@ -205,7 +216,12 @@ function isFatalCompatibilityError(error: unknown): boolean {
 async function main() {
   startHealthServer();
   const keeper = loadKeeper();
-  const baseConn = new web3.Connection(BASE_RPC, "confirmed");
+  // The keeper is the one process that has to outlive a throttled public
+  // RPC: a dropped read here is a day that never opens.
+  const baseConn = new web3.Connection(BASE_RPC, {
+    commitment: "confirmed",
+    fetch: retryingFetch(),
+  });
   const erConn = new web3.Connection(ER_RPC, "processed");
   const wallet = new anchor.Wallet(keeper);
   // Production workers run from a clean checkout where `target/` is ignored.
@@ -223,6 +239,17 @@ async function main() {
       commitment: "processed",
     }),
   ) as Program<any>;
+
+  // Preflight: the program itself, before anything derived from it. A closed
+  // or not-yet-deployed PROGRAM_ID still leaves its old PDAs on chain, so the
+  // config fetch below would happily succeed and every write would fail.
+  const programAccount = await baseConn.getAccountInfo(PROGRAM_ID);
+  if (!programAccount?.executable) {
+    throw new Error(
+      `program ${PROGRAM_ID.toBase58()} is not deployed on ${BASE_RPC} — ` +
+        `nothing this keeper sends can land`,
+    );
+  }
 
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
   log("keeper", keeper.publicKey.toBase58());

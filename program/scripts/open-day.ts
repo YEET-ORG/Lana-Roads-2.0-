@@ -19,6 +19,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN, Program, web3 } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { retryingFetch } from "./runtime-config";
 
 export const PROGRAM_ID = new web3.PublicKey(
   "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx",
@@ -387,7 +388,7 @@ async function main() {
   const baseProgram = new Program(
     idl,
     new anchor.AnchorProvider(
-      new web3.Connection(BASE_RPC, "confirmed"),
+      new web3.Connection(BASE_RPC, { commitment: "confirmed", fetch: retryingFetch() }),
       new anchor.Wallet(admin),
       { commitment: "confirmed" },
     ),
