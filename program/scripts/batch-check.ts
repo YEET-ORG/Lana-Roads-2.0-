@@ -411,6 +411,47 @@ async function main() {
     }
   }
 
+  // 6. CASUAL KICKS HAVE NO COOLDOWN. Paid burns five seconds per swing; three
+  // swings in a row here must all be accepted, and none may leave a cooldown
+  // behind for anything downstream to read.
+  {
+    run = await er.account.playerRun.fetch(runPda);
+    const seqBefore = Number(run.actionSeq);
+    const swings = [];
+    for (let i = 0; i < 3; i++) {
+      swings.push(
+        await er.methods
+          .kickFree(1, new BN(Date.now() * 8 + i))
+          .accountsPartial({
+            world,
+            kicker: runPda,
+            target: null,
+            targetSector: null,
+            destSector: null,
+            chunk: null,
+            signer: session.publicKey,
+          })
+          .rpc({ skipPreflight: false, commitment: "processed" })
+          .then(
+            () => null,
+            (e: any) => errText(e),
+          ),
+      );
+    }
+    const refused = swings.filter(Boolean);
+    await sleep(400);
+    run = await er.account.playerRun.fetch(runPda);
+    record(
+      "casual kicks have no cooldown",
+      refused.length === 0 &&
+        Number(run.actionSeq) === seqBefore + 3 &&
+        Number(run.kickReadyTs) === 0,
+      `${3 - refused.length}/3 swings accepted back to back, ` +
+        `seq ${seqBefore} -> ${run.actionSeq}, kick_ready_ts ${run.kickReadyTs}` +
+        (refused.length ? `; first refusal: ${refused[0]}` : ""),
+    );
+  }
+
   console.log(`\n${results.filter((r) => r.startsWith("PASS")).length}/${results.length} passed`);
   process.exit(results.every((r) => r.startsWith("PASS")) ? 0 : 1);
 }
