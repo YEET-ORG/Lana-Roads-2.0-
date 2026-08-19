@@ -654,7 +654,12 @@ export function GameScreen({
       // right when a prediction was wrong and WRONG while an action is
       // still legitimately in flight — it would yank the player back a tile
       // and then hop them forward again the moment it lands.
-      if (run) applyRun(run, outboxRef.current.length === 0);
+      if (run)
+        applyRun(
+          run,
+          outboxRef.current.length === 0 &&
+            performance.now() - lastFreeSendAtRef.current > 1200,
+        );
       // Who else is here. The subscription only speaks when a run CHANGES,
       // so a player who is standing still is invisible to a client that
       // just connected — and someone who leaves never says so. A roster
@@ -1027,7 +1032,47 @@ export function GameScreen({
    */
   const confirmMsRef = useRef(200);
 
+  /** Casual movement never waits and is never refused. */
+  const freeMoves = route.mode === WorldMode.Casual;
+  /**
+   * When the last free move went out.
+   *
+   * Casual keeps no outbox, so "is anything in flight?" cannot be answered by
+   * looking at one. It is answered by silence instead: nothing sent for a
+   * while means nothing is still travelling, and the authoritative position
+   * can be taken without yanking the player off a hop they just made.
+   *
+   * This also heals the one thing fire-and-forget gives up. solsocket
+   * broadcasts an absolute position, so a dropped packet fixes itself on the
+   * next one; a move is a DELTA, so a dropped one is gone for good. The
+   * reconcile sweep is what puts the player back where the chain has them.
+   */
+  const lastFreeSendAtRef = useRef(0);
+
   function enqueueAction(action: Outbound) {
+    // Casual: solsocket's `broadcast`. `move_free` carries no sequence and
+    // observes no cadence, so there is nothing to serialise behind, nothing
+    // to retry, and nothing that can come back refused — which is the only
+    // reason a prediction ever had to be rolled back. Send it and move on.
+    if (freeMoves && action.kind === "move") {
+      lastFreeSendAtRef.current = performance.now();
+      void boot.client
+        .sendMoveFree({
+          day: route.day,
+          direction: action.direction,
+          session: boot.session,
+          x: action.x,
+          y: action.y,
+          attemptNonce: action.attempt,
+        })
+        .catch((e) => {
+          const why = errorText(e);
+          if (why.includes("SessionExpired") || why.includes("BadSession")) {
+            void renewSession();
+          }
+        });
+      return;
+    }
     outboxRef.current.push(action);
     pumpOutbox();
   }
@@ -1483,8 +1528,14 @@ export function GameScreen({
         // rollup's own cadence: each hop is charged a slot whether it travels
         // alone or with three others, so nothing is gained by asking for hops
         // faster than one per slot.
+        // Casual sends every hop the moment it happens, so a held direction
+        // runs at a rate chosen for how it FEELS rather than for what the
+        // outbox can drain — gather-lite broadcasts at 10Hz for the same
+        // reason. Paid still paces itself to the batches it can confirm.
         repeatMs: () =>
-          Math.max(MS_PER_SLOT, confirmMsRef.current / MAX_MOVE_BATCH),
+          freeMoves
+            ? 110
+            : Math.max(MS_PER_SLOT, confirmMsRef.current / MAX_MOVE_BATCH),
       },
     );
     return detach;

@@ -1625,6 +1625,71 @@ export class CrossyClient {
   }
 
 
+
+  /**
+   * Casual movement: send it and forget it.
+   *
+   * `move_free` carries no sequence and observes no cadence, so nothing this
+   * sends can come back refused for ordering or rate — which means the caller
+   * never has to wait for one hop before sending the next, and never has to
+   * roll a prediction back because a hop was refused. That rollback is what a
+   * player sees as rubberbanding.
+   *
+   * This is solsocket's `broadcast`: the subscription carries the truth, the
+   * transaction is not awaited, and the chain assigns the sequence itself.
+   * The chain still simulates — traffic kills, rocks stop you — it simply
+   * never says no. Paid keeps `sendMove`/`sendMoveBatch`.
+   */
+  async sendMoveFree(params: {
+    day: bigint;
+    direction: Direction;
+    session: Keypair;
+    x: number;
+    y: number;
+    attemptNonce: number;
+  }): Promise<string> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(this.region, WorldMode.Casual, params.day);
+    let [nx, ny] = [params.x, params.y];
+    if (params.direction === Direction.Forward) ny += 1;
+    else if (params.direction === Direction.Backward) ny -= 1;
+    else if (params.direction === Direction.Left) nx -= 1;
+    else nx += 1;
+    if (nx < 0 || nx > 63 || ny < 0) throw new Error("out of bounds");
+    const src = sectorForTile(world, params.x, params.y);
+    const dst = sectorForTile(world, nx, ny);
+    const ix = await this.erProgram.methods
+      .moveFree(
+        params.attemptNonce,
+        params.direction,
+        new BN(Date.now() * 8 + params.direction),
+      )
+      .accountsPartial({
+        world,
+        run: pda.run(world, wallet),
+        sourceSector: src,
+        destSector: dst.equals(src) ? null : dst,
+        chunk: pda.chunk(this.region, params.day, Math.floor(ny / 16)),
+        best: pda.best(world, wallet),
+        signer: params.session.publicKey,
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.track(
+      "MoveFree",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true },
+    );
+  }
+
   /**
    * Several hops in ONE transaction — the same hot path as `sendMove`, minus
    * the round trip per hop.

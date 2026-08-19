@@ -264,6 +264,15 @@ pub mod crossy_world {
         instructions::gameplay::move_action(ctx, attempt_nonce, action_seq, direction, uniq)
     }
 
+    pub fn move_free(
+        ctx: Context<MoveAction>,
+        attempt_nonce: u32,
+        direction: u8,
+        uniq: u64,
+    ) -> Result<()> {
+        instructions::gameplay::move_free(ctx, attempt_nonce, direction, uniq)
+    }
+
     pub fn move_batch(
         ctx: Context<MoveBatch>,
         attempt_nonce: u32,

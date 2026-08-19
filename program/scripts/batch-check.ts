@@ -237,23 +237,35 @@ async function main() {
       }
     }
   }
-  /** A run of `n` free tiles from (x, y), preferring forward. */
+  /**
+   * A run of `n` free tiles from (x, y), staying inside the grass spawn zone
+   * so nothing here can die and no terrain can refuse a hop. Wanders sideways
+   * and back once forward runs out, so repeated calls never exhaust the space.
+   */
   const freePath = (x: number, y: number, n: number): number[] | null => {
     const out: number[] = [];
+    const used = new Set<string>([`${x},${y}`]);
     let [cx, cy] = [x, y];
     for (let i = 0; i < n; i++) {
-      const options = [
+      const options: number[][] = [
         [0, cx, cy + 1],
         [3, cx + 1, cy],
         [2, cx - 1, cy],
+        [1, cx, cy - 1],
       ];
       const pick = options.find(
-        ([, nx, ny]) => nx >= 0 && nx < 64 && ny < 16 && !blocked.has(`${nx},${ny}`),
+        ([, nx, ny]) =>
+          nx >= 0 &&
+          nx < 64 &&
+          ny >= 1 &&
+          ny < 15 &&
+          !blocked.has(`${nx},${ny}`) &&
+          !used.has(`${nx},${ny}`),
       );
       if (!pick) return null;
       out.push(pick[0]);
       [cx, cy] = [pick[1], pick[2]];
-      blocked.add(`${cx},${cy}`); // never revisit a tile within one batch
+      used.add(`${cx},${cy}`);
     }
     return out;
   };
@@ -313,7 +325,10 @@ async function main() {
     for (let i = 0; i < 12; i++) {
       run = await er.account.playerRun.fetch(runPda);
       const p4 = freePath(run.x, run.y, 4);
-      if (!p4) break;
+      if (!p4) {
+        console.log(`  (no free path from (${run.x}, ${run.y}) — stopping stream)`);
+        break;
+      }
       const t = Date.now();
       try {
         await batch(p4, run);
@@ -336,6 +351,64 @@ async function main() {
       `${landed} landed, ${refusedTooFast} TooFast, ${other} other; ` +
         `avg ${avgGap}ms between sends vs ${4 * 50}ms of cadence owed per batch`,
     );
+  }
+
+  // 5. CASUAL IS UNREFUSABLE. `move_free` carries no sequence and observes no
+  // cadence, so a burst fired without waiting for anything — the way a player
+  // holding a direction actually generates input — must land in full. Under
+  // the paid rules the same burst is refused for everything after the first:
+  // the sequence has not advanced and the cadence has not been paid.
+  {
+    run = await er.account.playerRun.fetch(runPda);
+    const burst = freePath(run.x, run.y, 4);
+    if (!burst) console.log(`  (no free path from (${run.x}, ${run.y}) for the casual burst)`);
+    if (burst) {
+      const seqBefore = Number(run.actionSeq);
+      const staleSeq = new BN(seqBefore);
+      let x = run.x;
+      let y = run.y;
+      const sends = burst.map((d) => {
+        const [nx, ny] =
+          d === 0 ? [x, y + 1] : d === 1 ? [x, y - 1] : d === 2 ? [x - 1, y] : [x + 1, y];
+        const src = sectorPda(Math.floor(x / 8), Math.floor(y / 8));
+        const dst = sectorPda(Math.floor(nx / 8), Math.floor(ny / 8));
+        const from = { x, y };
+        [x, y] = [nx, ny];
+        return { d, src, dst, ny, from };
+      });
+      // All four at once, nothing awaited between them — no sequence to get
+      // right, so order does not matter.
+      const outcomes = await Promise.allSettled(
+        sends.map((m) =>
+          er.methods
+            .moveFree(1, m.d, new BN(Date.now() * 8 + m.d))
+            .accountsPartial({
+              world,
+              run: runPda,
+              sourceSector: m.src,
+              destSector: m.dst.equals(m.src) ? null : m.dst,
+              chunk: chunkPda(Math.floor(m.ny / 16)),
+              best: bestPda,
+              signer: session.publicKey,
+            })
+            .rpc({ skipPreflight: false, commitment: "processed" }),
+        ),
+      );
+      const rejected = outcomes.filter((o) => o.status === "rejected");
+      await sleep(600);
+      run = await er.account.playerRun.fetch(runPda);
+      record(
+        "casual refuses nothing: four moves fired at once all land",
+        rejected.length === 0 && Number(run.actionSeq) === seqBefore + 4,
+        `${outcomes.length - rejected.length}/4 accepted, seq ${seqBefore} -> ${run.actionSeq}` +
+          (rejected.length
+            ? `; first refusal: ${errText((rejected[0] as any).reason)}`
+            : ""),
+      );
+      // ...and the stale sequence that paid movement would have refused is
+      // simply not consulted.
+      void staleSeq;
+    }
   }
 
   console.log(`\n${results.filter((r) => r.startsWith("PASS")).length}/${results.length} passed`);

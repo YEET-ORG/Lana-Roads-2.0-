@@ -4287,6 +4287,120 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "moveFree",
+      "discriminator": [
+        230,
+        196,
+        240,
+        179,
+        117,
+        155,
+        152,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "world",
+          "docs": [
+            "Mutable: a move into a hazard window is fatal, and death updates the",
+            "world's active-player count."
+          ],
+          "writable": true
+        },
+        {
+          "name": "run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "run.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "sourceSector",
+          "docs": [
+            "Source sector (must match the run's current tile)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "destSector",
+          "docs": [
+            "Destination sector for cross-sector moves; None when the destination",
+            "shares the source sector (Anchor forbids duplicate mutable accounts)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "chunk",
+          "docs": [
+            "Chunk covering the destination row."
+          ]
+        },
+        {
+          "name": "best",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "run.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "attemptNonce",
+          "type": "u32"
+        },
+        {
+          "name": "direction",
+          "type": "u8"
+        },
+        {
+          "name": "uniq",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "openDay",
       "discriminator": [
         119,

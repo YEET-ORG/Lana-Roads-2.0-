@@ -585,6 +585,49 @@ pub fn move_action(
     attempt_nonce: u32,
     action_seq: u64,
     direction: u8,
+    uniq: u64,
+) -> Result<()> {
+    move_one(ctx, attempt_nonce, Some(action_seq), direction, uniq)
+}
+
+/// Movement with no sequence and no cadence — casual only.
+///
+/// Casual is free to play and pays out nothing, so the ordering and rate
+/// rules that protect the prize pot buy it nothing and cost it everything.
+/// `action_seq` must match EXACTLY at execution, so two moves in flight can
+/// land out of order and the loser is refused; `TooFast` refuses anything
+/// inside the cadence. Every refusal rolls a prediction back, and a rolled
+/// back prediction is what a player sees as rubberbanding — or, once the
+/// retries run out, as "refused by the world".
+///
+/// This is the solsocket model: the chain still SIMULATES — traffic still
+/// kills, rocks still stop you, the frontier still fails closed — it just
+/// never refuses an action for arriving in the wrong order or too soon. The
+/// sequence becomes a counter the chain assigns, exactly like `set_presence`,
+/// and clients fire and forget because nothing can come back refused.
+///
+/// Paid keeps `move_action`. There, ordering is worth a round trip.
+pub fn move_free(
+    ctx: Context<MoveAction>,
+    attempt_nonce: u32,
+    direction: u8,
+    uniq: u64,
+) -> Result<()> {
+    require!(
+        ctx.accounts.world.mode == WorldMode::Casual,
+        CrossyError::InvalidTransition
+    );
+    move_one(ctx, attempt_nonce, None, direction, uniq)
+}
+
+/// One-tile movement. `action_seq` present = paid rules (exact sequence, one
+/// accepted move per slot); absent = casual rules (chain-assigned sequence,
+/// no cadence).
+fn move_one(
+    ctx: Context<MoveAction>,
+    attempt_nonce: u32,
+    action_seq: Option<u64>,
+    direction: u8,
     _uniq: u64, // client uniqueness memo: distinct logical actions never share bytes
 ) -> Result<()> {
     let clock = Clock::get()?;
@@ -599,30 +642,34 @@ pub fn move_action(
         &ctx.accounts.signer.key(),
         session_scope::MOVE,
         attempt_nonce,
-        action_seq,
+        // Unsequenced callers are admitted at whatever the run is on now.
+        action_seq.unwrap_or(run.action_seq),
         now,
     )?;
 
-    // Cadence: one accepted move per ER slot; slowed players every 2 slots.
+    // Being stunned is a game effect, not a rate limit: it applies in both
+    // modes. The cadence below is the rate limit, and casual has none.
     let (stunned, slowed_zone) = tile_effects(&ctx.accounts.source_sector, run.x, run.y, now);
     require!(
         !stunned && now >= run.stunned_until,
         CrossyError::Immobilized
     );
-    let min_gap = if slowed_zone || now < run.slowed_until {
-        2
-    } else {
-        1
-    };
-    require!(
-        run.last_move_slot == 0
-            || clock.slot
-                >= run
-                    .last_move_slot
-                    .checked_add(min_gap)
-                    .ok_or(CrossyError::Overflow)?,
-        CrossyError::TooFast
-    );
+    if action_seq.is_some() {
+        let min_gap = if slowed_zone || now < run.slowed_until {
+            2
+        } else {
+            1
+        };
+        require!(
+            run.last_move_slot == 0
+                || clock.slot
+                    >= run
+                        .last_move_slot
+                        .checked_add(min_gap)
+                        .ok_or(CrossyError::Overflow)?,
+            CrossyError::TooFast
+        );
+    }
 
     let dir = Direction::from_u8(direction).ok_or(CrossyError::OutOfBounds)?;
     let (nx, ny) = grid::step(run.x, run.y, dir).ok_or(CrossyError::OutOfBounds)?;
@@ -1479,6 +1526,17 @@ mod tests {
         let charged: u64 = (0..4).map(|_| 2u64).sum();
         assert_eq!(charged, 8);
         assert_eq!(hop_instant(100, 0, charged), (108, 400));
+    }
+
+    /// Casual admits an action at whatever sequence the run is already on,
+    /// so a move can never be refused for arriving out of order. Paid passes
+    /// the client's claim through unchanged and is refused when it is stale.
+    #[test]
+    fn casual_is_unsequenced_and_paid_is_not() {
+        let run_seq = 41u64;
+        assert_eq!(None::<u64>.unwrap_or(run_seq), run_seq);
+        assert_eq!(Some(39u64).unwrap_or(run_seq), 39);
+        assert_ne!(Some(39u64).unwrap_or(run_seq), run_seq);
     }
 
     #[test]
