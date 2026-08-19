@@ -9,14 +9,21 @@
 # the current source. A keeper that swallowed those instead once retried a
 # deleted program for five days while looking perfectly healthy.
 #
-# Usage: REGION=0 scripts/run-keeper.sh   (each region needs its own process;
-# they must not share KEEPER_HEALTH_PORT.)
+# Usage: REGION=0 MODES=1 scripts/run-keeper.sh
+#
+# One process per (region, mode). Regions are separate worlds, and modes must
+# be separated too: the keeper walks its MODES list in order within one cycle,
+# so a paid world spending minutes creating sectors on a throttled RPC starves
+# the casual world behind it — which is the one everybody actually plays. Give
+# casual its own process and it can never wait on paid.
+#
+# Each process needs its own KEEPER_HEALTH_PORT.
 cd "$(dirname "$0")/.."
 export REGION="${REGION:-0}"
 export KEEPER_HEALTH_PORT="${KEEPER_HEALTH_PORT:-$((8787 + REGION))}"
-echo "$(date -u +%H:%M:%S) keeper region $REGION, health :$KEEPER_HEALTH_PORT" >&2
+echo "$(date -u +%H:%M:%S) keeper region $REGION modes ${MODES:-0,1}, health :$KEEPER_HEALTH_PORT" >&2
 while true; do
   npx tsx scripts/frontier-keeper.ts
-  echo "$(date -u +%H:%M:%S) keeper region $REGION exited ($?), restarting in 5s" >&2
+  echo "$(date -u +%H:%M:%S) keeper region $REGION modes ${MODES:-0,1} exited ($?), restarting in 5s" >&2
   sleep 5
 done

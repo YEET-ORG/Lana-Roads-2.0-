@@ -249,12 +249,21 @@ async function main() {
   // Preflight: the program itself, before anything derived from it. A closed
   // or not-yet-deployed PROGRAM_ID still leaves its old PDAs on chain, so the
   // config fetch below would happily succeed and every write would fail.
-  const programAccount = await baseConn.getAccountInfo(PROGRAM_ID);
-  if (!programAccount?.executable) {
-    throw new Error(
-      `program ${PROGRAM_ID.toBase58()} is not deployed on ${BASE_RPC} — ` +
-        `nothing this keeper sends can land`,
-    );
+  //
+  // Only a definite answer counts. A throttled RPC that refuses to answer is
+  // not evidence the program is gone, and refusing to start on one 429 would
+  // trade a five-day silent stall for a five-day restart loop.
+  try {
+    const programAccount = await baseConn.getAccountInfo(PROGRAM_ID);
+    if (!programAccount?.executable) {
+      throw new Error(
+        `program ${PROGRAM_ID.toBase58()} is not deployed on ${BASE_RPC} — ` +
+          `nothing this keeper sends can land`,
+      );
+    }
+  } catch (e: any) {
+    if (/is not deployed/.test(String(e?.message))) throw e;
+    log(`could not verify the program is deployed (${e?.message ?? e}); continuing`);
   }
 
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
