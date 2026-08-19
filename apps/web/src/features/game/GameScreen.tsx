@@ -1054,6 +1054,36 @@ export function GameScreen({
     // observes no cadence, so there is nothing to serialise behind, nothing
     // to retry, and nothing that can come back refused — which is the only
     // reason a prediction ever had to be rolled back. Send it and move on.
+    // Casual kicks are free too: no sequence, no five second cooldown. The
+    // swing itself is unchanged — it still only strikes the tile the kicker
+    // faces — it just cannot be refused.
+    if (freeMoves && action.kind === "kick") {
+      lastFreeSendAtRef.current = performance.now();
+      const kick = {
+        day: route.day,
+        mode: WorldMode.Casual,
+        session: boot.session,
+        attemptNonce: action.attempt,
+        facing: action.facing,
+        target: action.target,
+      };
+      void boot.client
+        .sendKick(kick)
+        .catch((e) => {
+          const why = errorText(e);
+          if (why.includes("SessionExpired") || why.includes("BadSession")) {
+            void renewSession();
+            return;
+          }
+          // A rollup still running the previous program has no `kick_free`.
+          // Fall back to the sequenced kick rather than swallowing the swing,
+          // so an upgrade rolling out underneath a live player is invisible.
+          if (why.includes("Fallback") || why.includes("InstructionFallback")) {
+            void boot.client.sendKick({ ...kick, actionSeq: action.seq }).catch(() => {});
+          }
+        });
+      return;
+    }
     if (freeMoves && action.kind === "move") {
       lastFreeSendAtRef.current = performance.now();
       void boot.client

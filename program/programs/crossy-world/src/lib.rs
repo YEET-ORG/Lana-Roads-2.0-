@@ -300,6 +300,10 @@ pub mod crossy_world {
     }
 
     // ---- combat (ER) ----------------------------------------------------
+    pub fn kick_free(ctx: Context<Kick>, attempt_nonce: u32, uniq: u64) -> Result<()> {
+        instructions::combat::kick_free(ctx, attempt_nonce, uniq)
+    }
+
     pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, uniq: u64) -> Result<()> {
         instructions::combat::kick(ctx, attempt_nonce, action_seq, uniq)
     }

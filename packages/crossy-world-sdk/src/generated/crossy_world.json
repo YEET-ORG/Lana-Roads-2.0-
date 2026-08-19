@@ -3602,6 +3602,117 @@
       ]
     },
     {
+      "name": "kick_free",
+      "discriminator": [
+        129,
+        13,
+        38,
+        120,
+        25,
+        6,
+        188,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "world"
+        },
+        {
+          "name": "kicker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "kicker.wallet",
+                "account": "PlayerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "target",
+          "docs": [
+            "The player being kicked. Optional: a kick thrown at empty space is a",
+            "legal, wasted kick rather than a failed transaction."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "target.wallet",
+                "account": "PlayerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "target_sector",
+          "docs": [
+            "Sector containing the target's current tile."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "dest_sector",
+          "docs": [
+            "Sector containing the knockback destination; None when it shares the",
+            "target's sector (Anchor forbids duplicate mutable accounts)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "chunk",
+          "docs": [
+            "Chunk covering the knockback destination row."
+          ],
+          "optional": true
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "attempt_nonce",
+          "type": "u32"
+        },
+        {
+          "name": "uniq",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "list_agent",
       "discriminator": [
         158,

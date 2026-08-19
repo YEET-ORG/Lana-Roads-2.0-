@@ -3608,6 +3608,117 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "kickFree",
+      "discriminator": [
+        129,
+        13,
+        38,
+        120,
+        25,
+        6,
+        188,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "world"
+        },
+        {
+          "name": "kicker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "kicker.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "target",
+          "docs": [
+            "The player being kicked. Optional: a kick thrown at empty space is a",
+            "legal, wasted kick rather than a failed transaction."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "target.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "targetSector",
+          "docs": [
+            "Sector containing the target's current tile."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "destSector",
+          "docs": [
+            "Sector containing the knockback destination; None when it shares the",
+            "target's sector (Anchor forbids duplicate mutable accounts)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "chunk",
+          "docs": [
+            "Chunk covering the knockback destination row."
+          ],
+          "optional": true
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "attemptNonce",
+          "type": "u32"
+        },
+        {
+          "name": "uniq",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "listAgent",
       "discriminator": [
         158,

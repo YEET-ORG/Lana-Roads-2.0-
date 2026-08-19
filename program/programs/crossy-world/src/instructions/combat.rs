@@ -73,7 +73,37 @@ pub struct Kick<'info> {
 /// failed transaction. A connecting kick displaces the target one tile. The
 /// destination must be in bounds, not statically blocked, and unoccupied,
 /// but it MAY be a hazard window: the environment kills, never the kick.
-pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64) -> Result<()> {
+pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, uniq: u64) -> Result<()> {
+    kick_one(ctx, attempt_nonce, Some(action_seq), uniq)
+}
+
+/// Kicking with no sequence and no cooldown — casual only.
+///
+/// The same argument as `move_free`: an exact `action_seq` and a five second
+/// cooldown are there to keep a prize pot honest, and casual has no pot. Both
+/// could refuse a swing, and a refused action rolls the client's prediction
+/// back, which is what a player sees as the game fighting them.
+///
+/// What a kick DOES is untouched — it still only strikes the tile the kicker
+/// faces, still cannot aim anywhere else, still displaces exactly one tile
+/// into a destination that must be in bounds and unoccupied. Only the
+/// permission to swing is free.
+pub fn kick_free(ctx: Context<Kick>, attempt_nonce: u32, uniq: u64) -> Result<()> {
+    require!(
+        ctx.accounts.world.mode == WorldMode::Casual,
+        CrossyError::InvalidTransition
+    );
+    kick_one(ctx, attempt_nonce, None, uniq)
+}
+
+/// `action_seq` present = paid rules (exact sequence, cooldown enforced);
+/// absent = casual rules (chain-assigned sequence, no cooldown).
+fn kick_one(
+    ctx: Context<Kick>,
+    attempt_nonce: u32,
+    action_seq: Option<u64>,
+    _uniq: u64,
+) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
     let revealed_rows = ctx.accounts.world.revealed_rows;
@@ -89,11 +119,16 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
             &ctx.accounts.signer.key(),
             session_scope::KICK,
             attempt_nonce,
-            action_seq,
+            // Unsequenced callers are admitted at whatever the run is on now.
+            action_seq.unwrap_or(kicker.action_seq),
             now,
         )?;
+        // Stun is a game effect and applies in both modes; the cooldown is a
+        // rate limit, and casual has none.
         require!(now >= kicker.stunned_until, CrossyError::Immobilized);
-        require!(now >= kicker.kick_ready_ts, CrossyError::Cooldown);
+        if action_seq.is_some() {
+            require!(now >= kicker.kick_ready_ts, CrossyError::Cooldown);
+        }
     }
 
     // The tile the kicker is facing, and the tile a target there would be
@@ -160,9 +195,11 @@ pub fn kick(ctx: Context<Kick>, attempt_nonce: u32, action_seq: u64, _uniq: u64)
 
     // The swing costs the same whether or not it landed. No kill credit.
     let kicker = &mut ctx.accounts.kicker;
-    kicker.kick_ready_ts = now
-        .checked_add(KICK_COOLDOWN_SECONDS)
-        .ok_or(CrossyError::Overflow)?;
+    if action_seq.is_some() {
+        kicker.kick_ready_ts = now
+            .checked_add(KICK_COOLDOWN_SECONDS)
+            .ok_or(CrossyError::Overflow)?;
+    }
     kicker.action_seq = kicker
         .action_seq
         .checked_add(1)

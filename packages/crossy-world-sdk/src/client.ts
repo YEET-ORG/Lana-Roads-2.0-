@@ -1799,7 +1799,12 @@ export class CrossyClient {
     mode?: WorldMode;
     session: Keypair;
     attemptNonce: number;
-    actionSeq: number;
+    /**
+     * Omit in casual: `kick_free` takes no sequence and observes no cooldown,
+     * so a swing can never be refused for arriving out of order or too soon.
+     * Paid must supply it.
+     */
+    actionSeq?: number;
     facing: Direction;
     /** Omit to swing at empty space — a legal, wasted kick. */
     target?: { wallet: PublicKey; x: number; y: number };
@@ -1832,8 +1837,15 @@ export class CrossyClient {
         };
       }
     }
-    const ix = await this.erProgram.methods
-      .kick(params.attemptNonce, new BN(params.actionSeq), new BN(Date.now()))
+    const method =
+      params.actionSeq == null
+        ? this.erProgram.methods.kickFree(params.attemptNonce, new BN(Date.now()))
+        : this.erProgram.methods.kick(
+            params.attemptNonce,
+            new BN(params.actionSeq),
+            new BN(Date.now()),
+          );
+    const ix = await method
       .accountsPartial({
         world,
         kicker: pda.run(world, wallet),
@@ -1846,7 +1858,7 @@ export class CrossyClient {
     tx.feePayer = params.session.publicKey;
     tx.sign(params.session);
     return this.track(
-      "Kick",
+      params.actionSeq == null ? "KickFree" : "Kick",
       "er",
       () =>
         this.erConnection.sendRawTransaction(tx.serialize(), {
