@@ -300,6 +300,44 @@ async function main() {
     `(${y3.x}, ${y3.y}) -> (${run.x}, ${run.y})`,
   );
 
+  // 4. STREAM: what the browser actually does — send a batch, wait for the
+  // confirmation, send the next. If the cadence a batch owes outlasts the
+  // round trip, the next batch is refused as TooFast, the client retries,
+  // and the player watches their prediction snap back. That is rubberbanding.
+  {
+    let refusedTooFast = 0;
+    let other = 0;
+    let landed = 0;
+    const gaps: number[] = [];
+    let lastAt = 0;
+    for (let i = 0; i < 12; i++) {
+      run = await er.account.playerRun.fetch(runPda);
+      const p4 = freePath(run.x, run.y, 4);
+      if (!p4) break;
+      const t = Date.now();
+      try {
+        await batch(p4, run);
+        landed++;
+        if (lastAt) gaps.push(t - lastAt);
+        lastAt = t;
+      } catch (e) {
+        const why = errText(e);
+        if (why.includes("TooFast")) refusedTooFast++;
+        else other++;
+        lastAt = t;
+      }
+    }
+    const avgGap = gaps.length
+      ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length)
+      : 0;
+    record(
+      "streaming batches back-to-back is never refused for cadence",
+      refusedTooFast === 0,
+      `${landed} landed, ${refusedTooFast} TooFast, ${other} other; ` +
+        `avg ${avgGap}ms between sends vs ${4 * 50}ms of cadence owed per batch`,
+    );
+  }
+
   console.log(`\n${results.filter((r) => r.startsWith("PASS")).length}/${results.length} passed`);
   process.exit(results.every((r) => r.startsWith("PASS")) ? 0 : 1);
 }

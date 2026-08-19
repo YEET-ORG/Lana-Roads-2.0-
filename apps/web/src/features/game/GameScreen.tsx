@@ -428,7 +428,7 @@ export function GameScreen({
             score: run.score,
             facing: run.facing,
           };
-          scene?.setLocal(run.x, run.y, run.facing);
+          scene?.setLocal(run.x, run.y, run.facing, true);
         }
         // Death/revive presentation: the world reacts before the overlay.
         if (state === "deadAwaitingRevive" || state === "ended") {
@@ -1048,8 +1048,29 @@ export function GameScreen({
    * the gap below guarantees. A send that loses its race is retried with the
    * same sequence and is idempotent by construction.
    */
+  /**
+   * Earliest this client may send again, by the program's own cadence rule.
+   *
+   * Every hop is charged a rollup slot, so a batch of four leaves the run
+   * owing four. On a link slower than that the round trip hides it entirely —
+   * but on a fast one the next batch arrives early, is refused as `TooFast`,
+   * waits out the retry window, and the player watches their prediction snap
+   * back. Rubberbanding on a GOOD connection, which is a poor joke.
+   *
+   * So keep the rule on this side too. One extra slot covers the time between
+   * sending and executing, which is not observable from here.
+   */
+  const cadenceReadyRef = useRef(0);
+  const cadenceTimerRef = useRef(0);
+
   function pumpOutbox() {
     if (inFlightRef.current) return; // one batch at a time, by design
+    const owedFor = cadenceReadyRef.current - performance.now();
+    if (owedFor > 0) {
+      window.clearTimeout(cadenceTimerRef.current);
+      cadenceTimerRef.current = window.setTimeout(pumpOutbox, owedFor);
+      return;
+    }
     const from = outboxRef.current.findIndex((a) => !a.sent);
     if (from === -1) return;
     const next = outboxRef.current[from];
@@ -1067,6 +1088,8 @@ export function GameScreen({
 
     inFlightRef.current = batch;
     lastSendAtRef.current = performance.now();
+    cadenceReadyRef.current =
+      lastSendAtRef.current + (batch.length + 1) * MS_PER_SLOT;
     for (const a of batch) {
       a.sent = true;
       a.tries += 1;
@@ -1178,6 +1201,8 @@ export function GameScreen({
     if (head.sig) boot.client.markTx(head.sig, "failed", "refused by the world");
     outboxRef.current = [];
     inFlightRef.current = null;
+    window.clearTimeout(cadenceTimerRef.current);
+    cadenceReadyRef.current = 0;
     reconcileNowRef.current();
     rejectedRunRef.current += 1;
     if (rejectedRunRef.current >= 3) {

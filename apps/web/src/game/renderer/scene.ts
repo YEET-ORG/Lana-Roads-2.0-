@@ -161,6 +161,13 @@ type RigState =
       fromScale: THREE.Vector3;
       skipAnticipation: boolean;
     }
+  | {
+      name: "correct";
+      from: THREE.Vector3;
+      to: THREE.Vector3;
+      start: number;
+      duration: number;
+    }
   | { name: "land"; start: number }
   | { name: "dead"; cause: "impact" | "water"; start: number };
 
@@ -306,6 +313,37 @@ class PlayerRig {
     return Math.max(60, Math.min(HOP_MS, 200 / (1 + this.queue.length)));
   }
 
+  /**
+   * Slide to where authority says the player is.
+   *
+   * This is not a move the player made — it is the difference between what
+   * was predicted and what the chain accepted, and it is usually BACKWARDS.
+   * Playing it as a hop makes the character look like it deliberately jumped
+   * back; that is what rubberbanding looks like. A short ground slide with no
+   * arc, no squash and no sound reads as what it is: a correction, mostly
+   * beneath notice.
+   *
+   * Batching made this matter more, not less. A batch commits four hops on
+   * one prediction, so a single hop the chain saw differently now costs up to
+   * three tiles of correction instead of one.
+   */
+  correctTo(target: THREE.Vector3, facing?: number) {
+    if (this.state.name === "dead") return;
+    if (facing != null) this.targetYaw = facingYaw(facing);
+    this.queue.length = 0;
+    const from = this.root.position.clone();
+    if (from.distanceToSquared(target) < 1e-6) return;
+    this.state = {
+      name: "correct",
+      from,
+      to: target.clone(),
+      start: performance.now(),
+      // Long enough to read as motion rather than a jump, short enough that
+      // the next real hop is never queued behind it.
+      duration: 140,
+    };
+  }
+
   /** In-place hop for menu agent swaps. */
   flourish() {
     if (this.state.name === "dead") return;
@@ -417,6 +455,14 @@ class PlayerRig {
           const next = this.queue.shift();
           if (next) this.hopTo(next, undefined, this.queuedHopMs());
         }
+      }
+    } else if (s.name === "correct") {
+      const k = clamp01((now - s.start) / s.duration);
+      this.root.position.lerpVectors(s.from, s.to, easeOutCubic(k));
+      this.body.position.y = 0;
+      if (k >= 1) {
+        this.root.position.copy(s.to);
+        this.state = { name: "idle" };
       }
     } else if (s.name === "land") {
       const k = clamp01((now - s.start) / LAND_MS);
@@ -1152,8 +1198,16 @@ export class WorldScene {
 
   // ---- local player intents (called by GameScreen) ----
 
-  /** Authoritative/predicted local tile: the rig hops to it. */
-  setLocal(x: number, y: number, facing?: number) {
+  /**
+   * Local tile. `correction` marks the authoritative path — a tile the chain
+   * decided, rather than one the player asked for.
+   *
+   * The distinction is the whole difference between a game that feels
+   * responsive and one that rubber-bands. A move the player made should hop.
+   * A disagreement between prediction and authority should slide, quietly,
+   * and be over before it is noticed.
+   */
+  setLocal(x: number, y: number, facing?: number, correction = false) {
     const target = new THREE.Vector3(x + 0.5, 0, -y);
     // Whether the TILE changed, not whether the mesh has caught up to it.
     // Authority repeats the same position several times a second (the
@@ -1166,8 +1220,8 @@ export class WorldScene {
     const authoritativeJump = this.localTarget.distanceTo(target);
     this.localTarget.copy(target);
     if (facing != null) this.local.targetYaw = facingYaw(facing);
-    if (authoritativeJump > 2.5) {
-      // Large correction / spawn: ground snap with a network pulse.
+    if (authoritativeJump > 8) {
+      // Spawn, revive, or a genuine hole in the feed: snap with a pulse.
       this.local.teleport(target);
       this.dust.burst(target, {
         count: 8,
@@ -1176,7 +1230,13 @@ export class WorldScene {
         up: 1.4,
         size: 0.06,
       });
-    } else if (!sameTile) {
+    } else if (sameTile) {
+      // Nothing to do — authority repeating a tile the rig already owns.
+    } else if (correction) {
+      // The chain disagreed with the prediction. Slide, do not hop, and do
+      // not chirp: the player did not ask for this movement.
+      this.local.correctTo(target, facing);
+    } else {
       this.local.hopTo(target, facing);
       sfx.hop();
     }
