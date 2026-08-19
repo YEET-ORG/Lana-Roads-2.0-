@@ -190,6 +190,12 @@ function startHealthServer() {
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ healthy, staleForMs, ...health }));
   });
+  // A port already in use must not take the keeper down with it — growing
+  // the map matters more than answering a probe — but it must be said out
+  // loud, or the probe silently reports on somebody else's service.
+  server.on("error", (e: any) =>
+    log(`health server on :${HEALTH_PORT} failed (${e?.code ?? e}); continuing without it`),
+  );
   server.listen(HEALTH_PORT, "0.0.0.0", () =>
     log(`health http://0.0.0.0:${HEALTH_PORT}/healthz`),
   );
