@@ -26,6 +26,12 @@ export const SAFE_ZONE_ROWS = 16;
 export const SECTOR_EDGE = 8;
 export const SECTORS_PER_ROW = 8;
 export const CHUNK_LOOKAHEAD_CHUNKS = 10;
+
+/**
+ * Most hops one `move_batch` may carry. Mirrors the program's
+ * `MAX_MOVE_BATCH`; the accounts a batch can name cover no more.
+ */
+export const MAX_MOVE_BATCH = 4;
 export const CHUNK_REQUEST_MARGIN = CHUNK_LOOKAHEAD_CHUNKS * CHUNK_ROWS;
 export const DEFAULT_VRF_BASE_QUEUE = new PublicKey(
   "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",

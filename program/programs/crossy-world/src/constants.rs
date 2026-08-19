@@ -65,6 +65,18 @@ pub const MAX_AGENT_INDEX: u16 = 256;
 /// only execute on the rollup.
 pub const MS_PER_SLOT: u64 = 50;
 
+/// Most hops one `move_batch` transaction may carry.
+///
+/// A batch exists so a held direction is not throttled to one hop per network
+/// round trip. It is NOT a way to move faster: each hop is charged its own
+/// slot of cadence and evaluated at the instant that cadence puts it at, so a
+/// batch is exactly equivalent to the same hops sent one at a time — it just
+/// costs one round trip instead of four.
+///
+/// Four is the bound the destination accounts can cover: hops that far apart
+/// touch at most four occupancy sectors and two chunks.
+pub const MAX_MOVE_BATCH: usize = 4;
+
 /// USDC uses 6 decimals; amounts below are integer base units.
 pub const USDC_DECIMALS: u8 = 6;
 /// Fresh paid attempt: exactly 1 USDC.

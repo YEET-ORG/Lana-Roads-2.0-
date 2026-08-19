@@ -16,6 +16,7 @@ import {
   MPL_CORE_PROGRAM_ID,
   Direction,
   ENTRY_PRICE,
+  MAX_MOVE_BATCH,
   ReceiptKind,
   SESSION_SCOPE,
   WorldMode,
@@ -1621,6 +1622,106 @@ export class CrossyClient {
         }),
       { quiet: true },
     );
+  }
+
+
+  /**
+   * Several hops in ONE transaction — the same hot path as `sendMove`, minus
+   * the round trip per hop.
+   *
+   * `action_seq` must match exactly at execution, so two moves in flight at
+   * once can land out of order and the loser is refused. That capped movement
+   * at one hop per round trip. A batch carries the hops under a single
+   * sequence and the program applies them in order, charging each one its own
+   * slot of cadence — so this is a saving in round trips, never in cadence.
+   *
+   * The program can only apply hops covered by the accounts it was given, so
+   * the path is trimmed here to what fits: at most four occupancy sectors and
+   * two chunks. Returns the directions actually submitted; anything trimmed is
+   * the caller's to send next.
+   */
+  async sendMoveBatch(params: {
+    day: bigint;
+    mode?: WorldMode;
+    directions: Direction[];
+    session: Keypair;
+    x: number;
+    y: number;
+    attemptNonce: number;
+    actionSeq: number;
+  }): Promise<{ signature: string; sent: Direction[] }> {
+    const wallet = this.wallet.publicKey;
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
+
+    const sectors: PublicKey[] = [sectorForTile(world, params.x, params.y)];
+    const chunks: number[] = [];
+    const sent: Direction[] = [];
+    let [x, y] = [params.x, params.y];
+
+    for (const direction of params.directions.slice(0, MAX_MOVE_BATCH)) {
+      let [nx, ny] = [x, y];
+      if (direction === Direction.Forward) ny += 1;
+      else if (direction === Direction.Backward) ny -= 1;
+      else if (direction === Direction.Left) nx -= 1;
+      else nx += 1;
+      if (nx < 0 || nx > 63 || ny < 0) break;
+
+      // A hop the accounts cannot cover would just stop the batch on chain;
+      // trimming it here keeps the transaction honest about what it will do.
+      const sector = sectorForTile(world, nx, ny);
+      const nextSectors = sectors.some((s) => s.equals(sector))
+        ? sectors
+        : [...sectors, sector];
+      const chunk = Math.floor(ny / 16);
+      const nextChunks = chunks.includes(chunk) ? chunks : [...chunks, chunk];
+      if (nextSectors.length > 4 || nextChunks.length > 2) break;
+
+      sectors.length = 0;
+      sectors.push(...nextSectors);
+      chunks.length = 0;
+      chunks.push(...nextChunks);
+      sent.push(direction);
+      [x, y] = [nx, ny];
+    }
+
+    if (sent.length === 0) throw new Error("no hop fits this batch");
+    if (chunks.length === 0) chunks.push(Math.floor(params.y / 16));
+
+    const ix = await this.erProgram.methods
+      .moveBatch(
+        params.attemptNonce,
+        new BN(params.actionSeq),
+        Buffer.from(sent),
+        new BN(Date.now() * 8 + sent.length),
+      )
+      .accountsPartial({
+        world,
+        run: pda.run(world, wallet),
+        sectorA: sectors[0],
+        sectorB: sectors[1] ?? null,
+        sectorC: sectors[2] ?? null,
+        sectorD: sectors[3] ?? null,
+        chunkA: pda.chunk(this.region, params.day, chunks[0]),
+        chunkB: chunks[1] == null ? null : pda.chunk(this.region, params.day, chunks[1]),
+        best: pda.best(world, wallet),
+        signer: params.session.publicKey,
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    const signature = await this.track(
+      "MoveBatch",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true },
+    );
+    return { signature, sent };
   }
 
   /**

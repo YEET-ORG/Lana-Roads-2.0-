@@ -24,6 +24,7 @@ import { BlockDust, type Surface } from "./effects";
 import { sfx } from "../audio";
 import { arc, clamp01, easeOutBack, easeOutCubic, noise1d, smoothFactor } from "./tween";
 import { getSettings, haptic } from "../../lib/settings";
+import { MAX_MOVE_BATCH } from "@crossy-world/sdk";
 
 export interface RemotePlayer {
   wallet: string;
@@ -240,11 +241,14 @@ class PlayerRig {
     this.body.add(this.model);
   }
 
+  /** Tiles still to be hopped through, oldest first. */
+  private queue: THREE.Vector3[] = [];
+
   onLand(cb: (at: THREE.Vector3) => void) {
     this.landed = cb;
   }
 
-  hopTo(target: THREE.Vector3, facing?: number) {
+  hopTo(target: THREE.Vector3, facing?: number, durationMs?: number) {
     if (this.state.name === "dead") return;
     if (facing != null) this.targetYaw = facingYaw(facing);
     const airborne = this.state.name === "hop";
@@ -262,7 +266,7 @@ class PlayerRig {
       start: performance.now(),
       // Keep near-constant visual speed while allowing a slightly longer
       // catch-up when several accepted grid moves arrive during one hop.
-      duration: Math.min(190, Math.max(90, HOP_MS * distance)),
+      duration: durationMs ?? Math.min(190, Math.max(90, HOP_MS * distance)),
       fromBodyY: this.body.position.y,
       fromScale: this.body.scale.clone(),
       // Chained hops keep momentum: no fresh anticipation mid-run.
@@ -271,29 +275,35 @@ class PlayerRig {
   }
 
   /**
-   * Go to the newest known tile, animating only the last step of it.
+   * Hop a short path one tile at a time, fast enough to arrive on time.
    *
-   * A remote player's position arrives as whatever the chain last said, which
-   * after any gap is several tiles ahead of where they are drawn. Hopping
-   * across that gap plays their movement back as a slide THROUGH the tiles
-   * they already left — the further behind the feed got, the longer the
-   * replay, and the player is never shown where they actually are.
+   * A remote player now advances up to `MAX_MOVE_BATCH` tiles per update,
+   * because that is what one `move_batch` carries. Sliding across that gap in
+   * a single long hop reads as a player skating through tiles they already
+   * left; snapping to the end reads as a teleport. Neither is what happened —
+   * they hopped, four times, over the ~200ms the chain charged them for.
    *
-   * So close the gap instantly and hop the final tile. The rig lands on the
-   * authoritative tile with a real hop, and everything stale is skipped
-   * rather than performed.
+   * So replay it as hops, paced to drain by the time the next update lands.
+   * The queue is bounded by the batch size, and the sender cannot produce
+   * hops faster than one per rollup slot, so this can never fall behind: the
+   * fuller the queue, the shorter each hop. Anything longer than a batch is a
+   * gap in the feed rather than movement, and snaps.
    */
-  catchUpTo(target: THREE.Vector3, facing?: number) {
-    if (this.state.name === "dead") return;
-    const gap = this.root.position.distanceTo(target);
-    if (gap > 1.05) {
-      // One tile short of the target, along the direction of travel.
-      const approach = target
-        .clone()
-        .sub(target.clone().sub(this.root.position).normalize());
-      this.root.position.copy(approach);
-    }
-    this.hopTo(target, facing);
+  followPath(tiles: THREE.Vector3[], facing?: number) {
+    if (this.state.name === "dead" || tiles.length === 0) return;
+    this.queue = tiles.slice(1);
+    this.hopTo(tiles[0], facing, this.queuedHopMs());
+  }
+
+  /**
+   * How long one hop of a queued path may take.
+   *
+   * Each hop the sender made was charged one rollup slot, so the whole queue
+   * has to drain in about `slots * 50ms` to stay level with them. Falling
+   * behind is what "their movement lags on my screen" always was.
+   */
+  private queuedHopMs(): number {
+    return Math.max(60, Math.min(HOP_MS, 200 / (1 + this.queue.length)));
   }
 
   /** In-place hop for menu agent swaps. */
@@ -319,6 +329,7 @@ class PlayerRig {
 
   /** Snap without animation (spawn / large corrections). */
   teleport(target: THREE.Vector3) {
+    this.queue.length = 0;
     this.root.position.copy(target);
     this.state = { name: "idle" };
     this.bumpStart = -Infinity;
@@ -401,6 +412,10 @@ class PlayerRig {
           this.shadow.scale.setScalar(1);
           this.state = { name: "land", start: now };
           this.landed?.(this.root.position);
+          // Straight into the next tile of a queued path: a run of hops
+          // should read as running, not as four separate jumps.
+          const next = this.queue.shift();
+          if (next) this.hopTo(next, undefined, this.queuedHopMs());
         }
       }
     } else if (s.name === "land") {
@@ -455,6 +470,39 @@ class PlayerRig {
     this.body.scale.set(xz, y, xz);
   }
 }
+
+
+/**
+ * The tiles a player passed through to get from `from` to `to`.
+ *
+ * Only the endpoints are known — a batch reports where it finished, not the
+ * order its hops went in — so the path is reconstructed forward-first, then
+ * sideways, which is what a player crossing rows actually does. Returns null
+ * when the gap is bigger than one batch could have produced, because then
+ * this is a hole in the feed rather than movement to replay.
+ */
+function tilePath(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] | null {
+  const dz = Math.round(to.z - from.z);
+  const dx = Math.round(to.x - from.x);
+  if (Math.abs(dx) + Math.abs(dz) > MAX_MOVE_BATCH) return null;
+  const tiles: THREE.Vector3[] = [];
+  const at = from.clone();
+  const stepZ = Math.sign(dz);
+  const stepX = Math.sign(dx);
+  for (let i = 0; i < Math.abs(dz); i++) {
+    at.z += stepZ;
+    tiles.push(at.clone());
+  }
+  for (let i = 0; i < Math.abs(dx); i++) {
+    at.x += stepX;
+    tiles.push(at.clone());
+  }
+  // The last tile must be exactly the authoritative one, sub-tile offsets
+  // included — the reconstruction above must never drift the player.
+  if (tiles.length) tiles[tiles.length - 1] = to.clone();
+  return tiles.length ? tiles : null;
+}
+
 
 export class WorldScene {
   private renderer: THREE.WebGLRenderer;
@@ -1286,10 +1334,11 @@ export class WorldScene {
       const prev = this.remoteTargets.get(p.wallet);
       if (!prev || !prev.equals(target)) {
         this.remoteTargets.set(p.wallet, target);
-        // Always head for the LATEST tile. Anything more than one step away
-        // is caught up instantly rather than replayed.
-        if (prev && prev.distanceTo(target) <= 8)
-          rig.catchUpTo(target, yawFromDelta(target, prev));
+        // One update can now carry a whole batch of hops, so walk the tiles
+        // between rather than sliding or snapping across them. Beyond a
+        // batch it is a gap in the feed, not movement — go straight there.
+        const path = prev ? tilePath(prev, target) : null;
+        if (path) rig.followPath(path, yawFromDelta(target, prev!));
         else rig.teleport(target);
       }
     }

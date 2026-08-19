@@ -4161,6 +4161,132 @@ export type CrossyWorld = {
       ]
     },
     {
+      "name": "moveBatch",
+      "discriminator": [
+        92,
+        42,
+        50,
+        169,
+        171,
+        194,
+        139,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "world",
+          "writable": true
+        },
+        {
+          "name": "run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "run.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "sectorA",
+          "docs": [
+            "Sectors the batch may touch. `sector_a` must cover the starting tile;",
+            "the rest are whatever the client's intended path also crosses. Anchor",
+            "forbids passing the same account twice, so these are all distinct."
+          ],
+          "writable": true
+        },
+        {
+          "name": "sectorB",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "sectorC",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "sectorD",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "chunkA",
+          "docs": [
+            "Chunks covering the rows the batch may enter."
+          ]
+        },
+        {
+          "name": "chunkB",
+          "optional": true
+        },
+        {
+          "name": "best",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "world"
+              },
+              {
+                "kind": "account",
+                "path": "run.wallet",
+                "account": "playerRun"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "attemptNonce",
+          "type": "u32"
+        },
+        {
+          "name": "actionSeq",
+          "type": "u64"
+        },
+        {
+          "name": "directions",
+          "type": "bytes"
+        },
+        {
+          "name": "uniq",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "openDay",
       "discriminator": [
         119,

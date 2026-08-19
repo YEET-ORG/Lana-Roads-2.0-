@@ -5,7 +5,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{seeds, CHUNK_ROWS, ENTRY_PRICE, MS_PER_SLOT, WORLD_WIDTH};
+use crate::constants::{seeds, CHUNK_ROWS, ENTRY_PRICE, MAX_MOVE_BATCH, MS_PER_SLOT, WORLD_WIDTH};
 use crate::errors::CrossyError;
 use crate::events::*;
 use crate::kernel::grid::{self, Direction};
@@ -746,6 +746,309 @@ pub fn move_action(
 }
 
 // ---------------------------------------------------------------------------
+// move_batch (ER) — several hops, one round trip
+// ---------------------------------------------------------------------------
+
+#[derive(Accounts)]
+pub struct MoveBatch<'info> {
+    #[account(
+        mut,
+        seeds = [seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
+        bump = world.bump,
+    )]
+    pub world: Box<Account<'info, WorldHeader>>,
+    #[account(
+        mut,
+        seeds = [seeds::RUN, world.key().as_ref(), run.wallet.as_ref()],
+        bump = run.bump,
+    )]
+    pub run: Box<Account<'info, PlayerRun>>,
+    /// Sectors the batch may touch. `sector_a` must cover the starting tile;
+    /// the rest are whatever the client's intended path also crosses. Anchor
+    /// forbids passing the same account twice, so these are all distinct.
+    #[account(mut)]
+    pub sector_a: Box<Account<'info, OccupancySector>>,
+    #[account(mut)]
+    pub sector_b: Option<Box<Account<'info, OccupancySector>>>,
+    #[account(mut)]
+    pub sector_c: Option<Box<Account<'info, OccupancySector>>>,
+    #[account(mut)]
+    pub sector_d: Option<Box<Account<'info, OccupancySector>>>,
+    /// Chunks covering the rows the batch may enter.
+    pub chunk_a: Box<Account<'info, ChunkDefinition>>,
+    pub chunk_b: Option<Box<Account<'info, ChunkDefinition>>>,
+    #[account(
+        mut,
+        seeds = [seeds::BEST, world.key().as_ref(), run.wallet.as_ref()],
+        bump = best.bump,
+    )]
+    pub best: Box<Account<'info, DailyBest>>,
+    pub signer: Signer<'info>,
+}
+
+/// Where a batch's next hop sits in time.
+///
+/// `charged` is the cadence, in slots, the batch has already spent. A hop is
+/// placed at the slot that cadence puts it at, and the world clock is advanced
+/// by the same amount — so a hazard is where it would be if this hop had been
+/// sent on its own, that many slots after the first. This is the whole reason
+/// a batch cannot be used to cross traffic that four separate moves could not.
+fn hop_instant(base_slot: u64, base_ms: u64, charged: u64) -> (u64, u64) {
+    (
+        base_slot.saturating_add(charged),
+        base_ms.saturating_add(charged.saturating_mul(MS_PER_SLOT)),
+    )
+}
+
+/// Index of the supplied sector covering `(x, y)`, if one was supplied.
+fn sector_index_for(
+    sectors: &[&mut OccupancySector],
+    world: &Pubkey,
+    x: u8,
+    y: u32,
+) -> Option<usize> {
+    let (sx, sy) = grid::sector_of(x, y);
+    sectors
+        .iter()
+        .position(|s| s.world == *world && s.sector_x == sx && s.sector_y == sy)
+}
+
+/// The supplied chunk covering row `y`, if one was supplied.
+fn chunk_for_row<'a>(chunks: &[&'a ChunkDefinition], y: u32) -> Option<&'a ChunkDefinition> {
+    chunks.iter().copied().find(|c| {
+        c.row_start <= y && y < c.row_start.saturating_add(CHUNK_ROWS as u32)
+    })
+}
+
+/// Several one-tile hops in a single transaction.
+///
+/// This exists because a move used to cost a network round trip: the client
+/// could not send hop N+1 until hop N was confirmed, since `action_seq` must
+/// match EXACTLY at execution and two in-flight moves can land out of order.
+/// Holding a direction therefore ran at one hop per round trip — about five a
+/// second — while the rollup itself can accept twenty.
+///
+/// A batch is not a speed-up, it is a round-trip saving. Every hop is charged
+/// its own slot of cadence, and every hop is evaluated at the instant that
+/// cadence places it at, so traffic moves between the hops of a batch exactly
+/// as it would between four separately-sent moves. Sending [F, F, F, F] as a
+/// batch and sending it as four transactions produce the same outcome; only
+/// the number of round trips differs.
+///
+/// Exact-once survives: the whole batch is admitted by ONE `action_seq` check,
+/// so a replayed batch is refused like any replayed move. Each applied hop
+/// advances the sequence, and a batch that stops early (a hop needing a sector
+/// or chunk the client did not supply) leaves the run on a coherent tile with
+/// a sequence the client can read back and continue from.
+pub fn move_batch(
+    ctx: Context<MoveBatch>,
+    attempt_nonce: u32,
+    action_seq: u64,
+    directions: Vec<u8>,
+    _uniq: u64, // client uniqueness memo: distinct logical actions never share bytes
+) -> Result<()> {
+    require!(
+        !directions.is_empty() && directions.len() <= MAX_MOVE_BATCH,
+        CrossyError::OutOfBounds
+    );
+
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
+
+    let MoveBatch {
+        world,
+        run,
+        sector_a,
+        sector_b,
+        sector_c,
+        sector_d,
+        chunk_a,
+        chunk_b,
+        best,
+        signer,
+    } = &mut *ctx.accounts;
+
+    let world_key = world.key();
+
+    validate_action(
+        world,
+        run,
+        &signer.key(),
+        session_scope::MOVE,
+        attempt_nonce,
+        action_seq,
+        now,
+    )?;
+
+    let mut sectors: Vec<&mut OccupancySector> = Vec::with_capacity(MAX_MOVE_BATCH);
+    sectors.push(sector_a);
+    if let Some(s) = sector_b.as_deref_mut() {
+        sectors.push(s);
+    }
+    if let Some(s) = sector_c.as_deref_mut() {
+        sectors.push(s);
+    }
+    if let Some(s) = sector_d.as_deref_mut() {
+        sectors.push(s);
+    }
+
+    let mut chunks: Vec<&ChunkDefinition> = Vec::with_capacity(2);
+    chunks.push(chunk_a);
+    if let Some(c) = chunk_b.as_deref() {
+        chunks.push(c);
+    }
+    for chunk in chunks.iter() {
+        require!(chunk.day == world.day, CrossyError::BadChunkState);
+    }
+
+    let base_ms = world_time_ms(world, &clock)?;
+    // Slots of cadence this batch has already spent. Also how far the world
+    // clock has been advanced for the hop about to be evaluated.
+    let mut charged: u64 = 0;
+
+    for direction in directions.iter().copied() {
+        let (at_slot, t_ms) = hop_instant(clock.slot, base_ms, charged);
+
+        // The source tile has to be one of the supplied sectors, or there is
+        // nothing to move out of.
+        let Some(src_index) = sector_index_for(&sectors, &world_key, run.x, run.y) else {
+            break;
+        };
+
+        // Cadence: one accepted move per slot, every two while slowed. Read
+        // from the tile actually stood on, which changes as the batch runs.
+        let (stunned, slowed_zone) = tile_effects(sectors[src_index], run.x, run.y, now);
+        if stunned || now < run.stunned_until {
+            // Immobilised mid-batch: the remaining hops never happened. This
+            // is a stop, not a failure — the hops already applied stand.
+            break;
+        }
+        let min_gap = if slowed_zone || now < run.slowed_until {
+            2
+        } else {
+            1
+        };
+        if run.last_move_slot != 0
+            && at_slot
+                < run
+                    .last_move_slot
+                    .checked_add(min_gap)
+                    .ok_or(CrossyError::Overflow)?
+        {
+            // Only reachable on the FIRST hop (later hops carry their own
+            // charged slots), and there it means the same as `TooFast` does
+            // for a single move.
+            if charged == 0 {
+                return Err(CrossyError::TooFast.into());
+            }
+            break;
+        }
+
+        let Some(dir) = Direction::from_u8(direction) else {
+            break;
+        };
+        let Some((nx, ny)) = grid::step(run.x, run.y, dir) else {
+            break;
+        };
+        if ny >= world.revealed_rows {
+            break; // fail closed at the unrevealed frontier
+        }
+        let Some(chunk) = chunk_for_row(&chunks, ny) else {
+            break; // the client did not supply the terrain for this row
+        };
+        let Some(dst_index) = sector_index_for(&sectors, &world_key, nx, ny) else {
+            break; // nor the occupancy for this tile
+        };
+
+        let lane = lane_for_row(chunk, ny)?;
+        let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
+
+        // Terrain decides what entering the tile MEANS, not whether it is
+        // allowed: walls stop you, traffic and open water are fatal.
+        let fatal = match hazard::evaluate_tile(&descriptor, nx, t_ms) {
+            hazard::TileState::Blocked => {
+                run.facing = direction;
+                run.last_move_slot = at_slot;
+                run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+                charged = charged.saturating_add(min_gap);
+                continue;
+            }
+            hazard::TileState::Lethal => true,
+            hazard::TileState::Safe | hazard::TileState::Supported => false,
+        };
+
+        let dest_bit = grid::sector_bit(nx, ny);
+        if sectors[dst_index].is_blocked(dest_bit) || sectors[dst_index].is_occupied(dest_bit) {
+            run.facing = direction;
+            run.last_move_slot = at_slot;
+            run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+            charged = charged.saturating_add(min_gap);
+            continue;
+        }
+
+        // Atomic occupancy transfer. Source and destination may be the same
+        // sector; clearing before setting is correct either way.
+        let src_bit = grid::sector_bit(run.x, run.y);
+        sectors[src_index].clear_occupied(src_bit)?;
+        sectors[dst_index].set_occupied(dest_bit)?;
+
+        run.x = nx;
+        run.y = ny;
+        run.facing = direction;
+        run.last_move_slot = at_slot;
+        run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
+        charged = charged.saturating_add(min_gap);
+
+        if fatal {
+            // A shield absorbs one lethal collision, exactly as it does for a
+            // hazard that arrives while standing still.
+            if run.shield_charges > 0 && now < run.shield_until {
+                run.shield_charges -= 1;
+                run.bump_hazard_nonce()?;
+                run.hazard_deadline_ms =
+                    hazard::next_hazard_deadline_ms(&descriptor, nx, t_ms).unwrap_or(0);
+                run.touch()?;
+                return Ok(());
+            }
+            // Walking into traffic scores nothing: the row is not survived.
+            return crate::instructions::hazards::execute_death(
+                world,
+                run,
+                sectors[dst_index],
+                world_key,
+                now,
+                descriptor.kind.saturating_add(1),
+            );
+        }
+
+        // Track last verified safe tile (grass, unblocked).
+        if hazard::evaluate_tile(&descriptor, nx, t_ms) == hazard::TileState::Safe {
+            run.safe_x = nx;
+            run.safe_y = ny;
+        }
+
+        // Score: strictly-forward record within the attempt.
+        if ny > run.score {
+            run.score = ny;
+            if ny > best.best_score {
+                best.best_score = ny;
+                best.attempt_nonce = run.attempt_nonce;
+                best.reached_slot = clock.slot;
+                best.class_id = run.class_id;
+                best.asset = run.agent_asset;
+            }
+        }
+
+        run.bump_hazard_nonce()?;
+        run.hazard_deadline_ms =
+            hazard::next_hazard_deadline_ms(&descriptor, nx, t_ms).unwrap_or(0);
+    }
+
+    run.touch()?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // claim_record (ER) — decoupled from movement to avoid a global hot account
 // ---------------------------------------------------------------------------
 
@@ -1134,5 +1437,64 @@ mod tests {
         assert_eq!((run.action_seq, run.state_seq), (13, 21));
         assert_eq!((run.kick_ready_ts, run.ability_ready_ts), (500, 700));
         assert_eq!((run.hazard_nonce, run.hazard_deadline_ms), (3, 1_000));
+    }
+
+    fn sector_at(sector_x: u8, sector_y: u32, world: Pubkey) -> OccupancySector {
+        OccupancySector {
+            world,
+            sector_x,
+            sector_y,
+            occupancy: 0,
+            blockers: 0,
+            seq: 0,
+            effects: Default::default(),
+            bump: 1,
+        }
+    }
+
+    /// A batch must be indistinguishable from the same hops sent one at a
+    /// time. Four hops starting at slot 100 occupy slots 100..=103 and see the
+    /// world 0, 50, 100 and 150 ms apart — exactly the spacing four separate
+    /// transactions one slot apart would have had.
+    #[test]
+    fn a_batch_charges_and_ages_every_hop_like_a_separate_move() {
+        let base_slot = 100;
+        let base_ms = 4_000;
+        let seen: Vec<(u64, u64)> = (0..4)
+            .map(|i| hop_instant(base_slot, base_ms, i))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![(100, 4_000), (101, 4_050), (102, 4_100), (103, 4_150)]
+        );
+        // ...and the run is left owing the last hop's slot, so the next batch
+        // cannot start until slot 104 — one slot per hop, as before.
+        assert_eq!(seen.last().unwrap().0 + 1, base_slot + 4);
+    }
+
+    /// A slowed player is charged two slots a hop, so a batch of four costs
+    /// eight slots rather than four. The discount is on round trips only.
+    #[test]
+    fn slowed_hops_cost_double_inside_a_batch_too() {
+        let charged: u64 = (0..4).map(|_| 2u64).sum();
+        assert_eq!(charged, 8);
+        assert_eq!(hop_instant(100, 0, charged), (108, 400));
+    }
+
+    #[test]
+    fn a_hop_stops_at_the_edge_of_the_accounts_it_was_given() {
+        let world = Pubkey::new_unique();
+        let mut a = sector_at(0, 0, world);
+        let mut b = sector_at(0, 1, world);
+        let sectors: Vec<&mut OccupancySector> = vec![&mut a, &mut b];
+
+        // Rows 0..15 span sector rows 0 and 1, both supplied.
+        assert_eq!(sector_index_for(&sectors, &world, 3, 0), Some(0));
+        assert_eq!(sector_index_for(&sectors, &world, 3, 8), Some(1));
+        // Row 16 is sector row 2 — not supplied, so the batch stops there
+        // rather than moving a player into occupancy nobody is tracking.
+        assert_eq!(sector_index_for(&sectors, &world, 3, 16), None);
+        // A sector belonging to another world never matches.
+        assert_eq!(sector_index_for(&sectors, &Pubkey::new_unique(), 3, 0), None);
     }
 }

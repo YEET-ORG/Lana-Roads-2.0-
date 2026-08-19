@@ -10,6 +10,7 @@ import { PublicKey } from "@solana/web3.js";
 import {
   Direction,
   loadContiguousChunks,
+  MAX_MOVE_BATCH,
   pda,
   ReceiptKind,
   revivePrice,
@@ -1006,8 +1007,17 @@ export function GameScreen({
    * here against a 60ms floor. That is the trade — a slower ceiling for a
    * cadence that is never wrong and never rewinds.
    */
-  /** The action awaiting confirmation, if any. Exactly one, or none. */
-  const inFlightRef = useRef<Outbound | null>(null);
+  /**
+   * The actions awaiting confirmation. One batch, or none.
+   *
+   * Confirmation still gates the next send — that part was never the problem
+   * and it is the only thing that PROVES the sequence advanced. What changed
+   * is how much rides on one round trip: `move_batch` carries up to four hops
+   * under a single `action_seq`, applied in order on chain, each charged its
+   * own slot of cadence. So holding a direction is no longer throttled to one
+   * hop per round trip while the rollup sits idle waiting for us.
+   */
+  const inFlightRef = useRef<Outbound[] | null>(null);
   /**
    * Observed confirmation round trip, smoothed.
    *
@@ -1039,32 +1049,65 @@ export function GameScreen({
    * same sequence and is idempotent by construction.
    */
   function pumpOutbox() {
-    if (inFlightRef.current) return; // one at a time, by design
-    const next = outboxRef.current.find((a) => !a.sent);
-    if (!next) return;
-    inFlightRef.current = next;
+    if (inFlightRef.current) return; // one batch at a time, by design
+    const from = outboxRef.current.findIndex((a) => !a.sent);
+    if (from === -1) return;
+    const next = outboxRef.current[from];
+
+    // Consecutive moves ride together; a kick is its own instruction and
+    // ends the run of moves before it.
+    const batch: Outbound[] = [next];
+    if (next.kind === "move") {
+      for (let i = from + 1; i < outboxRef.current.length; i++) {
+        const a = outboxRef.current[i];
+        if (a.sent || a.kind !== "move" || batch.length >= MAX_MOVE_BATCH) break;
+        batch.push(a);
+      }
+    }
+
+    inFlightRef.current = batch;
     lastSendAtRef.current = performance.now();
-    next.sent = true;
-    next.tries += 1;
+    for (const a of batch) {
+      a.sent = true;
+      a.tries += 1;
+    }
 
     const common = { day: route.day, mode: route.mode, session: boot.session };
     const sending =
-      next.kind === "move"
-        ? boot.client.sendMove({
-            ...common,
-            direction: next.direction,
-            x: next.x,
-            y: next.y,
-            attemptNonce: next.attempt,
-            actionSeq: next.seq,
-          })
-        : boot.client.sendKick({
+      next.kind !== "move"
+        ? boot.client.sendKick({
             ...common,
             attemptNonce: next.attempt,
             actionSeq: next.seq,
             facing: next.facing,
             target: next.target,
-          });
+          })
+        : batch.length === 1
+          ? boot.client.sendMove({
+              ...common,
+              direction: next.direction,
+              x: next.x,
+              y: next.y,
+              attemptNonce: next.attempt,
+              actionSeq: next.seq,
+            })
+          : boot.client
+              .sendMoveBatch({
+                ...common,
+                directions: batch.map((a) => (a as { direction: Direction }).direction),
+                x: next.x,
+                y: next.y,
+                attemptNonce: next.attempt,
+                actionSeq: next.seq,
+              })
+              .then(({ signature, sent }) => {
+                // The program only applies hops its accounts cover, and the
+                // SDK trims the path to match. Anything trimmed was never
+                // sent, so put it back in the queue rather than waiting on a
+                // confirmation that can never arrive.
+                for (const a of batch.slice(sent.length)) a.sent = false;
+                return signature;
+              });
     // Not awaited: the signature is bookkeeping. What releases the next
     // action is the chain confirming this one, never this promise.
     void sending
@@ -1103,6 +1146,13 @@ export function GameScreen({
       const took = performance.now() - lastSendAtRef.current;
       if (took > 0 && took < 3_000)
         confirmMsRef.current = confirmMsRef.current * 0.7 + took * 0.3;
+      // A batch can be applied in part — a hop into a blocker turns in place,
+      // and the chain stops where its accounts run out. Whatever the drain
+      // above did not clear was not applied, so it goes again under the same
+      // (still correct) sequence.
+      for (const a of inFlightRef.current ?? []) {
+        if (outboxRef.current.includes(a)) a.sent = false;
+      }
       inFlightRef.current = null;
       window.clearTimeout(ackTimerRef.current);
       // Confirmed, so the sequence the next action needs has advanced. Go.
@@ -1113,6 +1163,7 @@ export function GameScreen({
       // Never acknowledged: lost, or refused for something transient. Resend
       // this exact sequence — the chain can apply it at most once however
       // many copies arrive.
+      for (const a of inFlightRef.current ?? []) a.sent = false;
       inFlightRef.current = null;
       head.sent = false;
       // Lost or refused for a reason that may not hold a slot later (the
@@ -1402,7 +1453,13 @@ export function GameScreen({
         // player faster — it fills a queue that then has to be dropped, and
         // the drop is what surfaces as "too fast" while a direction is merely
         // being held.
-        repeatMs: () => confirmMsRef.current,
+        // A held direction may generate input as fast as the outbox DRAINS,
+        // and a batch drains up to four hops per round trip. The floor is the
+        // rollup's own cadence: each hop is charged a slot whether it travels
+        // alone or with three others, so nothing is gained by asking for hops
+        // faster than one per slot.
+        repeatMs: () =>
+          Math.max(MS_PER_SLOT, confirmMsRef.current / MAX_MOVE_BATCH),
       },
     );
     return detach;

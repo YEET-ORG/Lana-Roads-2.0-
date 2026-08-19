@@ -264,6 +264,16 @@ pub mod crossy_world {
         instructions::gameplay::move_action(ctx, attempt_nonce, action_seq, direction, uniq)
     }
 
+    pub fn move_batch(
+        ctx: Context<MoveBatch>,
+        attempt_nonce: u32,
+        action_seq: u64,
+        directions: Vec<u8>,
+        uniq: u64,
+    ) -> Result<()> {
+        instructions::gameplay::move_batch(ctx, attempt_nonce, action_seq, directions, uniq)
+    }
+
     pub fn claim_record(ctx: Context<ClaimRecord>) -> Result<()> {
         instructions::gameplay::claim_record(ctx)
     }
