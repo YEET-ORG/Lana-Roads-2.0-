@@ -19,7 +19,7 @@ import { Program, web3, BN } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PROGRAM_ID = new web3.PublicKey("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
+const PROGRAM_ID = new web3.PublicKey("9HciUP5BBW2i9JZYdWxaD5rRsT7FgidharReBNyyXvN8");
 const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
 /**
  * Rollup region. Each region runs its own world, pot and map, so this

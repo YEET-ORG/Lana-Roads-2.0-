@@ -63,3 +63,10 @@ Original prompt: please check the codebase and all , check everything , we are h
 - Root cause 3: a world decode exception was treated as “account missing,” and `rollDay` swallowed its own setup failure. The daemon therefore remained alive while doing no work. It now checks raw account existence, distinguishes missing from incompatible state, propagates setup errors, and exits on fatal IDL/admin mismatches.
 - Added a production Docker worker, required secret injection, automatic restart, `/healthz`, root keeper commands, tracked runtime configuration, and Compose validation.
 - The current devnet worlds are confirmed incompatible legacy accounts (145 bytes; current decoder fails with `Invalid bool: 114`). This code fix intentionally fails loudly there; a fresh/migrated world after deployment is required.
+
+## 2026-09-11 held-movement pacing
+
+- Root cause: the batching client divided held-key repeat time by four, allowing predicted movement every 60 ms and making the character appear to fly.
+- Changed held movement to wait 320 ms before repeating and repeat no faster than every 220 ms. Network batching remains enabled but no longer multiplies gameplay speed; individual presses remain immediate.
+- Verified with the required web-game Playwright workflow and a focused browser timing probe: first movement remained immediate, held movement waited over 300 ms, and every subsequent repeat stayed above the 220 ms floor. Gameplay rendered correctly with no console errors.
+- Published the client-only update to `lanaroads.mystic.cat` as Cloudflare Worker version `d3535bf3-d84b-4533-9758-a6a17cb811df`; the live JavaScript SHA-256 matches the local production artifact.

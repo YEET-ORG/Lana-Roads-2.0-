@@ -24,6 +24,7 @@ import { pda, sectorForTile, sectorOf, spawnSectors } from "./pda.js";
 import { MAX_CARRY_TILES } from "./hazards.js";
 import { revivePrice, utcDayFromUnix } from "./time.js";
 import { SubscriptionHub } from "./subscriptions.js";
+import { MAX_MOVE_BATCH, selectMoveBatch, moveDestination } from "./movement.js";
 
 export interface WalletSigner {
   publicKey: PublicKey;
@@ -129,12 +130,7 @@ export interface TxActivity {
  * a client that treats it as terminal shows a buy button that can only fail.
  */
 export type PullState =
-  | "pending"
-  | "randomnessReady"
-  | "assigned"
-  | "claimed"
-  | "refundable"
-  | "refunded";
+  "pending" | "randomnessReady" | "assigned" | "claimed" | "refundable" | "refunded";
 
 /** One variant of a season's roster, with what is left of it. */
 export interface VariantSummary {
@@ -810,18 +806,21 @@ export class CrossyClient {
     chunkIndex: number,
     onChunk: (chunk: any, slot: number) => void,
   ): () => void {
-    return this.baseSubscriptions.onAccount(pda.chunk(this.region, day, chunkIndex), (info, slot) => {
-      try {
-        const chunk = this.program.coder.accounts.decode(
-          "chunkDefinition",
-          Buffer.from(info.data),
-        );
-        onChunk(chunk, slot);
-      } catch {
-        // The account may be observed between creation and valid decoding;
-        // the confirmed read/retry path will heal it.
-      }
-    });
+    return this.baseSubscriptions.onAccount(
+      pda.chunk(this.region, day, chunkIndex),
+      (info, slot) => {
+        try {
+          const chunk = this.program.coder.accounts.decode(
+            "chunkDefinition",
+            Buffer.from(info.data),
+          );
+          onChunk(chunk, slot);
+        } catch {
+          // The account may be observed between creation and valid decoding;
+          // the confirmed read/retry path will heal it.
+        }
+      },
+    );
   }
 
   async getSector(world: PublicKey, sx: number, sy: number) {
@@ -942,8 +941,7 @@ export class CrossyClient {
           payerToken: params.payerToken,
           usdcMint: config.usdcMint,
           wallet,
-          oracleQueue:
-            params.oracleQueue ?? DEFAULT_VRF_BASE_QUEUE,
+          oracleQueue: params.oracleQueue ?? DEFAULT_VRF_BASE_QUEUE,
           tokenProgram: config.tokenProgram,
         })
         .instruction(),
@@ -1111,7 +1109,13 @@ export class CrossyClient {
           run: runAddr,
           payerToken: params.payerToken,
           usdcMint: params.usdcMint,
-          receipt: pda.receipt(ReceiptKind.Entry, this.region, params.day, wallet, receiptNonce),
+          receipt: pda.receipt(
+            ReceiptKind.Entry,
+            this.region,
+            params.day,
+            wallet,
+            receiptNonce,
+          ),
           contribution: pda.contribution(this.region, params.day, wallet),
           wallet,
           tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
@@ -1158,7 +1162,13 @@ export class CrossyClient {
     const world = pda.world(this.region, mode, params.day);
     const receipt =
       mode === WorldMode.Paid
-        ? pda.receipt(ReceiptKind.Entry, this.region, params.day, wallet, params.receiptNonce)
+        ? pda.receipt(
+            ReceiptKind.Entry,
+            this.region,
+            params.day,
+            wallet,
+            params.receiptNonce,
+          )
         : world;
     const builder = this.erProgram.methods
       .spawn(params.attemptNonce)
@@ -1193,7 +1203,9 @@ export class CrossyClient {
         .reconcileReceipt()
         .accountsPartial({
           daily: pda.daily(this.region, params.day),
-          receipt: pda.receipt(params.kind, this.region,
+          receipt: pda.receipt(
+            params.kind,
+            this.region,
             params.day,
             params.wallet,
             params.receiptNonce,
@@ -1367,7 +1379,13 @@ export class CrossyClient {
         run: pda.run(world, wallet),
         payerToken: params.payerToken,
         usdcMint: params.usdcMint,
-        receipt: pda.receipt(ReceiptKind.Revival, this.region, params.day, wallet, receiptNonce),
+        receipt: pda.receipt(
+          ReceiptKind.Revival,
+          this.region,
+          params.day,
+          wallet,
+          receiptNonce,
+        ),
         wallet,
         tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
       })
@@ -1404,7 +1422,13 @@ export class CrossyClient {
     const builder = this.erProgram.methods.completeRevive().accountsPartial({
       world,
       run: pda.run(world, wallet),
-      receipt: pda.receipt(ReceiptKind.Revival, this.region, params.day, wallet, params.receiptNonce),
+      receipt: pda.receipt(
+        ReceiptKind.Revival,
+        this.region,
+        params.day,
+        wallet,
+        params.receiptNonce,
+      ),
       safeSector: sectorForTile(world, run.safeX, run.safeY),
       signer: params.session?.publicKey ?? wallet,
     });
@@ -1613,6 +1637,69 @@ export class CrossyClient {
     tx.sign(params.session);
     return this.track(
       "Move",
+      "er",
+      () =>
+        this.erConnection.sendRawTransaction(tx.serialize(), {
+          skipPreflight: true,
+          maxRetries: 0,
+        }),
+      { quiet: true },
+    );
+  }
+
+  /** Bounded intra-sector movement. The run subscription acknowledges the
+   * accepted prefix; a signature alone does not imply every step executed. */
+  async sendMoveBatch(params: {
+    day: bigint;
+    mode?: WorldMode;
+    directions: Direction[];
+    session: Keypair;
+    x: number;
+    y: number;
+    attemptNonce: number;
+    actionSeq: number;
+  }): Promise<string> {
+    if (!params.directions.length || params.directions.length > MAX_MOVE_BATCH)
+      throw new Error("move batch must contain 1–4 directions");
+    let { x, y } = params;
+    const moves = params.directions.map((direction, i) => {
+      const move = {
+        kind: "move",
+        x,
+        y,
+        direction,
+        attempt: params.attemptNonce,
+        seq: params.actionSeq + i,
+      };
+      ({ x, y } = moveDestination(x, y, direction));
+      return move;
+    });
+    if (selectMoveBatch(moves).length !== moves.length)
+      throw new Error("move batch must stay inside one sector");
+    const world = pda.world(this.region, params.mode ?? WorldMode.Paid, params.day);
+    const ix = await this.erProgram.methods
+      .moveBatch(
+        params.attemptNonce,
+        new BN(params.actionSeq),
+        Buffer.from(params.directions),
+        new BN(Date.now() * 8),
+      )
+      .accountsPartial({
+        world,
+        run: pda.run(world, this.wallet.publicKey),
+        best: pda.best(world, this.wallet.publicKey),
+        sourceSector: sectorForTile(world, params.x, params.y),
+        destSector: null,
+        chunk: pda.chunk(this.region, params.day, Math.floor(params.y / 16)),
+        signer: params.session.publicKey,
+      })
+      .instruction();
+    const tx = new anchor.web3.Transaction().add(ix);
+    tx.recentBlockhash = await this.erBlockhash();
+    tx.feePayer = params.session.publicKey;
+    tx.sign(params.session);
+    return this.track(
+      "Move batch",
       "er",
       () =>
         this.erConnection.sendRawTransaction(tx.serialize(), {

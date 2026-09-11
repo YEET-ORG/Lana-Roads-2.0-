@@ -581,13 +581,104 @@ pub struct MoveAction<'info> {
 /// A blocked destination consumes the action as a turn-in-place, allowing
 /// the next Kick to target that direction without moving through the blocker.
 pub fn move_action(
-    ctx: Context<MoveAction>,
+    mut ctx: Context<MoveAction>,
     attempt_nonce: u32,
     action_seq: u64,
     direction: u8,
     _uniq: u64, // client uniqueness memo: distinct logical actions never share bytes
 ) -> Result<()> {
     let clock = Clock::get()?;
+    move_step(
+        &mut ctx,
+        attempt_nonce,
+        action_seq,
+        direction,
+        &clock,
+        clock.slot,
+    )
+}
+
+/// Execute a bounded prefix in one sector, using elapsed runtime slots as
+/// credit. All hazards are evaluated NOW, never at client-supplied timestamps.
+/// Blockage, death, exhausted credit or a sector boundary stops the prefix.
+/// Invalid envelopes/accounts fail the entire transaction.
+pub fn move_batch(
+    mut ctx: Context<MoveAction>,
+    attempt_nonce: u32,
+    action_seq: u64,
+    directions: Vec<u8>,
+    _uniq: u64,
+) -> Result<()> {
+    use crate::kernel::movement::{next_move_slot, MAX_MOVE_BATCH};
+    require!(
+        !directions.is_empty() && directions.len() <= MAX_MOVE_BATCH,
+        CrossyError::CapacityExceeded
+    );
+    require!(
+        directions.iter().all(|d| Direction::from_u8(*d).is_some()),
+        CrossyError::OutOfBounds
+    );
+    require!(ctx.accounts.dest_sector.is_none(), CrossyError::WrongSector);
+    let clock = Clock::get()?;
+    validate_action(
+        &ctx.accounts.world,
+        &ctx.accounts.run,
+        &ctx.accounts.signer.key(),
+        session_scope::MOVE,
+        attempt_nonce,
+        action_seq,
+        clock.unix_timestamp,
+    )?;
+    assert_sector(
+        &ctx.accounts.source_sector,
+        &ctx.accounts.world.key(),
+        ctx.accounts.run.x,
+        ctx.accounts.run.y,
+    )?;
+
+    for (index, direction) in directions.into_iter().enumerate() {
+        let run = &ctx.accounts.run;
+        let (x, y) = (run.x, run.y);
+        let Some((nx, ny)) = grid::step(x, y, Direction::from_u8(direction).unwrap()) else {
+            break;
+        };
+        if grid::sector_of(x, y) != grid::sector_of(nx, ny) {
+            break;
+        }
+        let (stunned, slowed) =
+            tile_effects(&ctx.accounts.source_sector, x, y, clock.unix_timestamp);
+        if stunned || clock.unix_timestamp < run.stunned_until {
+            break;
+        }
+        let gap = if slowed || clock.unix_timestamp < run.slowed_until {
+            2
+        } else {
+            1
+        };
+        let Some(slot) = next_move_slot(run.last_move_slot, clock.slot, gap) else {
+            break;
+        };
+        let seq = action_seq
+            .checked_add(index as u64)
+            .ok_or(CrossyError::Overflow)?;
+        move_step(&mut ctx, attempt_nonce, seq, direction, &clock, slot)?;
+        if ctx.accounts.run.state != RunState::Active
+            || (ctx.accounts.run.x, ctx.accounts.run.y) == (x, y)
+        {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn move_step(
+    ctx: &mut Context<MoveAction>,
+    attempt_nonce: u32,
+    action_seq: u64,
+    direction: u8,
+    clock: &Clock,
+    move_slot: u64,
+) -> Result<()> {
     let now = clock.unix_timestamp;
     let world_key = ctx.accounts.world.key();
     let world = &ctx.accounts.world;
@@ -639,10 +730,10 @@ pub fn move_action(
     }
 
     // Terrain: destination must be traversable at the authoritative instant.
-    let t_ms = world_time_ms(world, &clock)?;
+    let t_ms = world_time_ms(world, clock)?;
     let lane = lane_for_row(&ctx.accounts.chunk, ny)?;
     require!(
-        ctx.accounts.chunk.day == world.day,
+        ctx.accounts.chunk.day == world.day && ctx.accounts.chunk.region == world.region,
         CrossyError::BadChunkState
     );
     let descriptor: crate::kernel::chunkgen::LaneDescriptor = (*lane).into();
@@ -652,7 +743,7 @@ pub fn move_action(
     // needs to be carried past the occupancy transfer below.
     let fatal = match hazard::evaluate_tile(&descriptor, nx, t_ms) {
         hazard::TileState::Blocked => {
-            accept_turn_in_place(run, direction, clock.slot)?;
+            accept_turn_in_place(run, direction, move_slot)?;
             return Ok(());
         }
         hazard::TileState::Lethal => true,
@@ -667,7 +758,7 @@ pub fn move_action(
             .as_deref()
             .unwrap_or(&ctx.accounts.source_sector);
         if dest_view.is_blocked(dest_bit) || dest_view.is_occupied(dest_bit) {
-            accept_turn_in_place(run, direction, clock.slot)?;
+            accept_turn_in_place(run, direction, move_slot)?;
             return Ok(());
         }
     }
@@ -689,7 +780,7 @@ pub fn move_action(
     run.x = nx;
     run.y = ny;
     run.facing = direction;
-    run.last_move_slot = clock.slot;
+    run.last_move_slot = move_slot;
     run.action_seq = run.action_seq.checked_add(1).ok_or(CrossyError::Overflow)?;
 
     if fatal {

@@ -5,7 +5,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const CROSSY_WORLD_PROGRAM_ID = new PublicKey(
-  "5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx",
+  "9HciUP5BBW2i9JZYdWxaD5rRsT7FgidharReBNyyXvN8",
 );
 
 export const DAY_SECONDS = 86_400n;

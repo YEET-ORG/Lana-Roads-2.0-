@@ -1,10 +1,10 @@
 /**
  * Home / mode selection, world-first: the live game world fills the screen
- * behind a Crossy-style overlay. The selected agent is the hero; Play is
- * the only giant CTA. Paid details live on a ticket sheet.
+ * behind a Crossy-style overlay. The selected agent is the hero and casual
+ * Play is the only giant CTA in this release.
  */
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { dayEnd, WorldMode } from "@crossy-world/sdk";
+import { WorldMode } from "@crossy-world/sdk";
 import { Bootstrapped } from "../../lib/client";
 import {
   agentModelIdFor,
@@ -15,30 +15,13 @@ import {
 import { agentId, AGENT_COUNT } from "../../game/renderer/assets";
 import { sfx } from "../../game/audio";
 import { WorldScene } from "../../game/renderer/scene";
-import { EntryFlow } from "../entry/EntryFlow";
 import { LeaderboardSheet } from "../leaderboard/LeaderboardSheet";
-import { PackSheet } from "../packs/PackSheet";
 import { MenuBackdrop } from "./MenuBackdrop";
-import {
-  Button,
-  Icon,
-  IconButton,
-  Modal,
-  Notice,
-  Sheet,
-  StatGrid,
-} from "../../design-system";
+import { Button, Icon, IconButton, Modal, Notice } from "../../design-system";
 import type { Route } from "../../app/App";
 
 interface DayInfo {
   day: bigint;
-  pool: bigint;
-  rollover: bigint;
-  recordScore: number;
-  recordHolder: string;
-  activePlayers: number;
-  /** Status of the PAID competition; casual play does not depend on it. */
-  status: string;
   /** The casual world exists on the rollup, so free play can start. */
   casualReady: boolean;
 }
@@ -81,11 +64,7 @@ export function Home({
   const [info, setInfo] = useState<DayInfo | null>(null);
   const [presence, setPresence] = useState<Presence | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState("");
-  const [entering, setEntering] = useState(false);
-  const [paidOpen, setPaidOpen] = useState(false);
-  const [boardOpen, setBoardOpen] = useState<WorldMode | null>(null);
-  const [packsOpen, setPacksOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
   const wallet = boot?.wallet.publicKey.toBase58() ?? "offline";
   const [agentIdx, setAgentIdx] = useState(
     () => getAgentChoice() ?? agentIndexFromModelId(agentModelIdFor(wallet)),
@@ -113,12 +92,6 @@ export function Home({
       setWarn("Cluster offline — practice is still open.");
       setInfo({
         day: 0n,
-        pool: 0n,
-        rollover: 0n,
-        recordScore: 0,
-        recordHolder: "",
-        activePlayers: 0,
-        status: "offline",
         casualReady: false,
       });
       return;
@@ -127,52 +100,20 @@ export function Home({
     const load = async () => {
       try {
         const day = await boot.client.getCurrentDay();
-        // Casual and paid are separate worlds with separate readiness. The
-        // free game must not be gated on the competition: a paid world that
-        // hasn't been delegated yet would otherwise send every casual player
-        // to offline practice while the casual world is live and waiting.
-        const [daily, paid, casual] = await Promise.all([
-          boot.client.getDaily(day).catch(() => null),
-          boot.client.getWorld(WorldMode.Paid, day).catch(() => null),
-          boot.client.getWorld(WorldMode.Casual, day).catch(() => null),
-        ]);
+        const casual = await boot.client
+          .getWorld(WorldMode.Casual, day)
+          .catch(() => null);
         if (!live) return;
-        if (!casual && !paid) {
-          setWarn(`Today's world (day ${day}) is not live on this cluster yet.`);
-          setInfo({
-            day,
-            pool: 0n,
-            rollover: 0n,
-            recordScore: 0,
-            recordHolder: "",
-            activePlayers: 0,
-            status: "unprepared",
-            casualReady: false,
-          });
+        if (!casual) {
+          setWarn(`Today's casual world (day ${day}) is not live yet.`);
+          setInfo({ day, casualReady: false });
           return false;
         }
-        // A retry that finally lands must clear whatever the failed attempts
-        // put on screen, or the player keeps reading an outage that is over.
-        setWarn(
-          !paid || !daily
-            ? "The daily competition isn't open yet — casual play is live."
-            : null,
-        );
-        const shown = paid ?? casual!;
-        setInfo({
-          day,
-          pool: daily ? BigInt(daily.activePool.toString()) : 0n,
-          rollover: daily ? BigInt(daily.rolloverIn.toString()) : 0n,
-          recordScore: shown.recordScore,
-          recordHolder: shown.recordHolder.toBase58(),
-          activePlayers: shown.activePlayers,
-          status: daily && paid ? (Object.keys(daily.status)[0] ?? "?") : "unprepared",
-          casualReady: casual != null,
-        });
-        return casual != null;
+        setWarn(null);
+        setInfo({ day, casualReady: true });
+        return true;
       } catch {
-        if (live)
-          setWarn("Can't reach the cluster — the daily competition is unavailable.");
+        if (live) setWarn("Can't reach the casual world — practice is still open.");
         return false;
       }
     };
@@ -193,9 +134,7 @@ export function Home({
     };
   }, [boot]);
 
-  // Live presence: how busy the world is right now, and how far away the
-  // rollup that runs it is. Both worlds count — a player in casual is just
-  // as online as one in the paid competition.
+  // Live presence: how busy the casual world is and how far away its rollup is.
   useEffect(() => {
     if (!boot || !info || info.day === 0n) return;
     let live = true;
@@ -207,16 +146,12 @@ export function Home({
       return slot == null ? null : Math.round(performance.now() - t0);
     };
     const poll = async () => {
-      const [casual, paid, pingMs] = await Promise.all([
+      const [casual, pingMs] = await Promise.all([
         boot.client.getWorld(WorldMode.Casual, info.day).catch(() => null),
-        boot.client.getWorld(WorldMode.Paid, info.day).catch(() => null),
         ping(),
       ]);
       if (!live) return;
-      setPresence({
-        players: (casual?.activePlayers ?? 0) + (paid?.activePlayers ?? 0),
-        pingMs,
-      });
+      setPresence({ players: casual?.activePlayers ?? 0, pingMs });
     };
     void poll();
     const id = setInterval(() => void poll(), 8000);
@@ -245,19 +180,6 @@ export function Home({
       live = false;
     };
   }, [boot]);
-
-  useEffect(() => {
-    if (!info) return;
-    const id = setInterval(() => {
-      const left = Number(dayEnd(info.day)) * 1000 - Date.now();
-      if (left <= 0) return setCountdown("cutoff reached");
-      const h = Math.floor(left / 3_600_000);
-      const m = Math.floor((left % 3_600_000) / 60_000);
-      const s = Math.floor((left % 60_000) / 1000);
-      setCountdown(`${h}h ${m}m ${s}s`);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [info]);
 
   function cycleAgent(delta: number) {
     const next = (((agentIdx + delta) % AGENT_COUNT) + AGENT_COUNT) % AGENT_COUNT;
@@ -321,8 +243,6 @@ export function Home({
     if (Math.abs(dx) < 40) return;
     cycleAgent(dx < 0 ? 1 : -1);
   }
-
-  const paidOpenable = info?.status === "open";
 
   return (
     <div className="world-home">
@@ -443,28 +363,6 @@ export function Home({
           >
             PLAY
           </Button>
-          <button
-            className="home-ticket"
-            onClick={() => {
-              sfx.click();
-              setPaidOpen(true);
-            }}
-          >
-            <span className="home-ticket__label">
-              <Icon name="ticket" size={22} />
-              <span>
-                DAILY POT · PAID
-                <small>
-                  {info && info.status !== "offline"
-                    ? `pool ${(Number(info.pool) / 1e6).toFixed(2)} USDC${
-                        countdown ? ` · ${countdown} left` : ""
-                      }`
-                    : "daily prize competition"}
-                </small>
-              </span>
-            </span>
-            <b className="home-ticket__price">1 USDC</b>
-          </button>
           <div className="home-links">
             <Button variant="link" icon="target" onClick={() => onPlay({ name: "demo" })}>
               Practice offline
@@ -475,94 +373,15 @@ export function Home({
                 icon="trophy"
                 onClick={() => {
                   sfx.click();
-                  setBoardOpen(WorldMode.Casual);
+                  setBoardOpen(true);
                 }}
               >
                 Standings
               </Button>
             )}
-            {boot && (
-              <Button
-                variant="link"
-                icon="spark"
-                onClick={() => {
-                  sfx.click();
-                  setPacksOpen(true);
-                }}
-              >
-                Packs
-              </Button>
-            )}
           </div>
         </div>
       </div>
-
-      {paidOpen && (
-        <Sheet
-          tone="gold"
-          title="Daily competition"
-          ariaLabel="Daily competition"
-          onClose={() => setPaidOpen(false)}
-        >
-          {info ? (
-            <StatGrid
-              items={[
-                {
-                  label: "pool",
-                  value: `${(Number(info.pool) / 1e6).toFixed(2)} USDC`,
-                  tone: "gold",
-                  icon: "vault",
-                },
-                { label: "record", value: `row ${info.recordScore}`, icon: "flag" },
-                { label: "live", value: info.activePlayers, icon: "users" },
-                { label: "cutoff", value: countdown || "…", icon: "timer" },
-              ]}
-            />
-          ) : (
-            <Notice tone="info">
-              Today's competition isn't reachable right now — practice mode is still open.
-            </Notice>
-          )}
-          <div className="paid-sheet-copy">
-            <p>
-              Entry <b>1 USDC</b> · winner takes <b>90%</b> · revival 10 → 20 → 40 USDC,
-              doubling, 60s window.
-            </p>
-            <p className="disclosure">
-              Stronger classes come from rarer agents — intentionally pay-to-win.
-            </p>
-          </div>
-          <div className="row">
-            <Button
-              variant="primary"
-              icon="coin"
-              disabled={entering || !paidOpenable}
-              onClick={() => {
-                sfx.confirm();
-                setEntering(true);
-                setPaidOpen(false);
-              }}
-            >
-              {paidOpenable
-                ? "Enter for 1 USDC"
-                : `Unavailable${info ? ` — day is ${info.status}` : ""}`}
-            </Button>
-            <Button
-              variant="ghost"
-              icon="trophy"
-              onClick={() => {
-                setPaidOpen(false);
-                setBoardOpen(WorldMode.Paid);
-              }}
-            >
-              Standings
-            </Button>
-            <Button variant="ghost" onClick={() => setPaidOpen(false)}>
-              Back
-            </Button>
-          </div>
-        </Sheet>
-      )}
 
       {nameOpen && boot && (
         <Modal
@@ -603,43 +422,11 @@ export function Home({
         </Modal>
       )}
 
-      {packsOpen && boot && (
-        <PackSheet
-          boot={boot}
-          // The world behind the sheet becomes the agent you just pulled —
-          // the reveal happens in the game, not only on a card.
-          onAgentRevealed={(modelId) => menuSceneRef.current?.setLocalModel(modelId)}
-          onClose={() => {
-            setPacksOpen(false);
-            // Put the player's own agent back.
-            menuSceneRef.current?.setLocalModel(agentId(agentIdx));
-          }}
-        />
-      )}
-
-      {boardOpen != null && boot && info && (
+      {boardOpen && boot && info && (
         <LeaderboardSheet
           boot={boot}
           day={info.day}
-          initialMode={boardOpen}
-          onClose={() => setBoardOpen(null)}
-        />
-      )}
-
-      {entering && info && boot && (
-        <EntryFlow
-          boot={boot}
-          day={info.day}
-          onCancel={() => setEntering(false)}
-          onActive={(attemptNonce, receiptNonce) =>
-            onPlay({
-              name: "play",
-              mode: WorldMode.Paid,
-              day: info.day,
-              attemptNonce,
-              receiptNonce,
-            })
-          }
+          onClose={() => setBoardOpen(false)}
         />
       )}
     </div>

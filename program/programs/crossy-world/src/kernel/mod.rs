@@ -9,6 +9,7 @@ pub mod chunkgen;
 pub mod economy;
 pub mod grid;
 pub mod hazard;
+pub mod movement;
 pub mod name;
 pub mod pity;
 pub mod sampling;

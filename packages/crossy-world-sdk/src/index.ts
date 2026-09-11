@@ -5,5 +5,6 @@ export * from "./session.js";
 export * from "./hazards.js";
 export * from "./subscriptions.js";
 export * from "./map-sync.js";
+export * from "./movement.js";
 export * from "./client.js";
 export type { CrossyWorld } from "./generated/crossy_world.js";

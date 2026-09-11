@@ -24,7 +24,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("5FBMHsiUcRZ5RiKYWd6XhRGkA3FifP4nji9RKijLYuLx");
+declare_id!("9HciUP5BBW2i9JZYdWxaD5rRsT7FgidharReBNyyXvN8");
 
 #[ephemeral]
 #[program]
@@ -52,11 +52,7 @@ pub mod crossy_world {
         instructions::admin::accept_admin(ctx)
     }
 
-    pub fn set_validator(
-        ctx: Context<AdminOnly>,
-        region: u8,
-        new_validator: Pubkey,
-    ) -> Result<()> {
+    pub fn set_validator(ctx: Context<AdminOnly>, region: u8, new_validator: Pubkey) -> Result<()> {
         instructions::admin::set_validator(ctx, region, new_validator)
     }
 
@@ -262,6 +258,16 @@ pub mod crossy_world {
         uniq: u64,
     ) -> Result<()> {
         instructions::gameplay::move_action(ctx, attempt_nonce, action_seq, direction, uniq)
+    }
+
+    pub fn move_batch(
+        ctx: Context<MoveAction>,
+        attempt_nonce: u32,
+        action_seq: u64,
+        directions: Vec<u8>,
+        uniq: u64,
+    ) -> Result<()> {
+        instructions::gameplay::move_batch(ctx, attempt_nonce, action_seq, directions, uniq)
     }
 
     pub fn claim_record(ctx: Context<ClaimRecord>) -> Result<()> {

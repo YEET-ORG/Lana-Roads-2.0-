@@ -17,12 +17,7 @@ import {
   type ToastMode,
 } from "../../lib/settings";
 import { sfx } from "../../game/audio";
-import {
-  clearRegionProbe,
-  lastProbe,
-  OPEN_REGIONS,
-  regionById,
-} from "../../lib/regions";
+import { clearRegionProbe, lastProbe, OPEN_REGIONS, regionById } from "../../lib/regions";
 
 /** One row: a label, an explanation, and a set of mutually exclusive picks. */
 function Choice<T extends string | number | boolean>({
@@ -175,8 +170,8 @@ export function SettingsSheet({
           <span className="setting__hint">
             Each region runs its own world on its own rollup. Playing in the nearest one
             is the difference between a move landing in 80 ms and 280 ms — but it also
-            decides who you play with and which prize pot you play for. Auto measures the
-            round trip and picks the nearest.
+            decides who you play with in casual mode. Auto measures the round trip and
+            picks the nearest.
           </span>
         </div>
         <div className="setting__choices setting__choices--wrap">

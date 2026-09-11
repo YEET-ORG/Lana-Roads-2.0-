@@ -40,7 +40,7 @@ const SWIPE_WINDOW_MS = 420;
  * Long enough that a deliberate single tap never double-fires, short enough
  * that a held key feels like it took effect immediately.
  */
-const HOLD_DELAY_MS = 190;
+const HOLD_DELAY_MS = 320;
 /**
  * Fallback repeat interval when the caller does not supply one.
  *
@@ -50,7 +50,9 @@ const HOLD_DELAY_MS = 190;
  * direction is merely being held. The repeat should run at the same rate the
  * outbox drains, whatever that currently is.
  */
-const REPEAT_MS = 135;
+const REPEAT_MS = 220;
+/** Never let connection or batching heuristics turn a held key into a sprint. */
+const MIN_REPEAT_MS = 220;
 
 export interface InputHooks {
   /** Gameplay surface for touch gestures (gestures outside it are ignored). */
@@ -96,7 +98,7 @@ export function attachInput(
       const dir = activeDirection();
       if (dir == null) return;
       onAction({ kind: "move", direction: dir });
-      scheduleRepeat(Math.max(60, hooks.repeatMs?.() ?? REPEAT_MS));
+      scheduleRepeat(Math.max(MIN_REPEAT_MS, hooks.repeatMs?.() ?? REPEAT_MS));
     }, delay);
   };
 

@@ -1,18 +1,19 @@
 /**
- * The game route: Three.js scene + HUD + death/revival overlay.
+ * The casual game route: Three.js scene + HUD + run-over overlay.
  *
  * State ownership: React owns overlays/HUD; the WorldScene owns frame-level
- * rendering. Prediction covers exactly one tile and never touches
+ * rendering. Prediction covers a bounded queue of tile intents and never touches
  * authoritative score display; rejections snap back to canonical state.
  */
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import {
   Direction,
+  MAX_PENDING_ACTIONS,
+  moveDestination,
+  selectMoveBatch,
   loadContiguousChunks,
   pda,
-  ReceiptKind,
-  revivePrice,
   MS_PER_SLOT,
   worldTimeMs as slotTimeMs,
   WorldMode,
@@ -95,12 +96,6 @@ function pingTone(ms: number | null): "good" | "fair" | "poor" {
   return ms < 300 ? "fair" : "poor";
 }
 
-interface DeathInfo {
-  deathNonce: number;
-  deadline: number;
-  price: bigint | null;
-}
-
 export function GameScreen({
   boot,
   route,
@@ -126,8 +121,6 @@ export function GameScreen({
     pingMs: null,
     players: 0,
   });
-  const [death, setDeath] = useState<DeathInfo | null>(null);
-  const [reviving, setReviving] = useState(false);
   /** Casual runs end outright on death; the player just goes again. */
   const [endedScore, setEndedScore] = useState<{
     score: number;
@@ -396,6 +389,35 @@ export function GameScreen({
           outboxRef.current = [];
         }
         lastAuthSeqRef.current = Math.max(lastAuthSeqRef.current, authSeqNow);
+        const previousPosition = ownAuthPositionRef.current;
+        if (
+          previousPosition != null &&
+          previousPosition.attempt === run.attemptNonce &&
+          previousPosition.seq === authSeqNow &&
+          (previousPosition.x !== run.x || previousPosition.y !== run.y)
+        ) {
+          // Kick/log carry can change position without consuming our input.
+          outboxRef.current = [];
+          force = true;
+        }
+        ownAuthPositionRef.current = {
+          x: run.x,
+          y: run.y,
+          seq: authSeqNow,
+          attempt: run.attemptNonce,
+        };
+        // Discard predictions based on a step that authority blocked or
+        // displaced. Never derive later account metas from that stale path.
+        const accepted = outboxRef.current.find((a) => a.seq === authSeqNow - 1);
+        if (accepted?.kind === "move") {
+          const expected = accepted.blocked
+            ? accepted
+            : moveDestination(accepted.x, accepted.y, accepted.direction);
+          if (expected.x !== run.x || expected.y !== run.y) {
+            outboxRef.current = [];
+            force = true;
+          }
+        }
         // Nothing queued can apply to a run that is no longer playing.
         if (Object.keys(run.state)[0] !== "active") outboxRef.current = [];
         hazardRef.current = {
@@ -409,13 +431,18 @@ export function GameScreen({
         // older authoritative tile rubber-bands every single move. The
         // authoritative position wins when it has caught up (or when the
         // silence reconciler forces a heal).
-        const inFlight = !force && mine != null && mine.seq > authSeq;
+        const inFlight =
+          !force &&
+          state === "active" &&
+          mine != null &&
+          mine.attempt === run.attemptNonce &&
+          mine.seq > authSeq;
         if (inFlight) {
           liveRun.current = {
             ...mine!,
             attempt: run.attemptNonce,
             state,
-            score: Math.max(run.score, mine!.score),
+            score: run.score,
           };
         } else {
           liveRun.current = {
@@ -453,24 +480,17 @@ export function GameScreen({
                 state,
               },
         );
+        // Wake the sender on authoritative acceptance, not on its retry timeout.
+        // Defer until this snapshot has finished reconciling all local state.
+        queueMicrotask(() => {
+          if (live) checkOutboxHead(false);
+        });
         claimRecordRef.current(liveRun.current!.score, hudRecordRef.current);
         const decade = Math.floor(liveRun.current!.score / 10);
         if (decade > scoreDecadeRef.current && state === "active") scene?.celebrate();
         scoreDecadeRef.current = decade;
-        if (state === "deadAwaitingRevive" && route.mode === WorldMode.Paid) {
-          // The run can take no further action; hand the key back too.
-          void endSession("death");
-          // Let the death animation land before the card stamps in.
-          const info = {
-            deathNonce: run.deathNonce,
-            deadline: Number(run.reviveDeadline.toString()),
-            price: revivePrice(run.successfulRevives),
-          };
+        if (state === "active") {
           window.clearTimeout(deathTimerRef.current);
-          deathTimerRef.current = window.setTimeout(() => live && setDeath(info), 450);
-        } else if (state === "active") {
-          window.clearTimeout(deathTimerRef.current);
-          setDeath(null);
           setEndedScore(null);
         } else if (state === "ended" && route.mode === WorldMode.Casual) {
           void endSession("death");
@@ -883,6 +903,10 @@ export function GameScreen({
       clearInterval(hazardTimer);
       clearChunkWait();
       window.clearTimeout(deathTimerRef.current);
+      window.clearTimeout(ackTimerRef.current);
+      window.clearTimeout(pumpTimerRef.current);
+      outboxRef.current = [];
+      inFlightRef.current = null;
       stopPrewarm?.();
       stopSlots();
       unsubscribe();
@@ -894,35 +918,8 @@ export function GameScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [erReady, route.day, route.mode]);
 
-  /**
-   * The outbound action queue.
-   *
-   * The program takes at most ONE accepted action per rollup slot and
-   * demands an exact `action_seq`; a refused action does not consume it. So
-   * firing a burst of optimistically-numbered moves at once means the first
-   * one wins and every later one is refused for a sequence that never
-   * advanced — and because gameplay is fire-and-forget, none of it reports
-   * anything. The player just watches their hops rewind a second later.
-   *
-   * The queue therefore preserves ORDER, but it does not wait for a round
-   * trip between sends. It used to: each action was sent, then nothing else
-   * went out until the chain pushed back an accepted sequence, which is one
-   * action per ~200ms at best and per `ackWindowMs` at worst. The player's own
-   * screen hopped at input rate because prediction is local, so this was
-   * invisible to them — and everyone ELSE saw their hops arrive at the
-   * acknowledgement rate, falling further behind the longer a direction was
-   * held. "My hop is slow on my friend's screen" is exactly that gap.
-   *
-   * Sending one slot apart is enough. The program's two rules are an exact
-   * `action_seq` and at most one accepted action per rollup slot; consecutive
-   * sends from one client are already in sequence, so the only requirement is
-   * that they do not land inside the same 50ms slot.
-   *
-   * A lost action is RESENT WITH THE SAME SEQUENCE, which is idempotent by
-   * construction: if the original did land, the retry is refused for the
-   * sequence it claims, so a duplicate hop is impossible. Only after the
-   * retries are exhausted does the prediction get rolled back.
-   */
+  /** One transaction in flight, acknowledged by authoritative run pushes.
+   * Batches amortize the round trip; retries preserve the action sequence. */
   type Outbound =
     | {
         kind: "move";
@@ -931,6 +928,7 @@ export function GameScreen({
         x: number;
         y: number;
         direction: Direction;
+        blocked?: boolean;
         tries: number;
         sig?: string;
         sent?: boolean;
@@ -964,48 +962,19 @@ export function GameScreen({
   }
 
   const outboxRef = useRef<Outbound[]>([]);
+  const ownAuthPositionRef = useRef<{
+    x: number;
+    y: number;
+    seq: number;
+    attempt: number;
+  } | null>(null);
   const ackTimerRef = useRef(0);
+  const pumpTimerRef = useRef(0);
+  // Enable only after the matching contract upgrade reaches this rollup.
+  const batchMoves = import.meta.env.VITE_MOVE_BATCHES === "true";
   /** When the last action actually went out, for the one-slot floor. */
   const lastSendAtRef = useRef(0);
 
-  /**
-   * How closely two actions may be sent, MEASURED against devnet rather than
-   * derived from the slot time.
-   *
-   * The tempting number is one rollup slot (50ms), because that is the rule
-   * the program states. It is wrong. `action_seq` must match EXACTLY at
-   * execution, so each action has to observe the previous one already
-   * applied — dispatched is not enough. Sending faster than the rollup can
-   * execute means every action after the first reads a sequence that has not
-   * advanced and is refused, the local prediction rolls back, and the player
-   * rubber-bands while everyone else watches them stutter.
-   *
-   * scripts/realtime-check.ts PIPELINE=1, oscillating inside the hazard-free
-   * spawn zone so nothing dies and terrain cannot skew it, 10 actions per run:
-   *
-   *     60ms  ->  1/10 accepted
-   *     90ms  ->  4/10
-   *    120ms  -> 10/10, 10/10
-   *
-   * 120ms it is. Roughly eight actions a second is what this rollup takes.
-   */
-  /**
-   * Strictly one action in flight.
-   *
-   * `action_seq` must match at EXECUTION, so an action sent before its
-   * predecessor has been APPLIED is refused — measured on this machine, 60ms
-   * apart landed 1 of 10, 120ms apart landed 10 of 10. Every guess at a safe
-   * gap is a guess about somebody else's connection, and when it is wrong the
-   * cost is refusals, rollback, and a player who rubber-bands.
-   *
-   * So do not guess. Confirmation is the only thing that PROVES the previous
-   * action applied, and nothing goes out until it arrives. This cannot be
-   * refused for sequencing, on any connection, ever.
-   *
-   * The price is one action per round trip rather than per slot: about 185ms
-   * here against a 60ms floor. That is the trade — a slower ceiling for a
-   * cadence that is never wrong and never rewinds.
-   */
   /** The action awaiting confirmation, if any. Exactly one, or none. */
   const inFlightRef = useRef<Outbound | null>(null);
   /**
@@ -1022,56 +991,65 @@ export function GameScreen({
     pumpOutbox();
   }
 
-  /**
-   * Send the next queued action, paced by the CLOCK rather than by the
-   * network.
-   *
-   * Holding the queue while awaiting the send made the real cadence a round
-   * trip plus the slot gap — about 137ms to the Singapore rollup, slower than
-   * a player holding a direction. Input then outran the outbox, the queue
-   * grew, and the drift landed entirely on other people's screens: the faster
-   * you moved, the further behind you appeared. Prediction hid it locally.
-   *
-   * Sends may overlap in flight. Ordering does not depend on them arriving
-   * one at a time — it depends on `action_seq`, which the program checks
-   * exactly, and on two accepted actions never sharing a rollup slot, which
-   * the gap below guarantees. A send that loses its race is retried with the
-   * same sequence and is idempotent by construction.
-   */
+  /** Send immediately once the preceding transaction is acknowledged.
+   * A small slot floor prevents a fast local link from repeatedly submitting
+   * while no movement credit is available. */
   function pumpOutbox() {
     if (inFlightRef.current) return; // one at a time, by design
     const next = outboxRef.current.find((a) => !a.sent);
     if (!next) return;
+    const wait = 60 - (performance.now() - lastSendAtRef.current);
+    if (wait > 0) {
+      window.clearTimeout(pumpTimerRef.current);
+      pumpTimerRef.current = window.setTimeout(pumpOutbox, wait);
+      return;
+    }
+    const batch = batchMoves ? selectMoveBatch(outboxRef.current) : [];
+    const submitted = batch.length ? batch : [next];
     inFlightRef.current = next;
     lastSendAtRef.current = performance.now();
-    next.sent = true;
-    next.tries += 1;
+    for (const action of submitted) {
+      action.sent = true;
+      action.tries += 1;
+    }
 
     const common = { day: route.day, mode: route.mode, session: boot.session };
     const sending =
-      next.kind === "move"
-        ? boot.client.sendMove({
+      batch.length && next.kind === "move"
+        ? boot.client.sendMoveBatch({
             ...common,
-            direction: next.direction,
+            directions: batch.map(
+              (a) => (a as Extract<Outbound, { kind: "move" }>).direction,
+            ),
             x: next.x,
             y: next.y,
             attemptNonce: next.attempt,
             actionSeq: next.seq,
           })
-        : boot.client.sendKick({
-            ...common,
-            attemptNonce: next.attempt,
-            actionSeq: next.seq,
-            facing: next.facing,
-            target: next.target,
-          });
+        : next.kind === "move"
+          ? boot.client.sendMove({
+              ...common,
+              direction: next.direction,
+              x: next.x,
+              y: next.y,
+              attemptNonce: next.attempt,
+              actionSeq: next.seq,
+            })
+          : boot.client.sendKick({
+              ...common,
+              attemptNonce: next.attempt,
+              actionSeq: next.seq,
+              facing: next.facing,
+              target: next.target,
+            });
     // Not awaited: the signature is bookkeeping. What releases the next
     // action is the chain confirming this one, never this promise.
     void sending
       .then((sig) => {
-        next.sig = sig;
+        for (const action of submitted) action.sig = sig;
       })
       .catch((e) => {
+        if (!submitted.some((action) => outboxRef.current.includes(action))) return;
         const why = errorText(e);
         setHud((h) => ({ ...h, lastRejection: why }));
         // A lapsed session refuses every action, which reads as a game that
@@ -1085,9 +1063,13 @@ export function GameScreen({
     ackTimerRef.current = window.setTimeout(checkOutboxHead, ackWindowMs());
   }
 
-  function checkOutboxHead() {
+  function checkOutboxHead(allowRetry = true) {
     const head = outboxRef.current[0];
-    if (!head) return;
+    if (!head) {
+      inFlightRef.current = null;
+      window.clearTimeout(ackTimerRef.current);
+      return;
+    }
     if (lastAuthSeqRef.current > head.seq) {
       // Accepted — and possibly several behind it, since sends are pipelined
       // and one push can carry the chain past a whole burst. Drop every entry
@@ -1104,17 +1086,24 @@ export function GameScreen({
       if (took > 0 && took < 3_000)
         confirmMsRef.current = confirmMsRef.current * 0.7 + took * 0.3;
       inFlightRef.current = null;
+      // A batch can accept only a prefix (credit, blockage or death).
+      // The rest must be eligible for a fresh envelope at the new sequence.
+      for (const action of outboxRef.current) {
+        action.sent = false;
+        action.tries = 0;
+      }
       window.clearTimeout(ackTimerRef.current);
       // Confirmed, so the sequence the next action needs has advanced. Go.
       pumpOutbox();
       return;
     }
+    if (!allowRetry) return;
     if (head.tries < ACTION_TRIES) {
       // Never acknowledged: lost, or refused for something transient. Resend
       // this exact sequence — the chain can apply it at most once however
       // many copies arrive.
       inFlightRef.current = null;
-      head.sent = false;
+      for (const action of outboxRef.current) action.sent = false;
       // Lost or refused for a reason that may not hold a slot later (the
       // one-action-per-slot rule, a dropped packet). Same sequence, so the
       // chain can apply it at most once however many copies arrive.
@@ -1241,6 +1230,8 @@ export function GameScreen({
         lastInputAtRef.current = performance.now();
         const mine = liveRun.current;
         if (!mine || mine.state !== "active") return;
+        // Bound both the network queue and how far visuals can lead authority.
+        if (outboxRef.current.length >= MAX_PENDING_ACTIONS) return;
         if (displacedRef.current) {
           setHud((h) => ({
             ...h,
@@ -1298,6 +1289,7 @@ export function GameScreen({
               x: mine.x,
               y: mine.y,
               direction: action.direction,
+              blocked: true,
               tries: 0,
             });
           };
@@ -1397,12 +1389,10 @@ export function GameScreen({
       },
       {
         surface: canvasRef.current ?? undefined,
-        // Hold-to-run repeats at whatever rate the outbox is currently
-        // draining. Generating input faster than that does not move the
-        // player faster — it fills a queue that then has to be dropped, and
-        // the drop is what surfaces as "too fast" while a direction is merely
-        // being held.
-        repeatMs: () => confirmMsRef.current,
+        // Batching reduces network overhead; it must never multiply player
+        // speed. A held key follows acknowledgement latency with a comfortable
+        // 220 ms floor, while a fresh press still moves immediately.
+        repeatMs: () => Math.max(220, confirmMsRef.current),
       },
     );
     return detach;
@@ -1434,46 +1424,10 @@ export function GameScreen({
     }
   }
 
-  async function revive() {
-    setReviving(true);
-    try {
-      const config = await boot.client.getConfig();
-      const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
-      const payerToken = getAssociatedTokenAddressSync(
-        new PublicKey(config.usdcMint),
-        boot.wallet.publicKey,
-      );
-      const review = await boot.client.reviewRevive({
-        day: route.day,
-        payerToken,
-        usdcMint: new PublicKey(config.usdcMint),
-      });
-      await boot.client.submitReviewed(review);
-      await boot.client.completeRevive({
-        day: route.day,
-        receiptNonce: review.receiptNonce,
-        session: boot.session,
-      });
-      boot.client
-        .reconcileReceipt({
-          day: route.day,
-          wallet: boot.wallet.publicKey,
-          kind: ReceiptKind.Revival,
-          receiptNonce: review.receiptNonce,
-        })
-        .catch(() => {});
-      setDeath(null);
-    } catch (e) {
-      setHud((h) => ({ ...h, lastRejection: `${e}`.slice(0, 120) }));
-    } finally {
-      setReviving(false);
-    }
-  }
-
   // Where the run placed. Asked only once the run is over: mid-run it would
   // be a distraction, and the standings are one gPA over the whole world.
   useEffect(() => {
-    if (endedScore == null && death == null) {
+    if (endedScore == null) {
       setRank(null);
       return;
     }
@@ -1493,20 +1447,7 @@ export function GameScreen({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endedScore, death]);
-
-  // The revival deadline is authoritative and untouched; only the countdown
-  // the player watches is presentation, so tick it once a second while the
-  // death card is up instead of freezing at the moment the card opened.
-  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
-  useEffect(() => {
-    if (!death) return;
-    setNowSec(Math.floor(Date.now() / 1000));
-    const tick = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
-    return () => clearInterval(tick);
-  }, [death]);
-
-  const deadlineLeft = death ? Math.max(0, death.deadline - nowSec) : 0;
+  }, [endedScore]);
 
   return (
     <div className="game">
@@ -1570,7 +1511,7 @@ export function GameScreen({
         </Modal>
       )}
 
-      {endedScore != null && !death && (
+      {endedScore != null && (
         <Modal ariaLabel="Run over">
           <div className="death-card">
             {endedScore.score >= hud.record && endedScore.score > 0 && <Confetti />}
@@ -1613,58 +1554,8 @@ export function GameScreen({
         <LeaderboardSheet
           boot={boot}
           day={route.day}
-          initialMode={route.mode}
           onClose={() => setBoardOpen(false)}
         />
-      )}
-
-      {death && (
-        <Modal ariaLabel="You went down — revive or end the attempt">
-          <div className="death-card">
-            {hud.score >= hud.record && hud.score > 0 && <Confetti />}
-            <h2>{deathHeadline(deathCauseRef.current)}</h2>
-            <div className="final-label">Score retained</div>
-            <div className="final-score">
-              row <CountUp value={hud.score} durationMs={650} />
-            </div>
-            {death.price != null ? (
-              <>
-                <p>
-                  Revive for{" "}
-                  <span className="death-price">
-                    {(Number(death.price) / 1e6).toFixed(2)} USDC
-                  </span>{" "}
-                  —{" "}
-                  <span className="death-deadline">
-                    <Icon name="timer" size={14} style={{ verticalAlign: "-2px" }} />{" "}
-                    {deadlineLeft}s
-                  </span>{" "}
-                  left.
-                  <br />
-                  <small className="ds-dim">Later revivals double in price.</small>
-                </p>
-                <div className="row">
-                  <Button
-                    variant="danger"
-                    icon="heart"
-                    busy={reviving}
-                    disabled={deadlineLeft === 0}
-                    onClick={revive}
-                  >
-                    {reviving
-                      ? "Reviving…"
-                      : `Continue (${(Number(death.price) / 1e6).toFixed(0)} USDC)`}
-                  </Button>
-                  <Button variant="ghost" onClick={onExit}>
-                    End attempt
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p>Revival price exceeds representable limits — the attempt ends.</p>
-            )}
-          </div>
-        </Modal>
       )}
     </div>
   );

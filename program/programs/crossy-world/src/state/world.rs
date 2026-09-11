@@ -306,7 +306,8 @@ pub struct PlayerRun {
     /// Last verified safe tile (revival placement policy).
     pub safe_x: u8,
     pub safe_y: u32,
-    /// One accepted movement per ER slot.
+    /// Last spent movement slot; batches retain at most four elapsed slots
+    /// of credit. Single moves consume through the current runtime slot.
     pub last_move_slot: u64,
     /// Exact-next action sequence; consumed by successfully executed actions.
     pub action_seq: u64,
