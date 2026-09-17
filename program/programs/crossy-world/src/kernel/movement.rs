@@ -1,7 +1,7 @@
 //! Bounded catch-up cadence. Slots are provided by the runtime, never clients.
-pub const MAX_MOVE_BATCH: usize = 4;
+pub const MAX_MOVE_BATCH: usize = 8;
 
-/// Spend one elapsed slot interval, retaining at most four moves of credit.
+/// Spend one elapsed slot interval, retaining at most eight moves of credit.
 /// A new run has no stored credit. A backwards clock cannot create credit.
 pub fn next_move_slot(last: u64, now: u64, gap: u64) -> Option<u64> {
     if gap == 0 || now == 0 || now < last {

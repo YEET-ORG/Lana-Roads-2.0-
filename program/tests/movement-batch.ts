@@ -44,6 +44,7 @@ async function fixture(
     blocked?: boolean;
     occupied?: boolean;
     fatal?: boolean;
+    paid?: boolean;
   } = {},
 ) {
   const svm = new LiteSVM();
@@ -55,7 +56,12 @@ async function fixture(
   clock.slot = 100n;
   clock.unixTimestamp = 1000n;
   svm.setClock(clock);
-  const [world, worldBump] = pda(Buffer.from("world"), le(0, 1), le(1, 1), le(1, 8));
+  const [world, worldBump] = pda(
+    Buffer.from("world"),
+    le(0, 1),
+    le(options.paid ? 0 : 1, 1),
+    le(1, 8),
+  );
   const [run, runBump] = pda(Buffer.from("run"), world.toBuffer(), wallet.toBuffer());
   const [best, bestBump] = pda(Buffer.from("best"), world.toBuffer(), wallet.toBuffer());
   const [sector, sectorBump] = pda(
@@ -81,7 +87,7 @@ async function fixture(
   await set("worldHeader", world, {
     bump: worldBump,
     day: new BN(1),
-    mode: { casual: {} },
+    mode: options.paid ? { paid: {} } : { casual: {} },
     status: { open: {} },
     startTs: new BN(0),
     endTs: new BN(2000),
@@ -95,7 +101,7 @@ async function fixture(
     wallet,
     sessionAuthority: signer.publicKey,
     sessionScope: 1,
-    sessionExpiry: new BN(2000),
+    sessionExpiry: new BN(3000),
     attemptNonce: 1,
     state: { active: {} },
     x: 1,
@@ -112,8 +118,8 @@ async function fixture(
     blockers: new BN(options.blocked ? (1n << 25n).toString() : 0),
   });
   const chunkValue = zero({ defined: { name: "chunkDefinition" } });
-  // Unsupported river tiles are deterministically lethal, at every slot.
-  if (options.fatal) chunkValue.lanes[3].kind = 3;
+  // Unsupported river water is deterministically lethal, at every slot.
+  if (options.fatal) chunkValue.lanes[3].kind = 2;
   await set("chunkDefinition", chunk, {
     ...chunkValue,
     bump: chunkBump,
@@ -185,26 +191,38 @@ async function main() {
   const sectorBytes = Buffer.from(f.svm.getAccount(f.sector.toBase58()).data);
   assert.equal(sectorBytes.readBigUInt64LE(8 + 32 + 1 + 4), 1n << 41n);
   checks++;
+  const full = await fixture();
+  // Eight steps inside one 8x8 sector: forward, right, forward, left, ...
+  const fullBatch = await full.send([0, 3, 0, 2, 0, 3, 0, 2]);
+  success(fullBatch);
+  assert.equal(full.read("playerRun", full.run).x, 1);
+  assert.equal(full.read("playerRun", full.run).y, 5);
+  assert.equal(full.read("playerRun", full.run).actionSeq.toNumber(), 8);
+  assert.equal(full.read("dailyBest", full.best).bestScore, 5);
+  checks++;
   failure(await f.send([0], 0), "BadActionSequence");
   checks++;
+  // A four-step batch leaves four of the eight-slot window unspent, so this
+  // single move still lands on the leftover credit.
   success(await f.send([0], 4));
-  assert.equal(f.read("playerRun", f.run).actionSeq.toNumber(), 4);
+  assert.equal(f.read("playerRun", f.run).actionSeq.toNumber(), 5);
+  assert.equal(f.read("playerRun", f.run).y, 6);
   checks++;
-  for (const directions of [[], [0, 0, 0, 0, 0], [0, 255]]) {
+  for (const directions of [[], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 255]]) {
     failure(
       await f.send(directions, 4),
       directions.includes(255) ? "OutOfBounds" : "CapacityExceeded",
     );
     checks++;
   }
-  failure(await f.send([0], 4, {}, 2), "BadAttemptNonce");
+  failure(await f.send([0], 5, {}, 2), "BadAttemptNonce");
   checks++;
   for (const options of [{ blocked: true }, { occupied: true }, { fatal: true }]) {
     const test = await fixture(options);
     success(await test.send([0, 0, 0, 0]));
     const run = test.read("playerRun", test.run);
-    assert.equal(run.actionSeq.toNumber(), 2);
-    assert.equal(run.y, options.fatal ? 3 : 2);
+    assert.equal(run.actionSeq.toNumber(), 2, JSON.stringify(options));
+    assert.equal(run.y, options.fatal ? 3 : 2, JSON.stringify(options));
     if (options.fatal) {
       assert.ok(run.state.ended);
       assert.equal(run.score, 2);
@@ -270,8 +288,14 @@ async function main() {
   assert.equal(f.read("playerRun", f.run).x, 1);
   checks++;
   f.clock.unixTimestamp = 2000n;
+  f.clock.slot = 110n;
   f.svm.setClock(f.clock);
-  failure(await f.send([0], 4), "CutoffPassed");
+  success(await f.send([0], 5));
+  assert.equal(f.read("playerRun", f.run).y, 7, "casual remains playable at cutoff");
+  const paid = await fixture({ paid: true });
+  paid.clock.unixTimestamp = 2000n;
+  paid.svm.setClock(paid.clock);
+  failure(await paid.send([0]), "CutoffPassed");
   checks++;
   for (const [overrides, error] of [
     [{ sessionAuthority: PublicKey.default }, "BadSession"],
@@ -312,7 +336,7 @@ async function main() {
   assert.equal(legacy.read("playerRun", legacy.run).y, 5);
   checks++;
   console.log(
-    `${checks} SBF movement checks passed; four-move batch: ${batch.computeUnitsConsumed()} CU; four single moves: ${singleCu} CU`,
+    `${checks} SBF movement checks passed; eight-move batch: ${fullBatch.computeUnitsConsumed()} CU; four-move batch: ${batch.computeUnitsConsumed()} CU; four single moves: ${singleCu} CU`,
   );
   process.exit(0);
 }
