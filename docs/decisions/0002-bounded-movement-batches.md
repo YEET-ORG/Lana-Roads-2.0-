@@ -68,3 +68,31 @@ Before rollout, verify two clients on the same region: held movement, alternatin
 directions, contention for one tile, crossing sectors, Kick while moving, death,
 reconnect and session displacement. Observe authoritative acceptance latency and
 remote movement while checking sequence progress, not just returned signatures.
+
+## Amendment 2026-09-18: cap raised to eight, batching enabled
+
+`MAX_MOVE_BATCH` is now 8: a batch carries up to eight cardinal steps and the
+catch-up window retains up to eight elapsed-slot intervals of credit. Sector
+and chunk adjacency rules still split batches, and the client's pending-action
+cap (8) now matches the batch cap exactly.
+
+Rollout verification on the devnet `as`, `eu` and `us` rollups: a
+`move_batch`-discriminated instruction dispatches as `Instruction: MoveBatch`
+on every region, while an unknown discriminator returns
+`InstructionFallbackNotFound` - the upgraded program is live everywhere. The
+web client therefore enables batching by default; `VITE_MOVE_BATCHES=false`
+remains as an escape hatch.
+
+The session-signed hot path now signs with `@noble/curves` and serializes
+with `verifySignatures: false` (measured ~4.5ms to ~1.6ms per action on the
+reference machine). Rollups still verify every signature.
+
+Deploying this cap requires the matching program build to reach the target
+rollup; any older deployment rejects batches of five or more.
+
+Local verification with the rebuilt SBF binary (platform-tools v1.52, LiteSVM):
+23 movement checks pass, including the full eight-step batch inside one sector.
+Compute units: eight-move batch 65,489 CU; four-move batch 57,765 CU; four
+single moves 203,764 CU. The fatal-tile fixture was corrected to use river
+(`kind = 2`); kind 3 is rail since the lane-kind renumbering, so the old
+fixture no longer produced a lethal row.

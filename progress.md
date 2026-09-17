@@ -70,3 +70,13 @@ Original prompt: please check the codebase and all , check everything , we are h
 - Changed held movement to wait 320 ms before repeating and repeat no faster than every 220 ms. Network batching remains enabled but no longer multiplies gameplay speed; individual presses remain immediate.
 - Verified with the required web-game Playwright workflow and a focused browser timing probe: first movement remained immediate, held movement waited over 300 ms, and every subsequent repeat stayed above the 220 ms floor. Gameplay rendered correctly with no console errors.
 - Published the client-only update to `lanaroads.mystic.cat` as Cloudflare Worker version `d3535bf3-d84b-4533-9758-a6a17cb811df`; the live JavaScript SHA-256 matches the local production artifact.
+
+## 2026-09-17 persistent casual and atomic join reveal
+
+- Updated contract behavior so casual worlds ignore the original daily cutoff, cannot be closed by daily settlement, and continue accepting gameplay/frontier writes. Paid worlds keep their cutoff unchanged.
+- Added a real LiteSVM SBF regression: casual `move_batch` succeeds exactly at `end_ts`, while paid returns `CutoffPassed`.
+- Added an opaque joining screen. The world stays hidden and input stays disabled until routing/joining has completed, the authoritative run is active, the player model exists, and the map chunk beneath the player has loaded.
+- The same readiness gate now covers retry/respawn, preventing intermediate authoritative corrections from appearing as two or three visible teleports.
+- Verified the joining transition in Chromium against the devnet-configured app: the branded screen rendered with the live phase label, the world canvas had computed opacity `0`, and no page errors were emitted. The live guest wallet was unfunded, so the readiness gate's final reveal is covered by the state conditions and build/type checks rather than a funded write transaction.
+- TODO: after deploying the persistent-casual program upgrade, run one funded join to confirm the final reveal against the upgraded live account layout.
+- Deployed the latest frontend to `lanaroads.mystic.cat` (Cloudflare Worker version `2f315c30-53dc-45fb-8136-0d6f7f1e45d5`). An earlier same-day deploy had built without `--mode devnet`, so the live bundle fell back to localhost RPC and showed "Can't reach the casual world"; `build:devnet` now produces the env-inlined production artifact and the live JavaScript SHA matches it.

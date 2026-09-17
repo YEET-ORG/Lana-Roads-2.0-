@@ -16,23 +16,23 @@ Only the curated vehicle subset defined in [`docs/FRONTEND.md`](docs/FRONTEND.md
 
 ## Running a live world (devnet)
 
-A day is a set of accounts, not a config flag. Until they exist and are
-delegated, the client cannot tell the difference between "the day just rolled
-over" and "the cluster is down", so it falls back to offline practice.
+Casual is one persistent world. Initialize and delegate it once, then keep its
+frontier worker running; UTC midnight does not close it or require another
+casual world. Paid competitions remain daily and use separate world accounts.
 
 ```bash
 cd program
-npx tsx scripts/open-day.ts              # today, casual world
-MODES=0,1 npx tsx scripts/open-day.ts    # paid world as well
-./scripts/run-keeper.sh                  # frontier + hazard crank, supervised
+DAY=20713 MODES=0,1 npx tsx scripts/open-day.ts # one-time bootstrap
+MODES=1 CASUAL_DAY=20713 ./scripts/run-keeper.sh # persistent casual worker
+MODES=0 ./scripts/run-keeper.sh                  # optional paid daily worker
 npx tsx scripts/presence-check.ts        # who is online, and ER round-trip
 DRY_RUN=1 npx tsx scripts/settle-day.ts  # what settling yesterday would do
 npx tsx scripts/settle-day.ts            # actually settle it
 ```
 
 The keeper is mandatory infrastructure: Solana programs do not execute on a
-timer by themselves. Run it under a process supervisor for the entire live
-day. It pre-reveals and prepares ten complete 16-row chunks beyond the leader
+timer by themselves. Run it under a process supervisor for the lifetime of the
+world. It pre-reveals and prepares ten complete 16-row chunks beyond the leader
 (160 rows of lookahead), and immediately replaces one whenever the leader
 crosses a chunk boundary. From the repository root, Windows and local shells
 can use `pnpm --dir program keeper`; inspect the current frontier with
@@ -56,16 +56,16 @@ validator from `GlobalConfig`; set `VALIDATOR` only as an explicit safety
 override.
 
 Settlement is the other half of the day: audit every permanent `DailyBest`,
-claim the strict maximum, close and commit the worlds, reconcile pending
+claim the strict maximum, close and commit the paid world, reconcile pending
 payments, record the final base commit, then `finalize_day` (90% winner / 10%
 team, or the whole pool rolled forward when nobody scored). Every stage is
 idempotent, so a half-finished settlement resumes where it stopped. The keeper
 runs it for yesterday every five minutes; `SETTLE=0` leaves the payout to an
 operator.
 
-`open-day.ts` is idempotent — it only does what is still missing — and the
-keeper calls the same routine itself when it finds no world on the rollup, so
-a UTC boundary rolls over without an operator. Both need the admin/keeper
+`open-day.ts` is idempotent — it only does what is still missing. The casual
+keeper targets `CASUAL_DAY`, so it reuses that world after UTC rollover instead
+of opening another one. Both setup and keeper operations need the admin/keeper
 keypair (`ADMIN_KEYPAIR` / `KEEPER_KEYPAIR`, default
 `~/.config/solana/id.json`, or `KEEPER_SECRET_JSON` in the worker). Randomness
 comes only from authenticated MagicBlock scoped-VRF callbacks; there is no VRF
