@@ -10,22 +10,17 @@ import {
   LANE_RAIL,
   LANE_RIVER,
   LANE_ROAD,
-  railPhaseVisual,
   TileState,
 } from "./hazards";
 
 /**
- * Demo-only tile rule: the program marks a whole rail row lethal for the
- * entire crossing window (authoritative, mirrored online) — but offline
- * practice owes the player positional fairness: the train only kills the
- * tiles it actually covers.
+ * Practice-mode tile rule. This used to special-case rails so that only the
+ * tiles the train covered were lethal, while the program killed the whole
+ * row; the program now evaluates real train coverage (`rail_train_covers`),
+ * so practice and authority finally agree and there is no second rule left
+ * to drift.
  */
 export function demoEvaluateTile(lane: Lane, x: number, tMs: number): TileState {
-  if (lane.kind === LANE_RAIL) {
-    const { phase, trainX } = railPhaseVisual(lane, tMs);
-    if (phase !== "train") return "safe";
-    return x + 1 > trainX && x < trainX + lane.footprint ? "lethal" : "safe";
-  }
   return evaluateTile(lane, x, tMs);
 }
 

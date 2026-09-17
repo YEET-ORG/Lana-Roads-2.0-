@@ -15,7 +15,7 @@ import {
   demoSeed,
   makeLane,
 } from "../../game/simulation/demoLanes";
-import { CHUNK_LOOKAHEAD_CHUNKS, CHUNK_ROWS, Direction } from "@crossy-world/sdk";
+import { CHUNK_LOOKAHEAD_CHUNKS, CHUNK_ROWS, Direction, tickOf } from "@crossy-world/sdk";
 import { Button, Confetti, CountUp, IconButton, Modal } from "../../design-system";
 import { agentModelIdFor } from "../../lib/agent";
 import { haptic } from "../../lib/settings";
@@ -83,7 +83,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
       const { x, y } = posRef.current;
       const lane = s.laneAt(y);
       if (!lane) return;
-      const t = s.worldTimeMs();
+      const t = tickOf(s.worldTimeMs());
       const state = demoEvaluateTile(lane, Math.round(x), t);
       if (state === "lethal") {
         deadRef.current = true;
@@ -131,7 +131,7 @@ export function DemoScreen({ onExit }: { onExit: () => void }) {
         reveal(practiceFrontierRow(ny));
         const destLane = s.laneAt(ny);
         if (destLane) {
-          const t = s.worldTimeMs();
+          const t = tickOf(s.worldTimeMs());
           if (!demoIsTraversable(destLane, nx, t)) {
             s.setFacing(action.direction);
             s.bumpLocal(dx, dy);

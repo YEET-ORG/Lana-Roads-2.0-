@@ -854,8 +854,8 @@ export class WorldScene {
       this.moverSlots.set(row, slots);
       // Roads get the contract drawn on them. Rivers do not need it (logs
       // are slow and their footprint is where you STAND, not where you
-      // die) and a rail's whole row is lethal at once, so position carries
-      // no information there.
+      // die), and the train is one long model whose drawn body is exactly
+      // the lethal span, so it marks itself.
       if (lane.kind === LANE_ROAD) {
         const marks: THREE.Mesh[] = [];
         for (let i = 0; i < count; i++) {
@@ -1400,7 +1400,14 @@ export class WorldScene {
     if (++this.frame % 120 === 0) this.pruneBehind(nearRow);
     let riverNear = false;
     for (const [row, lane] of this.lanes) {
-      const group = this.laneMeshes.get(row);
+      let group = this.laneMeshes.get(row);
+      // A row pruned while the player was ahead (or a hole from a partial
+      // snapshot) can be walked back into. Rebuild it before anything else:
+      // a lethal lane with no mesh is an invisible train.
+      if (!group && row > nearRow - 14 && row < nearRow + 26) {
+        this.setLane(row, lane, this.laneSeeds.get(row));
+        group = this.laneMeshes.get(row);
+      }
       if (group) {
         // Interest management: rows far outside the view skip work.
         const visible = row > nearRow - 14 && row < nearRow + 26;
@@ -1478,7 +1485,7 @@ export class WorldScene {
           if (marks?.[i] && !seen.has(i)) marks[i].visible = false;
         }
       } else if (lane.kind === LANE_RAIL) {
-        const { phase, trainX } = railPhaseVisual(lane, tMs);
+        const { phase, trainX, trainLen } = railPhaseVisual(lane, tMs);
         const blink = phase === "warning" && Math.floor(tMs / 220) % 2 === 0;
         const stripMat = this.railStripMats.get(row);
         if (stripMat) {
@@ -1504,7 +1511,11 @@ export class WorldScene {
         if (train) {
           train.userData.phase = phase;
           train.visible = phase === "train";
-          train.position.set(trainX + lane.footprint / 2, 0, -row);
+          // The body is stretched to the conservative kill span: the mesh is
+          // built at the lane footprint and scaled by whatever the visual
+          // span needs, so the drawn train always covers the lethal tiles.
+          train.position.set(trainX + trainLen / 2, 0, -row);
+          train.scale.x = trainLen / Math.max(2, lane.footprint);
           const lamp = train.userData.lamp as THREE.MeshLambertMaterial | undefined;
           if (lamp) lamp.emissiveIntensity = phase === "train" ? 1.35 : 0.25;
         }

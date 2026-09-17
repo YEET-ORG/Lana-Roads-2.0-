@@ -41,33 +41,29 @@ import {
   type Lane,
   evaluateTile,
   railPhase,
-  WORLD_WIDTH,
+  railVisualSpan,
+  tickOf,
 } from "@crossy-world/sdk";
 
 /**
  * Where to draw the train, on top of the authoritative phase.
  *
- * The program marks the whole rail row lethal for the entire crossing
- * window — it does not track where along the row the train is — so this
- * position is decoration. It must never be used to decide whether a tile is
- * safe; `evaluateTile` is the authority.
+ * The train's danger window is positional in the program (`rail_train_covers`),
+ * so the mesh must COVER that window: if a train is going, it has to be on
+ * screen where it kills. `railVisualSpan` is the conservative body — it only
+ * ever over-covers, never leaves the lethal span invisible.
+ *
+ * Returns the body's left edge (`trainX`) and length (`trainLen`), in tiles;
+ * the renderer centers and stretches the mesh accordingly.
  */
 export function railPhaseVisual(
   lane: Lane,
   tMs: number,
-): { phase: "quiet" | "warning" | "train"; trainX: number } {
-  const phase = railPhase(lane, tMs);
-  if (phase !== "train") return { phase, trainX: -100 };
-  const crossingMs =
-    ((WORLD_WIDTH + lane.footprint) * 1_000_000) / Math.max(1, lane.speedMtps);
-  const cycle = lane.periodMs + lane.warningMs + crossingMs;
-  const pos = (tMs + lane.phaseMt) % cycle;
-  const progress = (pos - lane.periodMs - lane.warningMs) / crossingMs;
-  const trainX =
-    lane.dirPositive === 1
-      ? -lane.footprint + progress * (WORLD_WIDTH + lane.footprint)
-      : WORLD_WIDTH - progress * (WORLD_WIDTH + lane.footprint);
-  return { phase, trainX };
+): { phase: "quiet" | "warning" | "train"; trainX: number; trainLen: number } {
+  const phase = railPhase(lane, tickOf(tMs));
+  if (phase !== "train") return { phase, trainX: -100, trainLen: lane.footprint };
+  const { left, length } = railVisualSpan(lane, tMs);
+  return { phase, trainX: left, trainLen: length };
 }
 
 /** Why a move was refused, in words a player understands. */

@@ -336,6 +336,131 @@ header {
   width: 100%;
   height: 100%;
   display: block;
+  transition: opacity 180ms var(--ease-out);
+}
+
+.game--joining .world-canvas,
+.game--joining .hud {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.join-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 24px;
+  overflow: hidden;
+  color: var(--paper);
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.2), transparent 34%),
+    linear-gradient(180deg, #16283b 0%, var(--navy-950) 100%);
+  animation: ds-fade-in 180ms var(--ease-out) both;
+}
+
+.join-screen__road {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  border-radius: 26px;
+  overflow: hidden;
+  border: 3px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(
+        90deg,
+        transparent 46%,
+        rgba(255, 255, 255, 0.9) 46% 54%,
+        transparent 54%
+      )
+      0 0 / 100% 30px,
+    #34495e;
+  box-shadow:
+    0 16px 42px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 5px rgba(16, 24, 39, 0.25);
+  animation: join-road-scroll 600ms linear infinite;
+}
+
+.join-screen__road span {
+  position: absolute;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px 8px 11px 11px;
+  background: var(--sun-400);
+  box-shadow:
+    -11px 8px 0 -7px var(--navy-950),
+    11px 8px 0 -7px var(--navy-950),
+    0 5px 0 #d88a23;
+  transform: translate(-50%, -50%) scale(0.5);
+  opacity: 0;
+  animation: join-runner 1.35s var(--ease-out) infinite;
+}
+
+.join-screen__road span:nth-child(2) {
+  animation-delay: 450ms;
+}
+
+.join-screen__road span:nth-child(3) {
+  animation-delay: 900ms;
+}
+
+.join-screen__copy {
+  min-height: 88px;
+}
+
+.join-screen__eyebrow {
+  margin-bottom: 6px;
+  color: var(--grass-400);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+}
+
+.join-screen h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 7vw, 46px);
+  letter-spacing: -0.03em;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.28);
+}
+
+.join-screen p {
+  max-width: min(80vw, 440px);
+  margin: 10px 0 0;
+  color: var(--ds-text-dim);
+  font-weight: 700;
+}
+
+@keyframes join-road-scroll {
+  to {
+    background-position:
+      0 30px,
+      0 0;
+  }
+}
+
+@keyframes join-runner {
+  0% {
+    top: 112%;
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+  20%,
+  72% {
+    opacity: 1;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    top: -12%;
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
 }
 
 .hud {

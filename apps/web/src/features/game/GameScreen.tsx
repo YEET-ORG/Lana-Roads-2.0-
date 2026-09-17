@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import {
+  CHUNK_LOOKAHEAD_CHUNKS,
+  CHUNK_ROWS,
   Direction,
   MAX_PENDING_ACTIONS,
   moveDestination,
@@ -60,6 +62,16 @@ function errorText(e: unknown): string {
 
 /** Quiet spell after which the session is handed back to the wallet. */
 const IDLE_SESSION_MS = 3 * 60 * 1000;
+/** Prevent a fast cache hit from flashing the joining screen for one frame. */
+const JOIN_MIN_VISIBLE_MS = 650;
+
+function joiningLabel(state: string): string {
+  if (state.startsWith("error:")) return state;
+  if (state.includes("resolving")) return "Finding the nearest game server…";
+  if (state.includes("joining")) return "Securing your place…";
+  if (state.includes("spawning")) return "Placing your runner…";
+  return "Loading the course…";
+}
 
 /**
  * What killed a run, by the same rule the program uses: the kind of lane it
@@ -136,8 +148,25 @@ export function GameScreen({
   const [rank, setRank] = useState<{ place: number; of: number } | null>(null);
   /** No gameplay listener may attach until the router has selected one ER. */
   const [erReady, setErReady] = useState(!boot.client.routerUrl);
+  /**
+   * Keep bootstrap corrections off-screen. The world is revealed only after
+   * the join transaction, an active authoritative run, its model, and the
+   * containing map chunk are all ready.
+   */
+  const [joining, setJoining] = useState(true);
+  const joiningRef = useRef(true);
+  const joinPreparedRef = useRef(route.mode !== WorldMode.Casual);
+  const joinStartedAtRef = useRef(performance.now());
+  const revealReadyRef = useRef<() => void>(() => {});
   const settings = useSettings();
   const world = pda.world(boot.client.region, route.mode, route.day);
+
+  useEffect(() => {
+    joiningRef.current = true;
+    joinPreparedRef.current = route.mode !== WorldMode.Casual;
+    joinStartedAtRef.current = performance.now();
+    setJoining(true);
+  }, [route.day, route.mode]);
 
   // Resolve the authoritative ER before subscribing, reading a run, or
   // sending an action. This used to race the live-state effect: that effect
@@ -197,7 +226,11 @@ export function GameScreen({
             mode: WorldMode.Casual,
           });
         }
-        if (live) setHud((h) => ({ ...h, state: "active" }));
+        if (live) {
+          joinPreparedRef.current = true;
+          setHud((h) => ({ ...h, state: "loading map…" }));
+          revealReadyRef.current();
+        }
       } catch (e) {
         console.error("join/spawn failed:", e);
         if (live) setHud((h) => ({ ...h, state: `error: ${errorText(e)}` }));
@@ -271,12 +304,49 @@ export function GameScreen({
     let scene: WorldScene | null = null;
     let live = true;
     let loadedChunks = 0;
-    let wantedChunks = 0;
+    // Always ask for a useful runway even if the independent world-header
+    // request is temporarily unavailable. The screenshot-worthy failure was
+    // chunk 0 ending exactly under a player on row 15 while twelve already
+    // revealed chunks sat on chain.
+    let wantedChunks = CHUNK_LOOKAHEAD_CHUNKS + 1;
     let chunkLoadRunning = false;
     let chunkRetryMs = 150;
     let chunkRetryTimer = 0;
+    let revealTimer = 0;
+    let ownRunReady = false;
+    let ownRunRow = 0;
     let stopChunkWait: (() => void) | null = null;
     const me = boot.wallet.publicKey.toBase58();
+    const maybeRevealWorld = () => {
+      if (
+        !live ||
+        !joinPreparedRef.current ||
+        !scene ||
+        !ownRunReady ||
+        loadedChunks <= Math.floor(ownRunRow / CHUNK_ROWS) ||
+        revealTimer
+      ) {
+        return;
+      }
+      const delay = Math.max(
+        0,
+        JOIN_MIN_VISIBLE_MS - (performance.now() - joinStartedAtRef.current),
+      );
+      revealTimer = window.setTimeout(() => {
+        revealTimer = 0;
+        if (!live) return;
+        // Reveal on a paint boundary so the authoritative camera/player pose
+        // and newly installed terrain are in the same first visible frame.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!live) return;
+            joiningRef.current = false;
+            setJoining(false);
+          });
+        });
+      }, delay);
+    };
+    revealReadyRef.current = maybeRevealWorld;
     // Assets resolve before first paint of the world; missing models fall
     // back to footprint-correct primitives inside the scene.
     void preloadAssets().then(() => {
@@ -288,6 +358,7 @@ export function GameScreen({
       loadedChunks = 0;
       void pumpChunks();
       reconcileNowRef.current();
+      maybeRevealWorld();
     });
     const onResize = () => sceneRef.current?.resize();
     window.addEventListener("resize", onResize);
@@ -374,9 +445,9 @@ export function GameScreen({
       // A subscription does not replay existing world-header state. During a
       // cold reload the run read can succeed while the independent header
       // read is temporarily unavailable, which previously rendered exactly
-      // one thing: this player. A valid run proves every chunk through its
-      // current row is revealed, so it safely seeds the minimum map range.
-      loadChunks(run.y + 1);
+      // one thing: this player. A valid run proves its row is revealed and
+      // asks for the same bounded runway the keeper maintains ahead of it.
+      loadChunks(run.y + 1 + CHUNK_LOOKAHEAD_CHUNKS * CHUNK_ROWS);
       if (wallet === me) {
         lastOwnPushRef.current = performance.now();
         // A new attempt restarts the sequence at zero. Carrying the old
@@ -426,6 +497,10 @@ export function GameScreen({
         };
         const mine = liveRun.current;
         const authSeq = run.actionSeq.toNumber();
+        // `PlayerRig.correctTo` deliberately ignores movement while dead.
+        // Revive before positioning a new attempt; doing this afterward left
+        // the mesh at the death tile while the camera followed the spawn.
+        if (state === "active") scene?.reviveLocal();
         // While optimistic moves are still in flight (our local sequence is
         // ahead of this push), keep the predicted position — snapping to the
         // older authoritative tile rubber-bands every single move. The
@@ -456,6 +531,9 @@ export function GameScreen({
           };
           scene?.setLocal(run.x, run.y, run.facing, true);
         }
+        ownRunReady = state === "active";
+        ownRunRow = run.y;
+        maybeRevealWorld();
         // Death/revive presentation: the world reacts before the overlay.
         if (state === "deadAwaitingRevive" || state === "ended") {
           // The program decides what killed you from the lane the run
@@ -463,7 +541,7 @@ export function GameScreen({
           // tile rather than from wherever the local mesh ended up.
           scene?.killLocal(causeOfDeath(scene, run.y));
           if (scene) deathCauseRef.current = scene.lastDeathCause;
-        } else if (state === "active") scene?.reviveLocal();
+        }
         // HUD updates only when something visible changed (uncontrolled
         // re-renders on every ~50ms push cause visible jank).
         setHud((h) =>
@@ -557,23 +635,24 @@ export function GameScreen({
      * cannot leave the scene blank.
      */
     const wantChunksFromWorld = async () => {
-      if (wantedChunks > 0) return;
       const world = await boot.client
         .getWorldAnywhere(route.mode, route.day)
         .catch(() => null);
       if (!live || !world) return;
-      wantedChunks = Math.max(wantedChunks, Math.ceil(Number(world.revealedRows) / 16));
+      wantedChunks = Math.max(
+        wantedChunks,
+        Math.ceil(Number(world.revealedRows) / CHUNK_ROWS),
+      );
     };
 
     const pumpChunks = async () => {
       if (!live || !scene || chunkLoadRunning) return;
-      if (loadedChunks >= wantedChunks) {
+      chunkLoadRunning = true;
+      let throughIndex = loadedChunks;
+      try {
         await wantChunksFromWorld();
         if (!live || !scene || loadedChunks >= wantedChunks) return;
-      }
-      chunkLoadRunning = true;
-      const throughIndex = wantedChunks;
-      try {
+        throughIndex = wantedChunks;
         const snapshotStart = loadedChunks;
         const snapshot = await boot.client
           .getChunks(route.day, snapshotStart, throughIndex - snapshotStart)
@@ -605,6 +684,7 @@ export function GameScreen({
             });
           },
         });
+        maybeRevealWorld();
       } finally {
         chunkLoadRunning = false;
       }
@@ -619,7 +699,7 @@ export function GameScreen({
 
     // Chunk/lane loading repeats immediately whenever the frontier grows.
     const loadChunks = (revealedRows: number) => {
-      wantedChunks = Math.max(wantedChunks, Math.ceil(revealedRows / 16));
+      wantedChunks = Math.max(wantedChunks, Math.ceil(revealedRows / CHUNK_ROWS));
       void pumpChunks();
     };
 
@@ -902,6 +982,8 @@ export function GameScreen({
       clearInterval(pingTimer);
       clearInterval(hazardTimer);
       clearChunkWait();
+      window.clearTimeout(revealTimer);
+      revealReadyRef.current = () => {};
       window.clearTimeout(deathTimerRef.current);
       window.clearTimeout(ackTimerRef.current);
       window.clearTimeout(pumpTimerRef.current);
@@ -970,8 +1052,10 @@ export function GameScreen({
   } | null>(null);
   const ackTimerRef = useRef(0);
   const pumpTimerRef = useRef(0);
-  // Enable only after the matching contract upgrade reaches this rollup.
-  const batchMoves = import.meta.env.VITE_MOVE_BATCHES === "true";
+  // Batching is live on the devnet rollups (verified 2026-09-18: every region
+  // dispatches move_batch). Set VITE_MOVE_BATCHES=false to fall back to single
+  // moves without a rebuild of this logic.
+  const batchMoves = import.meta.env.VITE_MOVE_BATCHES !== "false";
   /** When the last action actually went out, for the one-slot floor. */
   const lastSendAtRef = useRef(0);
 
@@ -1228,6 +1312,7 @@ export function GameScreen({
     const detach = attachInput(
       (action) => {
         lastInputAtRef.current = performance.now();
+        if (joiningRef.current) return;
         const mine = liveRun.current;
         if (!mine || mine.state !== "active") return;
         // Bound both the network queue and how far visuals can lead authority.
@@ -1402,6 +1487,10 @@ export function GameScreen({
   /** Casual restart: a fresh attempt on the same delegated run account. */
   async function playAgain() {
     setRespawning(true);
+    joiningRef.current = true;
+    joinPreparedRef.current = false;
+    joinStartedAtRef.current = performance.now();
+    setJoining(true);
     try {
       const { attemptNonce } = await boot.client.joinCasual({
         day: route.day,
@@ -1415,8 +1504,10 @@ export function GameScreen({
         session: boot.session,
         mode: WorldMode.Casual,
       });
+      joinPreparedRef.current = true;
       setEndedScore(null);
       reconcileNowRef.current();
+      revealReadyRef.current();
     } catch (e) {
       setHud((h) => ({ ...h, lastRejection: errorText(e) }));
     } finally {
@@ -1450,8 +1541,25 @@ export function GameScreen({
   }, [endedScore]);
 
   return (
-    <div className="game">
+    <div className={`game${joining ? " game--joining" : ""}`}>
       <canvas ref={canvasRef} className="world-canvas" />
+      {joining && (
+        <div className="join-screen" role="status" aria-live="polite">
+          <div className="join-screen__road" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="join-screen__copy">
+            <div className="join-screen__eyebrow">LANA ROADS</div>
+            <h1>Joining world</h1>
+            <p>{joiningLabel(hud.state)}</p>
+          </div>
+          <Button variant="ghost" onClick={onExit}>
+            Cancel
+          </Button>
+        </div>
+      )}
       <div className="hud score">
         {/* key retriggers the pop on every score change */}
         <span className="score-value" key={hud.score}>

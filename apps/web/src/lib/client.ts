@@ -24,6 +24,26 @@ const BASE_WS = import.meta.env.VITE_WS ?? "ws://localhost:8900";
 export const ER_RPC = import.meta.env.VITE_ER_RPC ?? BASE_RPC;
 const ER_WS = import.meta.env.VITE_ER_WS ?? BASE_WS;
 export const CLUSTER = import.meta.env.VITE_CLUSTER ?? "local";
+
+/**
+ * Casual play intentionally uses one long-lived world for now. Paid play can
+ * keep its UTC-day lifecycle without making the free-play button depend on a
+ * brand-new world being initialized every midnight.
+ */
+function configuredCasualDay(raw: string | undefined): bigint | null {
+  if (!raw) return null;
+  try {
+    const day = BigInt(raw);
+    return day >= 0n ? day : null;
+  } catch {
+    console.warn(`Ignoring invalid VITE_CASUAL_DAY=${raw}`);
+    return null;
+  }
+}
+
+export const CASUAL_DAY =
+  configuredCasualDay(import.meta.env.VITE_CASUAL_DAY) ??
+  (CLUSTER === "devnet" ? 20713n : null);
 const ROUTER =
   import.meta.env.VITE_ROUTER ??
   (CLUSTER === "devnet" ? "https://devnet-router.magicblock.app" : undefined);
@@ -100,8 +120,7 @@ export async function bootstrap(wallet: Keypair): Promise<Bootstrapped> {
     // The world for this region is delegated to this region's validator, so
     // pin it rather than letting the router resolve to whichever rollup
     // happens to answer.
-    validator:
-      CLUSTER === "devnet" ? new PublicKey(region.validator) : VALIDATOR,
+    validator: CLUSTER === "devnet" ? new PublicKey(region.validator) : VALIDATOR,
     routerUrl: ROUTER,
     region: region.id,
     wallet: new KeypairWallet(wallet),

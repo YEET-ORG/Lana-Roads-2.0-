@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { WorldMode } from "@crossy-world/sdk";
-import { Bootstrapped } from "../../lib/client";
+import { Bootstrapped, CASUAL_DAY } from "../../lib/client";
 import {
   agentModelIdFor,
   agentName,
@@ -99,13 +99,15 @@ export function Home({
     let live = true;
     const load = async () => {
       try {
-        const day = await boot.client.getCurrentDay();
+        // Casual is a persistent free-play room for now. Only local/dev
+        // environments without an explicit room retain the old clock day.
+        const day = CASUAL_DAY ?? (await boot.client.getCurrentDay());
         const casual = await boot.client
           .getWorld(WorldMode.Casual, day)
           .catch(() => null);
         if (!live) return;
         if (!casual) {
-          setWarn(`Today's casual world (day ${day}) is not live yet.`);
+          setWarn(`The casual world (day ${day}) is not live yet.`);
           setInfo({ day, casualReady: false });
           return false;
         }
