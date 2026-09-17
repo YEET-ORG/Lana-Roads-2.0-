@@ -20,17 +20,25 @@ import {
   CHUNK_ROWS,
 } from "../src/constants.js";
 import {
+  LANE_RAIL,
   LANE_ROAD,
   Lane,
   VEHICLE_ASSET_IDS,
   VEHICLE_VARIANT_COUNT,
   VehicleClass,
   MS_PER_SLOT,
+  evaluateTile,
   laneObjectCovers,
   laneObjects,
   laneVehicleClass,
   laneVehicles,
   objectIndex,
+  railNextCoverageMs,
+  railPhase,
+  railTrainCovers,
+  railTrainTileX,
+  railTrainXMt,
+  railVisualSpan,
   tickOf,
   vehicleVariant,
   worldTimeMs,
@@ -229,6 +237,170 @@ describe("shared golden vectors", () => {
           }
         }
       }
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // rails: the train is a position, not a whole-row timer
+  // -------------------------------------------------------------------------
+
+  // Emitted by `cargo test -p crossy-world --lib -- --nocapture
+  // golden_rail_vectors_for_the_sdk`. A rail lane is 6 tiles long, crosses
+  // at 2 tiles/s (35s), warns for 1.5s, waits 6s, and starts at phase 0.
+  const railLane = (dirPositive: number): Lane => ({
+    kind: LANE_RAIL,
+    dirPositive,
+    footprint: 6,
+    gapTiles: 0,
+    speedMtps: 2_000,
+    phaseMt: 0,
+    warningMs: 1_500,
+    periodMs: 6_000,
+    blockerMask: 0n,
+    sinking: 0,
+  });
+
+  it("a train is only lethal where it is", () => {
+    // This is the bug the whole-row rule shipped: a player crossing at one
+    // end died while the train was still leaving the other end — or had not
+    // even entered yet.
+    const lane = railLane(1);
+    assert.deepEqual(railPhase(lane, 0), "quiet");
+    assert.deepEqual(railPhase(lane, 7_000), "warning");
+    assert.deepEqual(railPhase(lane, 7_500), "train");
+    assert.equal(evaluateTile(lane, 0, 0), "safe");
+    assert.equal(evaluateTile(lane, 63, 0), "safe");
+    // The phase is open but the train is still off-world: nothing dies.
+    assert.equal(evaluateTile(lane, 0, 7_500), "safe");
+    assert.equal(evaluateTile(lane, 63, 7_500), "safe");
+    // Mid-crossing: exactly the tiles under the train.
+    const mid = 7_500 + 17_500;
+    for (let x = 0; x < 64; x++) {
+      assert.equal(
+        evaluateTile(lane, x, mid),
+        x >= 29 && x < 35 ? "lethal" : "safe",
+        `x=${x}`,
+      );
+    }
+  });
+
+  it("rail coverage and train position match kernel::hazard", () => {
+    const expected: Record<number, { pos: [number, number]; covered: [number, number] }> =
+      {
+        0: { pos: [-6_000, 64_000], covered: [[], []] },
+        7_500: { pos: [-6_000, 64_000], covered: [[], []] },
+        17_500: {
+          pos: [14_000, 44_000],
+          covered: [
+            [14, 15, 16, 17, 18, 19],
+            [44, 45, 46, 47, 48, 49],
+          ],
+        },
+        25_000: {
+          pos: [29_000, 29_000],
+          covered: [
+            [29, 30, 31, 32, 33, 34],
+            [29, 30, 31, 32, 33, 34],
+          ],
+        },
+        42_499: { pos: [63_998, -5_998], covered: [[63], [0]] },
+      };
+    for (const dir of [0, 1] as const) {
+      const lane = railLane(dir);
+      const at = dir === 1 ? 0 : 1;
+      for (const [t, want] of Object.entries(expected)) {
+        assert.equal(railTrainXMt(lane, Number(t)), want.pos[at], `x_mt ${dir} ${t}`);
+        assert.equal(
+          railTrainTileX(lane, Number(t)),
+          want.pos[at] / 1_000,
+          `tile x ${dir} ${t}`,
+        );
+        const covered = [...Array(64).keys()].filter((x) =>
+          railTrainCovers(lane, x, Number(t)),
+        );
+        assert.deepEqual(covered, want.covered[at], `covered ${dir} ${t}`);
+      }
+    }
+  });
+
+  it("the lethal span is exactly the train body", () => {
+    // The collision span and the authoritative train edge must agree, or a
+    // player dies beside a train with nothing under them. Sweep a full cycle.
+    for (const dir of [0, 1] as const) {
+      const lane = railLane(dir);
+      for (let step = 0; step < 900; step++) {
+        const t = step * MS_PER_SLOT;
+        const edge = railTrainTileX(lane, t);
+        let lethal = 0;
+        for (let x = 0; x < 64; x++) {
+          const inBody = x + 1 > edge + 1e-9 && x + 1e-9 < edge + lane.footprint;
+          assert.equal(railTrainCovers(lane, x, t), inBody, `dir ${dir} t ${t} x ${x}`);
+          if (inBody) lethal += 1;
+        }
+        // One train, never a whole row. A body straddling two cells can
+        // overlap up to footprint + 1 tiles; nothing more.
+        assert.ok(lethal <= lane.footprint + 1, `dir ${dir} t ${t}: ${lethal} lethal`);
+      }
+    }
+  });
+
+  it("the drawn train always covers the lethal train", () => {
+    // The renderer draws `railVisualSpan`. If that span ever misses a tile
+    // the program kills on, the player dies to a train that was not there
+    // on their screen. Sweep render time (fractional) across many cycles.
+    for (const dir of [0, 1] as const) {
+      const lane = railLane(dir);
+      let drawn = 0;
+      for (let step = 0; step < 4_000; step++) {
+        const t = step * 3.3;
+        if (railPhase(lane, tickOf(t)) !== "train") continue;
+        const span = railVisualSpan(lane, t);
+        const lethalLeft = railTrainTileX(lane, tickOf(t));
+        assert.ok(
+          span.left <= lethalLeft + 1e-9,
+          `dir ${dir} t ${t}: left leak ${span.left} > ${lethalLeft}`,
+        );
+        assert.ok(
+          span.left + span.length >= lethalLeft + lane.footprint - 1e-9,
+          `dir ${dir} t ${t}: right leak`,
+        );
+        // Over-cover stays bounded to one tick of travel.
+        assert.ok(
+          span.length <= lane.footprint + 1,
+          `dir ${dir} t ${t}: overstretched ${span.length}`,
+        );
+        drawn++;
+      }
+      assert.ok(drawn > 1_000, `dir ${dir} never drew a train`);
+    }
+  });
+
+  it("rail hazard deadlines land when the train arrives", () => {
+    // A player standing on the track must be scheduled for the moment the
+    // train reaches THEM — not for the phase opening, which happens while
+    // the train is still off-world.
+    const expected: Record<number, [number, number]> = {
+      0: [7_501, 39_001],
+      31: [23_001, 23_501],
+      63: [39_001, 7_501],
+    };
+    for (const dir of [0, 1] as const) {
+      const lane = railLane(dir);
+      const at = dir === 1 ? 0 : 1;
+      for (const [x, want] of Object.entries(expected)) {
+        const d = railNextCoverageMs(lane, Number(x), 0);
+        assert.equal(d, want[at], `x=${x} dir=${dir}`);
+        assert.ok(railTrainCovers(lane, Number(x), d), "covers at the deadline");
+        assert.ok(!railTrainCovers(lane, Number(x), d - 1), "not one ms early");
+      }
+      // Once the train has passed, the next deadline is the next cycle.
+      const lane1 = railLane(dir);
+      const cycle = 6_000 + 1_500 + 35_000;
+      const passed = 7_500 + 35_000 + 100;
+      assert.equal(
+        railNextCoverageMs(lane1, 63, passed),
+        railNextCoverageMs(lane1, 63, 0) + cycle,
+      );
     }
   });
 

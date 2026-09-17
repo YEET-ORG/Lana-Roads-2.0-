@@ -136,14 +136,118 @@ export function laneObjects(
 
 export type RailPhase = "quiet" | "warning" | "train";
 
+/**
+ * Milliseconds for the train to travel the world plus its own length.
+ *
+ * Integer division on purpose: the program uses u64, and a client that kept
+ * the fractional remainder would drift from it on any lane whose speed does
+ * not divide evenly.
+ */
+export function railCrossingMs(lane: Lane): number {
+  return Math.max(
+    1,
+    Math.floor(
+      ((WORLD_WIDTH + lane.footprint) * 1_000_000) / Math.max(1, lane.speedMtps),
+    ),
+  );
+}
+
+/** One full rail cycle: quiet, warning, and the crossing itself. */
+export function railCycleMs(lane: Lane): number {
+  return lane.periodMs + lane.warningMs + railCrossingMs(lane);
+}
+
 export function railPhase(lane: Lane, tMs: number): RailPhase {
-  const crossingMs =
-    ((WORLD_WIDTH + lane.footprint) * 1_000_000) / Math.max(1, lane.speedMtps);
-  const cycle = lane.periodMs + lane.warningMs + crossingMs;
-  const pos = (tMs + lane.phaseMt) % cycle;
+  const cycle = railCycleMs(lane);
+  const pos = (Math.floor(tMs) + lane.phaseMt) % cycle;
   if (pos < lane.periodMs) return "quiet";
   if (pos < lane.periodMs + lane.warningMs) return "warning";
   return "train";
+}
+
+/**
+ * World-x of the train's leading (left) edge in milli-tiles at `tMs`.
+ * Mirrors `hazard::rail_train_x_mt`.
+ *
+ * A train is one long object, not a repeating conveyor: through the quiet
+ * and warning windows it waits just off the far edge of the world, then
+ * makes a single run across. The edge is allowed to sit outside
+ * `[0, WORLD_WIDTH)` — that is what "entering" and "leaving" mean.
+ */
+export function railTrainXMt(lane: Lane, tMs: number): number {
+  const crossing = railCrossingMs(lane);
+  const cycle = railCycleMs(lane);
+  const pos = (Math.floor(tMs) + lane.phaseMt) % cycle;
+  const elapsed = Math.max(0, pos - lane.periodMs - lane.warningMs);
+  const spanMt = (WORLD_WIDTH + lane.footprint) * 1_000;
+  const travelMt = Math.floor((elapsed * spanMt) / crossing);
+  return lane.dirPositive === 1
+    ? travelMt - lane.footprint * 1_000
+    : WORLD_WIDTH * 1_000 - travelMt;
+}
+
+/**
+ * True when the train's body actually covers tile `x`. Mirrors
+ * `hazard::rail_train_covers`.
+ *
+ * Danger on a rail row is positional: the whole row is NOT lethal for the
+ * whole crossing. Only the tiles under the train are.
+ */
+export function railTrainCovers(lane: Lane, x: number, tMs: number): boolean {
+  const trainMt = railTrainXMt(lane, tMs);
+  const tileLoMt = x * 1_000;
+  return trainMt < tileLoMt + 1_000 && trainMt + lane.footprint * 1_000 > tileLoMt;
+}
+
+/** The train's leading edge in whole tiles — what the renderer draws. */
+export function railTrainTileX(lane: Lane, tMs: number): number {
+  return railTrainXMt(lane, tMs) / 1_000;
+}
+
+/**
+ * The span the renderer should draw the train across, in tiles, at `tMs`.
+ *
+ * The drawn body must COVER the authoritative lethal span at the current
+ * tick: a client that lags the rollup by a fraction of a tick would
+ * otherwise show a clear tile the program still kills on — an invisible
+ * train. The lagging edge rides the tick interpolation; the leading edge is
+ * pushed one tick of travel ahead, so the result only ever over-covers.
+ * Mirrors nothing on chain — it may safely be conservative, and only ever
+ * this direction.
+ */
+export function railVisualSpan(
+  lane: Lane,
+  tMs: number,
+): { left: number; length: number } {
+  const tick = tickOf(tMs);
+  const frac = Math.min(1, Math.max(0, (tMs - tick) / MS_PER_SLOT));
+  const at = railTrainTileX(lane, tick);
+  const prev = railTrainTileX(lane, Math.max(0, tick - MS_PER_SLOT));
+  const drawn = prev + (at - prev) * frac;
+  const travel = Math.abs(at - prev);
+  // "Leading" depends on the direction the train runs; extending the wrong
+  // edge would leave the kill zone uncovered ahead of the drawn body.
+  const lead = lane.dirPositive === 1 ? 0 : travel;
+  return { left: drawn - lead, length: lane.footprint + travel };
+}
+
+/** The first instant at or after `tMs` at which the train covers tile `x`.
+ * Mirrors `hazard::rail_next_coverage_ms`. */
+export function railNextCoverageMs(lane: Lane, x: number, tMs: number): number {
+  const crossing = railCrossingMs(lane);
+  const cycle = railCycleMs(lane);
+  const spanMt = (WORLD_WIDTH + lane.footprint) * 1_000;
+  // Milli-tiles the train travels before its body reaches this tile. The
+  // extra milli-tile matches `railTrainCovers` exactly at the edge.
+  const neededMt =
+    lane.dirPositive === 1 ? x * 1_000 + 1 : Math.max(0, WORLD_WIDTH - x - 1) * 1_000 + 1;
+  // Earliest elapsed millisecond whose floored travel reaches `neededMt`.
+  const elapsed = Math.ceil((neededMt * crossing) / spanMt);
+  const startPos = lane.periodMs + lane.warningMs + elapsed;
+  const pos = (Math.floor(tMs) + lane.phaseMt) % cycle;
+  let delay = (startPos + cycle - pos) % cycle;
+  if (delay === 0) delay = cycle;
+  return tMs + delay;
 }
 
 export function logSubmerged(lane: Lane, tMs: number): boolean {
@@ -165,7 +269,7 @@ export function evaluateTile(lane: Lane, x: number, tMs: number): TileState {
         ? "supported"
         : "lethal";
     case LANE_RAIL:
-      return railPhase(lane, tMs) === "train" ? "lethal" : "safe";
+      return railTrainCovers(lane, x, tMs) ? "lethal" : "safe";
     default:
       return "blocked";
   }
