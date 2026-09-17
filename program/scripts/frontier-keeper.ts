@@ -30,7 +30,7 @@ import { readFileSync } from "node:fs";
 import { ensureDayReady } from "./open-day";
 import { ensureDaySettled } from "./settle-day";
 import { assignPendingPulls } from "./assign-pulls";
-import { loadCrossyWorldIdl } from "./runtime-config";
+import { loadCrossyWorldIdl, retryingFetch } from "./runtime-config";
 import {
   CHUNK_LOOKAHEAD_CHUNKS,
   CHUNK_ROWS,
@@ -59,9 +59,7 @@ const REGION_VALIDATOR = [
 
 const ER_RPC = process.env.ER_RPC ?? REGION_RPC[REGION];
 /** The region names its validator; VALIDATOR only overrides it for testing. */
-const VALIDATOR = new web3.PublicKey(
-  process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
-);
+const VALIDATOR = new web3.PublicKey(process.env.VALIDATOR ?? REGION_VALIDATOR[REGION]);
 const VRF_BASE_QUEUE = new web3.PublicKey(
   process.env.VRF_BASE_QUEUE ?? "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
 );
@@ -190,14 +188,33 @@ function startHealthServer() {
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ healthy, staleForMs, ...health }));
   });
+  // A port already in use must not take the keeper down with it — growing
+  // the map matters more than answering a probe — but it must be said out
+  // loud, or the probe silently reports on somebody else's service.
+  server.on("error", (e: any) =>
+    log(
+      `health server on :${HEALTH_PORT} failed (${e?.code ?? e}); continuing without it`,
+    ),
+  );
   server.listen(HEALTH_PORT, "0.0.0.0", () =>
     log(`health http://0.0.0.0:${HEALTH_PORT}/healthz`),
   );
 }
 
+/**
+ * Errors that mean this process can never succeed again, so it should die and
+ * let the supervisor start a fresh one.
+ *
+ * "Program is not deployed" belongs here for a reason that cost five days of
+ * downtime: after a close-and-redeploy the running keeper still holds the old
+ * PROGRAM_ID from the source it imported at boot, and `run-keeper.sh` only
+ * re-execs on exit. Every tick failed, every failure was caught and logged,
+ * and the day never opened — with the process looking perfectly alive. Exiting
+ * turns that silent stall into a restart that reloads the current source.
+ */
 function isFatalCompatibilityError(error: unknown): boolean {
   const message = String((error as any)?.message ?? error);
-  return /Invalid bool|cannot decode|account discriminator|DeclaredProgramIdMismatch|IDL cannot decode|config\.admin|admin-only/i.test(
+  return /Invalid bool|cannot decode|account discriminator|DeclaredProgramIdMismatch|IDL cannot decode|config\.admin|admin-only|Program is not deployed|Unsupported program id/i.test(
     message,
   );
 }
@@ -205,7 +222,12 @@ function isFatalCompatibilityError(error: unknown): boolean {
 async function main() {
   startHealthServer();
   const keeper = loadKeeper();
-  const baseConn = new web3.Connection(BASE_RPC, "confirmed");
+  // The keeper is the one process that has to outlive a throttled public
+  // RPC: a dropped read here is a day that never opens.
+  const baseConn = new web3.Connection(BASE_RPC, {
+    commitment: "confirmed",
+    fetch: retryingFetch(),
+  });
   const erConn = new web3.Connection(ER_RPC, "processed");
   const wallet = new anchor.Wallet(keeper);
   // Production workers run from a clean checkout where `target/` is ignored.
@@ -223,6 +245,26 @@ async function main() {
       commitment: "processed",
     }),
   ) as Program<any>;
+
+  // Preflight: the program itself, before anything derived from it. A closed
+  // or not-yet-deployed PROGRAM_ID still leaves its old PDAs on chain, so the
+  // config fetch below would happily succeed and every write would fail.
+  //
+  // Only a definite answer counts. A throttled RPC that refuses to answer is
+  // not evidence the program is gone, and refusing to start on one 429 would
+  // trade a five-day silent stall for a five-day restart loop.
+  try {
+    const programAccount = await baseConn.getAccountInfo(PROGRAM_ID);
+    if (!programAccount?.executable) {
+      throw new Error(
+        `program ${PROGRAM_ID.toBase58()} is not deployed on ${BASE_RPC} — ` +
+          `nothing this keeper sends can land`,
+      );
+    }
+  } catch (e: any) {
+    if (/is not deployed/.test(String(e?.message))) throw e;
+    log(`could not verify the program is deployed (${e?.message ?? e}); continuing`);
+  }
 
   const cfg = await baseProgram.account.globalConfig.fetch(configPda());
   log("keeper", keeper.publicKey.toBase58());

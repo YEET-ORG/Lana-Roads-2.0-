@@ -19,6 +19,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN, Program, web3 } from "@coral-xyz/anchor";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { retryingFetch } from "./runtime-config";
 
 export const PROGRAM_ID = new web3.PublicKey(
   "9HciUP5BBW2i9JZYdWxaD5rRsT7FgidharReBNyyXvN8",
@@ -43,9 +44,7 @@ const REGION_VALIDATOR = [
 const DELEGATION_PROGRAM = new web3.PublicKey(
   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
 );
-const TOKEN_PROGRAM = new web3.PublicKey(
-  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-);
+const TOKEN_PROGRAM = new web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 /** Chunk 0 covers rows 0-15, i.e. sector bands y=0 and y=1. */
 const SPAWN_BANDS = 2;
 const SECTORS_WIDE = 8;
@@ -65,7 +64,8 @@ const pda = (...s: (Buffer | Uint8Array)[]) =>
 
 export const worldPda = (mode: number, day: bigint) =>
   pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([mode]), le8(day));
-export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
+export const dailyPda = (day: bigint) =>
+  pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
 export const chunkPda = (day: bigint, index: number) =>
   pda(Buffer.from("chunk"), Buffer.from([REGION]), le8(day), le4(index));
 export const sectorPda = (world: web3.PublicKey, sx: number, sy: number) =>
@@ -163,21 +163,30 @@ export async function ensureDayReady(opts: {
     log(`day ${day}: preparing (daily + both worlds + spawn chunk)`);
     await withRetry("prepare_day", () =>
       baseProgram.methods
-      .prepareDay(REGION, new BN(day.toString()))
-      .accountsPartial({
-        config: pda(Buffer.from("config")),
-        daily,
-        vaultAuthority: pda(Buffer.from("daily_vault"), Buffer.from([REGION]), le8(day)),
-        vault: pda(Buffer.from("daily_vault"), Buffer.from([REGION]), le8(day), Buffer.from("ata")),
-        usdcMint: config.usdcMint,
-        paidWorld: worldPda(0, day),
-        casualWorld: worldPda(1, day),
-        spawnChunk: chunkPda(day, 0),
-        commitPayer: admin.publicKey,
-        admin: admin.publicKey,
-        tokenProgram: TOKEN_PROGRAM,
-      })
-      .rpc(),
+        .prepareDay(REGION, new BN(day.toString()))
+        .accountsPartial({
+          config: pda(Buffer.from("config")),
+          daily,
+          vaultAuthority: pda(
+            Buffer.from("daily_vault"),
+            Buffer.from([REGION]),
+            le8(day),
+          ),
+          vault: pda(
+            Buffer.from("daily_vault"),
+            Buffer.from([REGION]),
+            le8(day),
+            Buffer.from("ata"),
+          ),
+          usdcMint: config.usdcMint,
+          paidWorld: worldPda(0, day),
+          casualWorld: worldPda(1, day),
+          spawnChunk: chunkPda(day, 0),
+          commitPayer: admin.publicKey,
+          admin: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM,
+        })
+        .rpc(),
     );
     result.prepared = true;
   }
@@ -308,11 +317,7 @@ export async function ensureDayReady(opts: {
       const world = worldPda(mode, day);
       const remaining = chunkRemaining.map((account, index) => ({
         ...account,
-        pubkey: sectorPda(
-          world,
-          index % SECTORS_WIDE,
-          Math.floor(index / SECTORS_WIDE),
-        ),
+        pubkey: sectorPda(world, index % SECTORS_WIDE, Math.floor(index / SECTORS_WIDE)),
       }));
       let ready = false;
       for (let attempt = 0; attempt < 12; attempt++) {
@@ -373,9 +378,7 @@ export function loadKeypair(path: string) {
 
 async function main() {
   const BASE_RPC = process.env.BASE_RPC ?? "https://api.devnet.solana.com";
-  const validator = new web3.PublicKey(
-    process.env.VALIDATOR ?? REGION_VALIDATOR[REGION],
-  );
+  const validator = new web3.PublicKey(process.env.VALIDATOR ?? REGION_VALIDATOR[REGION]);
   const admin = loadKeypair(
     process.env.ADMIN_KEYPAIR ?? `${process.env.HOME}/.config/solana/id.json`,
   );
@@ -387,7 +390,7 @@ async function main() {
   const baseProgram = new Program(
     idl,
     new anchor.AnchorProvider(
-      new web3.Connection(BASE_RPC, "confirmed"),
+      new web3.Connection(BASE_RPC, { commitment: "confirmed", fetch: retryingFetch() }),
       new anchor.Wallet(admin),
       { commitment: "confirmed" },
     ),

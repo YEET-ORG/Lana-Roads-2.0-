@@ -160,6 +160,13 @@ type RigState =
       fromScale: THREE.Vector3;
       skipAnticipation: boolean;
     }
+  | {
+      name: "correct";
+      from: THREE.Vector3;
+      to: THREE.Vector3;
+      start: number;
+      duration: number;
+    }
   | { name: "land"; start: number }
   | { name: "dead"; cause: "impact" | "water"; start: number };
 
@@ -270,6 +277,34 @@ class PlayerRig {
     };
   }
 
+  /** Skip stale remote history and animate only the final hop to authority. */
+  catchUpTo(target: THREE.Vector3, facing?: number) {
+    if (this.state.name === "dead") return;
+    const gap = this.root.position.distanceTo(target);
+    if (gap > 1.05) {
+      const approach = target
+        .clone()
+        .sub(target.clone().sub(this.root.position).normalize());
+      this.root.position.copy(approach);
+    }
+    this.hopTo(target, facing);
+  }
+
+  /** Quietly reconcile a predicted local position with authoritative state. */
+  correctTo(target: THREE.Vector3, facing?: number) {
+    if (this.state.name === "dead") return;
+    if (facing != null) this.targetYaw = facingYaw(facing);
+    const from = this.root.position.clone();
+    if (from.distanceToSquared(target) < 1e-6) return;
+    this.state = {
+      name: "correct",
+      from,
+      to: target.clone(),
+      start: performance.now(),
+      duration: 140,
+    };
+  }
+
   /** In-place hop for menu agent swaps. */
   flourish() {
     if (this.state.name === "dead") return;
@@ -376,6 +411,14 @@ class PlayerRig {
           this.state = { name: "land", start: now };
           this.landed?.(this.root.position);
         }
+      }
+    } else if (s.name === "correct") {
+      const k = clamp01((now - s.start) / s.duration);
+      this.root.position.lerpVectors(s.from, s.to, easeOutCubic(k));
+      this.body.position.y = 0;
+      if (k >= 1) {
+        this.root.position.copy(s.to);
+        this.state = { name: "idle" };
       }
     } else if (s.name === "land") {
       const k = clamp01((now - s.start) / LAND_MS);
@@ -1078,8 +1121,8 @@ export class WorldScene {
 
   // ---- local player intents (called by GameScreen) ----
 
-  /** Authoritative/predicted local tile: the rig hops to it. */
-  setLocal(x: number, y: number, facing?: number) {
+  /** Predicted moves hop; authoritative corrections slide without fanfare. */
+  setLocal(x: number, y: number, facing?: number, correction = false) {
     const target = new THREE.Vector3(x + 0.5, 0, -y);
     // Whether the TILE changed, not whether the mesh has caught up to it.
     // Authority repeats the same position several times a second (the
@@ -1092,8 +1135,8 @@ export class WorldScene {
     const authoritativeJump = this.localTarget.distanceTo(target);
     this.localTarget.copy(target);
     if (facing != null) this.local.targetYaw = facingYaw(facing);
-    if (authoritativeJump > 2.5) {
-      // Large correction / spawn: ground snap with a network pulse.
+    if (authoritativeJump > 8) {
+      // Spawn, revive, or a genuine hole in the feed: snap with a pulse.
       this.local.teleport(target);
       this.dust.burst(target, {
         count: 8,
@@ -1102,7 +1145,11 @@ export class WorldScene {
         up: 1.4,
         size: 0.06,
       });
-    } else if (!sameTile) {
+    } else if (sameTile) {
+      return;
+    } else if (correction) {
+      this.local.correctTo(target, facing);
+    } else {
       this.local.hopTo(target, facing);
       sfx.hop();
     }
@@ -1260,8 +1307,8 @@ export class WorldScene {
       const prev = this.remoteTargets.get(p.wallet);
       if (!prev || !prev.equals(target)) {
         this.remoteTargets.set(p.wallet, target);
-        if (prev && prev.distanceTo(target) <= 2.5)
-          rig.hopTo(target, yawFromDelta(target, prev));
+        if (prev && prev.distanceTo(target) <= 8)
+          rig.catchUpTo(target, yawFromDelta(target, prev));
         else rig.teleport(target);
       }
     }

@@ -454,7 +454,7 @@ export function GameScreen({
             score: run.score,
             facing: run.facing,
           };
-          scene?.setLocal(run.x, run.y, run.facing);
+          scene?.setLocal(run.x, run.y, run.facing, true);
         }
         // Death/revive presentation: the world reacts before the overlay.
         if (state === "deadAwaitingRevive" || state === "ended") {
