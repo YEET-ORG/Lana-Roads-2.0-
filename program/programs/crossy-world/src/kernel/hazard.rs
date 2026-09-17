@@ -28,7 +28,7 @@ pub enum TileState {
     Safe,
     /// Lethal right now (vehicle/train overlap, unsupported water, sink).
     Lethal,
-    /// Not passable but not lethal (static blocker; train warning gate).
+    /// Not passable but not lethal (static blocker).
     Blocked,
     /// Water with an active support (log/platform) under this tile.
     Supported,
@@ -122,10 +122,20 @@ pub enum RailPhase {
     Train,
 }
 
+/// Milliseconds for the train to travel the world plus its own length.
+fn rail_crossing_ms(lane: &LaneDescriptor) -> u64 {
+    (WORLD_WIDTH as u64 + lane.footprint as u64) * 1_000_000 / (lane.speed_mtps as u64).max(1)
+}
+
+/// One full rail cycle: quiet, warning, and the crossing itself.
+fn rail_cycle_ms(lane: &LaneDescriptor) -> u64 {
+    (lane.period_ms as u64)
+        .saturating_add(lane.warning_ms as u64)
+        .saturating_add(rail_crossing_ms(lane))
+}
+
 pub fn rail_phase(lane: &LaneDescriptor, t_ms: u64) -> RailPhase {
-    let crossing_ms =
-        (WORLD_WIDTH as u64 + lane.footprint as u64) * 1_000_000 / (lane.speed_mtps as u64).max(1);
-    let cycle = lane.period_ms as u64 + lane.warning_ms as u64 + crossing_ms;
+    let cycle = rail_cycle_ms(lane).max(1);
     let pos = (t_ms + lane.phase_mt as u64) % cycle;
     if pos < lane.period_ms as u64 {
         RailPhase::Quiet
@@ -136,22 +146,66 @@ pub fn rail_phase(lane: &LaneDescriptor, t_ms: u64) -> RailPhase {
     }
 }
 
-/// Milliseconds until the next phase boundary of a rail lane (for hazard
-/// scheduling).
-pub fn rail_next_transition_ms(lane: &LaneDescriptor, t_ms: u64) -> u64 {
-    let crossing_ms =
-        (WORLD_WIDTH as u64 + lane.footprint as u64) * 1_000_000 / (lane.speed_mtps as u64).max(1);
-    let cycle = lane.period_ms as u64 + lane.warning_ms as u64 + crossing_ms;
+/// World-x of the train's leading (left) edge in milli-tiles at `t_ms`.
+///
+/// A train is one long object, not a repeating conveyor: through the quiet
+/// and warning windows it waits just off the far edge of the world, then
+/// makes a single run across. The edge is therefore allowed to sit outside
+/// `[0, WORLD_WIDTH)` — that is what "entering" and "leaving" mean.
+pub fn rail_train_x_mt(lane: &LaneDescriptor, t_ms: u64) -> i64 {
+    let crossing = rail_crossing_ms(lane).max(1);
+    let cycle = rail_cycle_ms(lane).max(1);
     let pos = (t_ms + lane.phase_mt as u64) % cycle;
-    let quiet_end = lane.period_ms as u64;
-    let warn_end = quiet_end + lane.warning_ms as u64;
-    if pos < quiet_end {
-        quiet_end - pos
-    } else if pos < warn_end {
-        warn_end - pos
+    let elapsed = pos.saturating_sub(lane.period_ms as u64 + lane.warning_ms as u64);
+    let span_mt = (WORLD_WIDTH as u64 + lane.footprint as u64) * 1_000;
+    let travel_mt = elapsed.saturating_mul(span_mt) / crossing;
+    if lane.dir_positive == 1 {
+        travel_mt as i64 - lane.footprint as i64 * 1_000
     } else {
-        cycle - pos
+        WORLD_WIDTH as i64 * 1_000 - travel_mt as i64
     }
+}
+
+/// True when the train's body covers tile `x` at `t_ms`.
+///
+/// Danger on a rail row is positional. The program used to mark the whole
+/// row lethal for the entire crossing window, which killed players at the
+/// far end of the map — or before the train had even entered — with nothing
+/// on their screen. Only the tiles under the train are lethal.
+pub fn rail_train_covers(lane: &LaneDescriptor, x: u8, t_ms: u64) -> bool {
+    let train_mt = rail_train_x_mt(lane, t_ms);
+    let tile_lo_mt = x as i64 * 1_000;
+    let tile_hi_mt = tile_lo_mt + 1_000;
+    train_mt < tile_hi_mt && train_mt + lane.footprint as i64 * 1_000 > tile_lo_mt
+}
+
+/// The first instant at or after `t_ms` at which the train covers tile `x`.
+///
+/// Solving backwards from the tile rather than from the phase boundary is
+/// what keeps the schedule honest: the train phase opens while the train is
+/// still off-world, so a deadline taken from the phase would fire a lethal
+/// check on a tile the train has not reached.
+pub fn rail_next_coverage_ms(lane: &LaneDescriptor, x: u8, t_ms: u64) -> u64 {
+    let crossing = rail_crossing_ms(lane).max(1);
+    let cycle = rail_cycle_ms(lane).max(1);
+    let span_mt = (WORLD_WIDTH as u64 + lane.footprint as u64) * 1_000;
+    // Milli-tiles the train travels before its body reaches this tile. The
+    // extra milli-tile makes the comparison strict, matching
+    // `rail_train_covers` exactly at the edge.
+    let needed_mt = if lane.dir_positive == 1 {
+        x as u64 * 1_000 + 1
+    } else {
+        (WORLD_WIDTH as u64).saturating_sub(x as u64 + 1) * 1_000 + 1
+    };
+    // Earliest elapsed millisecond whose floored travel reaches `needed_mt`.
+    let elapsed = needed_mt.saturating_mul(crossing).div_ceil(span_mt);
+    let start_pos = lane.period_ms as u64 + lane.warning_ms as u64 + elapsed;
+    let pos = (t_ms + lane.phase_mt as u64) % cycle;
+    let mut delay = (start_pos + cycle - pos) % cycle;
+    if delay == 0 {
+        delay = cycle;
+    }
+    t_ms.saturating_add(delay)
 }
 
 /// Sinking log windows: logs are submerged for the last quarter of every
@@ -192,10 +246,13 @@ pub fn evaluate_tile(lane: &LaneDescriptor, x: u8, t_ms: u64) -> TileState {
                 TileState::Lethal
             }
         }
-        Some(LaneKind::Rail) => match rail_phase(lane, t_ms) {
-            RailPhase::Train => TileState::Lethal,
-            _ => TileState::Safe,
-        },
+        Some(LaneKind::Rail) => {
+            if rail_train_covers(lane, x, t_ms) {
+                TileState::Lethal
+            } else {
+                TileState::Safe
+            }
+        }
         None => TileState::Blocked,
     }
 }
@@ -279,7 +336,7 @@ pub fn next_hazard_deadline_ms(lane: &LaneDescriptor, x: u8, t_ms: u64) -> Optio
             // short deadline — recheck often while on a river tile.
             Some(t_ms + RIVER_RECHECK_MS)
         }
-        Some(LaneKind::Rail) => Some(t_ms + rail_next_transition_ms(lane, t_ms).max(1)),
+        Some(LaneKind::Rail) => Some(rail_next_coverage_ms(lane, x, t_ms)),
     }
 }
 
@@ -352,9 +409,123 @@ mod tests {
         assert_eq!(rail_phase(&lane, 6_000), RailPhase::Warning);
         assert_eq!(rail_phase(&lane, 7_499), RailPhase::Warning);
         assert_eq!(rail_phase(&lane, 7_500), RailPhase::Train);
-        // Scheduling: from quiet, next transition is warning start.
-        assert_eq!(rail_next_transition_ms(&lane, 0), 6_000);
-        assert_eq!(rail_next_transition_ms(&lane, 6_000), 1_500);
+    }
+
+    fn rail_lane(dir_positive: u8) -> LaneDescriptor {
+        LaneDescriptor {
+            kind: LaneKind::Rail as u8,
+            dir_positive,
+            footprint: 6,
+            speed_mtps: 2_000, // 2 tiles/s => 35s crossing
+            warning_ms: 1_500,
+            period_ms: 6_000,
+            phase_mt: 0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_train_only_kills_the_tiles_under_it() {
+        let lane = rail_lane(1);
+        // Quiet and warning: the train waits off-world, so the whole row is
+        // crossable.
+        for x in 0..64u8 {
+            assert_eq!(evaluate_tile(&lane, x, 0), TileState::Safe);
+            assert_eq!(evaluate_tile(&lane, x, 7_000), TileState::Safe);
+        }
+        // Mid-crossing the train spans tiles [29, 35): exactly those die.
+        let mid = 7_500 + 17_500;
+        for x in 0..64u8 {
+            let expected = if (29..35).contains(&x) {
+                TileState::Lethal
+            } else {
+                TileState::Safe
+            };
+            assert_eq!(evaluate_tile(&lane, x, mid), expected, "x={x}");
+        }
+        assert!(rail_train_covers(&lane, 29, mid));
+        assert!(rail_train_covers(&lane, 34, mid));
+        assert!(!rail_train_covers(&lane, 28, mid));
+        assert!(!rail_train_covers(&lane, 35, mid));
+    }
+
+    #[test]
+    fn a_train_running_the_other_way_is_positional_too() {
+        let lane = rail_lane(0);
+        // Mid-crossing, moving -x: the train has travelled 35 tiles from the
+        // right, so it spans [29, 35) again but is drawn from the other side.
+        let mid = 7_500 + 17_500;
+        assert_eq!(rail_train_x_mt(&lane, mid), 29_000);
+        for x in 0..64u8 {
+            assert_eq!(
+                rail_train_covers(&lane, x, mid),
+                (29..35).contains(&x),
+                "x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn rail_deadline_is_when_the_train_reaches_the_tile() {
+        let lane = rail_lane(1);
+        // Far tile from the quiet window: the phase opens at 7_500ms, but the
+        // train's nose does not reach column 63 until much later.
+        let d = next_hazard_deadline_ms(&lane, 63, 0).expect("the train comes around");
+        assert!(d > 7_500, "must not fire at the phase boundary");
+        assert!(!rail_train_covers(&lane, 63, d - 1));
+        assert!(rail_train_covers(&lane, 63, d));
+        assert_eq!(evaluate_tile(&lane, 63, d), TileState::Lethal);
+        // Columns nearer the entrance are reached sooner.
+        let near = next_hazard_deadline_ms(&lane, 0, 0).expect("the train comes around");
+        assert!(near < d);
+        assert!(rail_train_covers(&lane, 0, near));
+        // Once it has passed, the next deadline is the next cycle's arrival.
+        let cycle = 6_000 + 1_500 + 35_000;
+        let passed = 7_500 + 35_000 + 100;
+        assert_eq!(next_hazard_deadline_ms(&lane, 63, passed), Some(d + cycle));
+    }
+
+    #[test]
+    fn rail_deadline_never_schedules_before_the_train_is_there() {
+        // Sweep a whole cycle against the coverage test: the scheduled
+        // instant must be the first ms of coverage, never earlier.
+        for dir in [0u8, 1] {
+            let lane = rail_lane(dir);
+            for x in [0u8, 5, 32, 63] {
+                let d = next_hazard_deadline_ms(&lane, x, 0).expect("train arrives");
+                assert!(rail_train_covers(&lane, x, d), "x={x} dir={dir} at {d}");
+                assert!(
+                    !rail_train_covers(&lane, x, d - 1),
+                    "x={x} dir={dir} one ms early"
+                );
+            }
+        }
+    }
+
+    /// Printed with `cargo test -p crossy-world --lib -- --nocapture
+    /// golden_rail_vectors_for_the_sdk`, and asserted in the SDK's
+    /// `tests/vectors.test.ts`. Any drift is a release blocker.
+    #[test]
+    fn golden_rail_vectors_for_the_sdk() {
+        for dir in [1u8, 0] {
+            let lane = rail_lane(dir);
+            for t in [0u64, 7_500, 17_500, 25_000, 42_499] {
+                let covered: Vec<u8> = (0..64u8)
+                    .filter(|x| rail_train_covers(&lane, *x, t))
+                    .collect();
+                println!(
+                    "dir={dir} t={t} x_mt={} covered={covered:?}",
+                    rail_train_x_mt(&lane, t)
+                );
+            }
+            for x in [0u8, 31, 63] {
+                println!(
+                    "dir={dir} x={x} next={} covers_at_it={}",
+                    rail_next_coverage_ms(&lane, x, 0),
+                    rail_train_covers(&lane, x, rail_next_coverage_ms(&lane, x, 0))
+                );
+            }
+        }
     }
 
     #[test]

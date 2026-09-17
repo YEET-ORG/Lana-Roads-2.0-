@@ -207,8 +207,8 @@ pub struct UnlockAgent<'info> {
     /// CHECK: committed run for (world, owner) — proves the attempt is
     /// terminal; or the day cutoff proves it (validated in handler).
     pub run: UncheckedAccount<'info>,
-    /// CHECK: the lock's world header — its immutable end_ts provides the
-    /// day-cutoff evidence. Address fixed by the lock; validated in handler.
+    /// CHECK: the lock's world header provides paid-cutoff evidence. Casual
+    /// attempts require committed terminal run state instead.
     pub world: UncheckedAccount<'info>,
     /// CHECK: the locked asset.
     #[account(mut, address = lock.asset @ CrossyError::WrongAssetOwner)]
@@ -239,15 +239,14 @@ pub fn unlock_agent(ctx: Context<UnlockAgent>) -> Result<()> {
         CrossyError::BadClassMapping
     );
 
-    // Terminal evidence: committed run state, OR the world's hard cutoff
-    // (after end_ts every attempt is terminal by definition — this also
-    // frees locks whose attempt never spawned).
+    // Terminal evidence: committed run state, OR a paid world's hard cutoff
+    // (which also frees locks whose attempt never spawned).
     let now = Clock::get()?.unix_timestamp;
     let world = crate::cross_plane::read_committed_world(
         &ctx.accounts.world.to_account_info(),
         &lock.world,
     )?;
-    let day_over = now >= world.end_ts;
+    let day_over = world.mode.cutoff_passed(now, world.end_ts);
     let attempt_terminal = if day_over {
         true
     } else {

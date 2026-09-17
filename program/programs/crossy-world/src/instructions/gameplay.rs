@@ -58,7 +58,10 @@ pub fn validate_action(
 ) -> Result<()> {
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
     require!(world.spawn_ready, CrossyError::FrontierClosed);
-    require!(now < world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        !world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     // Session OR wallet may sign (wallet always retains authority).
     if *signer != run.wallet {
         require_keys_eq!(*signer, run.session_authority, CrossyError::BadSession);
@@ -193,7 +196,10 @@ pub fn init_run(
         );
         committed
     };
-    require!(now < world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        !world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(
         session_expiry > now && session_expiry <= now + crate::constants::MAX_SESSION_SECONDS,
         CrossyError::SessionExpired
@@ -427,7 +433,8 @@ pub fn spawn<'info>(ctx: Context<'info, Spawn<'info>>, attempt_nonce: u32) -> Re
     }
 
     // Cutoff / capacity failure -> committed EntryFailed.
-    let failed = now >= world.end_ts || world.active_players >= world.player_cap;
+    let failed =
+        world.mode.cutoff_passed(now, world.end_ts) || world.active_players >= world.player_cap;
     if failed {
         run.attempt_nonce = attempt_nonce;
         run.state = RunState::EntryFailed;

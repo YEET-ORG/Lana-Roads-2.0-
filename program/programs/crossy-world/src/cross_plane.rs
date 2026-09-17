@@ -22,7 +22,12 @@ pub fn read_committed_chunk(
     chunk_index: u32,
 ) -> Result<ChunkDefinition> {
     let (expected, _) = Pubkey::find_program_address(
-        &[seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        &[
+            seeds::CHUNK,
+            &[region],
+            &day.to_le_bytes(),
+            &chunk_index.to_le_bytes(),
+        ],
         &crate::ID,
     );
     require_keys_eq!(*account.key, expected, CrossyError::NotReconcilable);
@@ -79,8 +84,8 @@ pub fn read_committed_world_any(account: &AccountInfo) -> Result<WorldHeader> {
 
 /// Read the committed representation of a `WorldHeader` by address (the
 /// caller supplies the expected address from trusted state, e.g. an
-/// AgentLock). Validates owner and discriminator; the immutable day window
-/// (start_ts/end_ts) is trustworthy from any committed copy.
+/// AgentLock). Validates owner and discriminator; paid cutoff data and casual
+/// activation data are trustworthy from any committed copy.
 pub fn read_committed_world(account: &AccountInfo, expected: &Pubkey) -> Result<WorldHeader> {
     require_keys_eq!(*account.key, *expected, CrossyError::NotReconcilable);
     let owner_ok = *account.owner == crate::ID || *account.owner == DELEGATION_PROGRAM_ID;

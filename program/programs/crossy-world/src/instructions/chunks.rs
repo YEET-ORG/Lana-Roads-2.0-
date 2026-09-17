@@ -78,7 +78,12 @@ pub fn request_chunk(
     let world =
         crate::cross_plane::read_committed_world_any(&ctx.accounts.world.to_account_info())?;
     let expected_world = Pubkey::find_program_address(
-        &[seeds::WORLD, &[world.region], &[world.mode as u8], &world.day.to_le_bytes()],
+        &[
+            seeds::WORLD,
+            &[world.region],
+            &[world.mode as u8],
+            &world.day.to_le_bytes(),
+        ],
         &crate::ID,
     )
     .0;
@@ -92,7 +97,10 @@ pub fn request_chunk(
     // world can never advance its frontier over another region's terrain.
     require!(world.region == region, CrossyError::BadChunkState);
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
-    require!(now < world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        !world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(
         chunk_in_request_window(world.next_chunk_index, chunk_index),
         CrossyError::BadChunkState
@@ -360,7 +368,10 @@ pub fn mark_chunk_ready<'info>(
     let world = &mut ctx.accounts.world;
     let chunk = &ctx.accounts.chunk;
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
-    require!(now < world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        !world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(chunk.day == world.day, CrossyError::BadChunkState);
     require!(chunk.region == world.region, CrossyError::BadChunkState);
     require!(chunk.chunk_index == chunk_index, CrossyError::BadChunkState);
@@ -420,7 +431,10 @@ pub fn extend_frontier(ctx: Context<ExtendFrontier>) -> Result<()> {
     let world = &mut ctx.accounts.world;
     let chunk = &ctx.accounts.chunk;
     require!(world.status == WorldStatus::Open, CrossyError::WorldNotOpen);
-    require!(now < world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        !world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(chunk.day == world.day, CrossyError::BadChunkState);
     require!(chunk.region == world.region, CrossyError::BadChunkState);
     require!(

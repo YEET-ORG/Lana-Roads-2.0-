@@ -19,6 +19,25 @@ impl WorldMode {
     pub fn seed_byte(self) -> u8 {
         self as u8
     }
+
+    /// Paid competition ends at its UTC cutoff. Casual worlds are persistent
+    /// rooms and keep accepting play until explicitly migrated by an upgrade.
+    pub fn cutoff_passed(self, now: i64, end_ts: i64) -> bool {
+        self == Self::Paid && now >= end_ts
+    }
+}
+
+#[cfg(test)]
+mod world_mode_tests {
+    use super::WorldMode;
+
+    #[test]
+    fn paid_closes_at_cutoff_but_casual_remains_open() {
+        assert!(!WorldMode::Paid.cutoff_passed(99, 100));
+        assert!(WorldMode::Paid.cutoff_passed(100, 100));
+        assert!(!WorldMode::Casual.cutoff_passed(100, 100));
+        assert!(!WorldMode::Casual.cutoff_passed(i64::MAX, 100));
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
@@ -47,7 +66,8 @@ pub struct WorldHeader {
     pub day: u64,
     pub mode: WorldMode,
     pub status: WorldStatus,
-    /// Authoritative day window (derived from `day`, stored for cheap checks).
+    /// Paid competition window. Casual uses `start_ts` as its activation time
+    /// and deliberately ignores `end_ts` after activation.
     pub start_ts: i64,
     pub end_ts: i64,
     /// Fixed 64.

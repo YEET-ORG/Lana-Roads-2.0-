@@ -125,10 +125,9 @@ pub fn prepare_day(ctx: Context<PrepareDay>, region: u8, day: u64) -> Result<()>
         world.region = region;
         world.day = day;
         world.mode = mode;
-        // Worlds are born Open: actual play is gated by authoritative time
-        // (start_ts/end_ts checks in every gameplay instruction) and paid
-        // admission additionally by DailyCompetition status. This avoids an
-        // extra write to already-delegated world accounts at day start.
+        // Worlds are born Open. Paid play is bounded by this competition's
+        // UTC window; casual uses the start as one-time activation and stays
+        // open across later UTC days.
         world.status = WorldStatus::Open;
         world.start_ts = start_ts;
         world.end_ts = end_ts;
@@ -390,7 +389,14 @@ pub fn close_world_base(ctx: Context<CloseWorldBase>) -> Result<()> {
         world.commit_payer,
         CrossyError::NotAdmin
     );
-    require!(now >= world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        world.mode == WorldMode::Paid,
+        CrossyError::InvalidTransition
+    );
+    require!(
+        world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(
         world.status != WorldStatus::Closed,
         CrossyError::InvalidTransition

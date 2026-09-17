@@ -37,12 +37,7 @@ pub struct DelegateWorld<'info> {
 /// caller: a world whose seeds say "eu" but which is hosted in Singapore
 /// would give European players the latency the region was created to remove,
 /// and nothing downstream would notice.
-pub fn delegate_world(
-    ctx: Context<DelegateWorld>,
-    region: u8,
-    mode: u8,
-    day: u64,
-) -> Result<()> {
+pub fn delegate_world(ctx: Context<DelegateWorld>, region: u8, mode: u8, day: u64) -> Result<()> {
     let validator = ctx
         .accounts
         .config
@@ -228,7 +223,12 @@ pub fn delegate_chunk(
         .ok_or(CrossyError::RegionClosed)?;
     ctx.accounts.delegate_pda(
         &ctx.accounts.payer,
-        &[seeds::CHUNK, &[region], &day.to_le_bytes(), &chunk_index.to_le_bytes()],
+        &[
+            seeds::CHUNK,
+            &[region],
+            &day.to_le_bytes(),
+            &chunk_index.to_le_bytes(),
+        ],
         DelegateConfig {
             validator: Some(validator),
             ..Default::default()
@@ -299,7 +299,14 @@ pub fn close_world(ctx: Context<CloseWorld>) -> Result<()> {
         world.commit_payer,
         CrossyError::NotAdmin
     );
-    require!(now >= world.end_ts, CrossyError::CutoffPassed);
+    require!(
+        world.mode == WorldMode::Paid,
+        CrossyError::InvalidTransition
+    );
+    require!(
+        world.mode.cutoff_passed(now, world.end_ts),
+        CrossyError::CutoffPassed
+    );
     require!(
         world.status != WorldStatus::Closed,
         CrossyError::InvalidTransition
