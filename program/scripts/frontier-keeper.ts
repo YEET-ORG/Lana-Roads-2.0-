@@ -64,6 +64,8 @@ const VRF_BASE_QUEUE = new web3.PublicKey(
   process.env.VRF_BASE_QUEUE ?? "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh",
 );
 const POLL_MS = Number(process.env.POLL_MS ?? 3_000);
+/** Casual free play remains on one initialized world instead of rolling daily. */
+const CASUAL_DAY = BigInt(process.env.CASUAL_DAY ?? "20713");
 const SECTOR_EDGE = 8;
 const MAX_CARRY_TILES = 8;
 /** Set CRANK_HAZARDS=0 to leave collision resolution entirely to clients. */
@@ -279,7 +281,9 @@ async function main() {
   }
 
   // Modes are keyed by the world PDA discriminant: 0 = paid, 1 = casual.
-  const modes = (process.env.MODES ?? "0,1").split(",").map(Number);
+  // Casual is the always-on default. Paid UTC competitions are opt-in and
+  // should run in their own keeper process with MODES=0.
+  const modes = (process.env.MODES ?? "1").split(",").map(Number);
 
   /**
    * State the hoisted helpers below close over. It has to be initialised
@@ -426,7 +430,7 @@ async function main() {
   }
 
   async function tick(mode: number) {
-    const day = BigInt(Math.floor(Date.now() / 1000 / 86400));
+    const day = mode === 1 ? CASUAL_DAY : BigInt(Math.floor(Date.now() / 1000 / 86400));
     const world = worldPda(mode, day);
     // The live header is the ER copy; the base copy lags until a commit.
     let live: any;
@@ -496,11 +500,13 @@ async function main() {
       }
       log(`  lookahead ${pass + 1}/${needed}: chunk ${index}`);
       // `day` is the WORLD's day, not today's — see ensureSectors.
-      await ensureSectors(worldPda(0, day), day, index);
-      await ensureSectors(worldPda(1, day), day, index);
+      // Paid and casual can now live on different days. Prepare only this
+      // world's occupancy accounts; the other mode will do the same when its
+      // own frontier reaches this chunk.
+      await ensureSectors(world, day, index);
       await ensureChunkDelegated(day, index);
       await markChunkReady(world, day, index);
-      await extendFrontier(world, index);
+      await extendFrontier(world, day, index);
       live = await erProgram.account.worldHeader.fetch(world);
       await checkpointWorld(world, Number(live.recordScore), Number(live.mapSeq));
       log(`mode ${mode}: frontier now ${live.revealedRows} rows`);
@@ -829,8 +835,7 @@ async function main() {
     log(`  chunk ${index} ready (${signature.slice(0, 8)})`);
   }
 
-  async function extendFrontier(world: web3.PublicKey, index: number) {
-    const day = BigInt(Math.floor(Date.now() / 1000 / 86400));
+  async function extendFrontier(world: web3.PublicKey, day: bigint, index: number) {
     // The ER must be able to read the freshly created base chunk account.
     for (let attempt = 0; attempt < 10; attempt++) {
       try {

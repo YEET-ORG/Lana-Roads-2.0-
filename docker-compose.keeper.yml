@@ -7,7 +7,8 @@ services:
     environment:
       BASE_RPC: ${BASE_RPC:-https://api.devnet.solana.com}
       ER_RPC: ${ER_RPC:-https://devnet-as.magicblock.app}
-      MODES: ${MODES:-0,1}
+      MODES: ${MODES:-1}
+      CASUAL_DAY: ${CASUAL_DAY:-20713}
       KEEPER_SECRET_JSON: ${KEEPER_SECRET_JSON:?set KEEPER_SECRET_JSON to the keeper keypair byte array}
       VALIDATOR: ${VALIDATOR:-}
       VRF_BASE_QUEUE: ${VRF_BASE_QUEUE:-Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh}

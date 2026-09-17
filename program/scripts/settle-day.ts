@@ -5,7 +5,7 @@
  * planes, and every stage is blocked by the one before it:
  *
  *   ER   claim_record          sweep every DailyBest before closure
- *   ER   close_world           mark Closed, commit + undelegate to base
+ *   ER   close_world           close the paid world, commit + undelegate
  *   ER   commit_state          runs behind unreconciled payments
  *   base close_day             Open -> Closed (permissionless, after cutoff)
  *   base reconcile_receipt     every Pending payment -> Consumed/Refundable
@@ -61,7 +61,8 @@ const pda = (...s: Buffer[]) => web3.PublicKey.findProgramAddressSync(s, PROGRAM
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const configPda = () => pda(Buffer.from("config"));
-export const dailyPda = (day: bigint) => pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
+export const dailyPda = (day: bigint) =>
+  pda(Buffer.from("daily"), Buffer.from([REGION]), le8(day));
 export const worldPda = (mode: number, day: bigint) =>
   pda(Buffer.from("world"), Buffer.from([REGION]), Buffer.from([mode]), le8(day));
 export const vaultAuthorityPda = (day: bigint) =>
@@ -157,13 +158,16 @@ export async function ensureDaySettled(opts: {
     return out;
   }
 
-  // ---- stage A: sweep final DailyBest records, then close worlds --------
+  // ---- stage A: sweep the paid record, then close the paid world --------
   // Which plane a world lives on is decided by OWNERSHIP, not by which RPC
   // can read it: the rollup happily serves an undelegated account it has
   // cloned, and writing to it there fails with "modified data of a
   // read-only account". Base ownership means the world never left, or has
   // already come back, and `close_world_base` is the instruction for it.
-  for (const mode of [0, 1]) {
+  // Casual is one persistent room. Daily settlement must never close or
+  // undelegate it merely because the paid competition sharing its original
+  // day reached cutoff.
+  for (const mode of [0]) {
     const world = worldPda(mode, day);
     const baseInfo = await withRetry("fetch world", () =>
       conn.getAccountInfo(world),
@@ -199,7 +203,9 @@ export async function ensureDaySettled(opts: {
       }
       if (winner) {
         if (dry) {
-          out.did.push(`would claim final record ${winner.account.bestScore} (mode ${mode})`);
+          out.did.push(
+            `would claim final record ${winner.account.bestScore} (mode ${mode})`,
+          );
         } else {
           try {
             await withRetry(`claim final record mode ${mode}`, () =>
@@ -208,7 +214,9 @@ export async function ensureDaySettled(opts: {
                 .accountsPartial({ world, best: winner!.publicKey })
                 .rpc({ commitment: "processed" }),
             );
-            out.did.push(`claimed final record ${winner.account.bestScore} (mode ${mode})`);
+            out.did.push(
+              `claimed final record ${winner.account.bestScore} (mode ${mode})`,
+            );
           } catch (e) {
             out.blocked.push(`claim_record mode ${mode}: ${errText(e)}`);
             continue;
