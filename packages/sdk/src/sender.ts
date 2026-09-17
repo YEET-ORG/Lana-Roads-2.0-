@@ -33,10 +33,11 @@ export interface SendOptions {
 
 /**
  * Blockhash cache, keyed per RPC endpoint. High-frequency broadcast() calls
- * would otherwise pay a full RPC round trip per message. TTL stays well under
- * blockhash validity even at the ER's 50ms slot time (150 slots ≈ 7.5s).
+ * would otherwise pay a full RPC round trip per message. Blockhashes live
+ * ~60s on the base layer (150 slots at ~400ms) and ~60s on the devnet ERs
+ * (~1200 slots at ~50ms — measured), so a 15s TTL keeps a 4x margin.
  */
-const BLOCKHASH_TTL_MS = 2_000;
+const BLOCKHASH_TTL_MS = 15_000;
 const blockhashCache = new Map<
   string,
   { blockhash: string; lastValidBlockHeight: number; fetchedAt: number }

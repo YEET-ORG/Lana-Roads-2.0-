@@ -1,6 +1,6 @@
 import { Direction } from "./constants.js";
 
-export const MAX_MOVE_BATCH = 4;
+export const MAX_MOVE_BATCH = 8;
 export const MAX_PENDING_ACTIONS = 8;
 
 export interface QueuedMove {

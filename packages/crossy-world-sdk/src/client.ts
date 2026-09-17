@@ -25,6 +25,7 @@ import { MAX_CARRY_TILES } from "./hazards.js";
 import { revivePrice, utcDayFromUnix } from "./time.js";
 import { SubscriptionHub } from "./subscriptions.js";
 import { MAX_MOVE_BATCH, selectMoveBatch, moveDestination } from "./movement.js";
+import { signHotTransaction } from "./fast-tx.js";
 
 export interface WalletSigner {
   publicKey: PublicKey;
@@ -1537,16 +1538,18 @@ export class CrossyClient {
   /**
    * How long a rollup blockhash may be reused.
    *
-   * Solana drops a transaction whose blockhash is older than 150 blocks. On
-   * the base layer that is about a minute; on an ephemeral rollup, where a
-   * block is ~50ms, it is roughly SEVEN SECONDS. A cache tuned for base
-   * timings therefore hands out dead blockhashes for part of every cycle,
-   * and the failure is invisible: `sendRawTransaction` still returns a
-   * signature, the toast still says the move went out, and the move simply
-   * never happens. Stay far inside the window.
+   * Base-layer blockhashes survive ~150 slots (~60s at 400ms slots). The
+   * devnet ERs advertise ~1200 slots instead, and their measured slot time is
+   * ~50ms, so the real window is also ~60s. Measured on as/eu/us: a hash
+   * stays `isBlockhashValid` for ~59-60s, and a 70s-old transaction is
+   * rejected with `Blockhash not found`. (Not the 7.5s a base-layer slot
+   * count would suggest at 50ms slots.) A stale hash fails invisibly:
+   * `sendRawTransaction` may still return a signature and the move simply
+   * never happens. Refresh well inside the window; the max age is only a
+   * guard for when the background refresher has been failing.
    */
-  private static readonly ER_BLOCKHASH_MAX_AGE_MS = 3_000;
-  private static readonly ER_BLOCKHASH_REFRESH_MS = 1_500;
+  private static readonly ER_BLOCKHASH_MAX_AGE_MS = 15_000;
+  private static readonly ER_BLOCKHASH_REFRESH_MS = 10_000;
 
   private async erBlockhash(): Promise<string> {
     const now = Date.now();
@@ -1634,12 +1637,12 @@ export class CrossyClient {
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
-    tx.sign(params.session);
+    const raw = signHotTransaction(tx, [params.session]);
     return this.track(
       "Move",
       "er",
       () =>
-        this.erConnection.sendRawTransaction(tx.serialize(), {
+        this.erConnection.sendRawTransaction(raw, {
           skipPreflight: true,
           maxRetries: 0,
         }),
@@ -1660,7 +1663,7 @@ export class CrossyClient {
     actionSeq: number;
   }): Promise<string> {
     if (!params.directions.length || params.directions.length > MAX_MOVE_BATCH)
-      throw new Error("move batch must contain 1–4 directions");
+      throw new Error("move batch must contain 1–8 directions");
     let { x, y } = params;
     const moves = params.directions.map((direction, i) => {
       const move = {
@@ -1697,12 +1700,12 @@ export class CrossyClient {
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
-    tx.sign(params.session);
+    const raw = signHotTransaction(tx, [params.session]);
     return this.track(
       "Move batch",
       "er",
       () =>
-        this.erConnection.sendRawTransaction(tx.serialize(), {
+        this.erConnection.sendRawTransaction(raw, {
           skipPreflight: true,
           maxRetries: 0,
         }),
@@ -1765,12 +1768,12 @@ export class CrossyClient {
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
-    tx.sign(params.session);
+    const raw = signHotTransaction(tx, [params.session]);
     return this.track(
       "Kick",
       "er",
       () =>
-        this.erConnection.sendRawTransaction(tx.serialize(), {
+        this.erConnection.sendRawTransaction(raw, {
           skipPreflight: true,
           maxRetries: 0,
         }),
@@ -1888,9 +1891,9 @@ export class CrossyClient {
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
-    tx.sign(params.session);
+    const raw = signHotTransaction(tx, [params.session]);
     return this.track("New record", "er", () =>
-      this.erConnection.sendRawTransaction(tx.serialize(), {
+      this.erConnection.sendRawTransaction(raw, {
         skipPreflight: true,
         maxRetries: 0,
       }),
@@ -1936,12 +1939,12 @@ export class CrossyClient {
     const tx = new anchor.web3.Transaction().add(ix);
     tx.recentBlockhash = await this.erBlockhash();
     tx.feePayer = params.session.publicKey;
-    tx.sign(params.session);
+    const raw = signHotTransaction(tx, [params.session]);
     return this.track(
       "Hazard check",
       "er",
       () =>
-        this.erConnection.sendRawTransaction(tx.serialize(), {
+        this.erConnection.sendRawTransaction(raw, {
           skipPreflight: true,
           maxRetries: 0,
         }),

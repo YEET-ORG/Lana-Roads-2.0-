@@ -14,7 +14,16 @@ function moves(count: number, x = 1, y = 1, direction = Direction.Forward) {
 
 describe("bounded movement batches", () => {
   it("caps batching and splits at all sector boundaries", () => {
-    assert.equal(selectMoveBatch(moves(6)).length, MAX_MOVE_BATCH);
+    assert.equal(selectMoveBatch(moves(6)).length, 6);
+    const zigzag = Array.from({ length: 10 }, (_, i) => ({
+      kind: "move",
+      x: i % 2,
+      y: 0,
+      seq: i,
+      attempt: 1,
+      direction: i % 2 ? Direction.Left : Direction.Right,
+    }));
+    assert.equal(selectMoveBatch(zigzag).length, MAX_MOVE_BATCH);
     assert.equal(selectMoveBatch(moves(4, 1, 6)).length, 1);
     assert.equal(selectMoveBatch(moves(4, 1, 14)).length, 1);
     assert.equal(selectMoveBatch(moves(4, 6, 1, Direction.Right)).length, 1);
@@ -77,10 +86,13 @@ describe("bounded movement batches", () => {
       actionSeq: 0,
     };
     await client.sendMoveBatch({ ...params, directions: [0, 0, 0, 0] });
-    await assert.rejects(client.sendMoveBatch({ ...params, directions: [] }), /1–4/);
+    await assert.rejects(client.sendMoveBatch({ ...params, directions: [] }), /1–8/);
     await assert.rejects(
-      client.sendMoveBatch({ ...params, directions: [0, 0, 0, 0, 0] }),
-      /1–4/,
+      client.sendMoveBatch({
+        ...params,
+        directions: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+      }),
+      /1–8/,
     );
     await assert.rejects(
       client.sendMoveBatch({ ...params, y: 7, directions: [0] }),
